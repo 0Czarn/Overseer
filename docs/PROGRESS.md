@@ -519,3 +519,22 @@ państw miały 0. Gracza wskazuje tylko przy włączonej mgle (jedno widoczne pa
 wyniku aplikacja używa ostatniego jednoznacznego wyniku z tego procesu gry, potem zapisu; flaga nie służy do wykrywania MP.
 
 **Testy:** backend 166 OK, JS 30 OK, smoke 18/18.
+
+---
+
+## Equipment Manager: deficyt, grupy wariantów, magazyn na żywo i edycja (2026-10-09) ✅
+
+- **Deficyt** (`hoi4dbg/deficit.py`): potrzeby wystawionych dywizji = szablon (bataliony + kompanie) × `need` z
+  `common/units`, minus sprzęt w dywizjach, minus magazyn – per archetyp (`common/units/equipment`: wariant →
+  archetyp). Szacunek (bez dywizji w szkoleniu i produkcji). Dywizje/szablony z zapisu tekstowego i binarnego
+  (tokeny: division_templates 0x3439, division_template 0x2f50, regiments 0x2fa3, support 0x2f9c, units 0x2faa,
+  division 0x1d7, division_template_id 0x3142; typy batalionów: 7 tokenów, reszta tekst). GER: tekst = binarny.
+- **Grupy:** jeden wiersz na archetyp (potrzebne / w dywizjach / magazyn / deficyt), rozwijane ▶/▼ do wariantów.
+- **Magazyn na żywo:** `[państwo + 0xf68] + 0x220` → tablica {wariant*, ilość ×100000}, liczba pod +0x22c;
+  wariant: +0xc id z zapisu, +0x28 nazwa projektu. **99/99 państw identycznych z zapisem `magazyn.hoi4`.**
+- **Edycja ilości na żywo:** lokalny zapis do pamięci (jak stabilność): tylko singleplayer (game.log), przełącznik,
+  liczby całkowite 0–10 mln, odrzucenie przy zmianie wartości w międzyczasie, odczyt kontrolny, log. Tylko pozycje,
+  które już mają wpis w magazynie (także zerowe – np. własne projekty); nowe – raz przez `add_equipment`.
+- Wydajność: szybsze pomijanie tokenów (tablica rozmiarów); limit widoku w smoke teście 20 s (pierwszy odczyt
+  dużego zapisu binarnego trwa kilka sekund – do poprawy wspólnym indeksem zapisu, krok I).
+- Testy: backend 168 OK, JS 30 OK, smoke 18/18.

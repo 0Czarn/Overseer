@@ -1,5 +1,5 @@
 HOI4 DEBUGGER - STAN PROJEKTU
-Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-09 (krok F, część 2)
+Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-09 (Equipment: deficyt, magazyn na żywo)
 Szczegóły i dowody: docs/PROGRESS.md, plan: docs/STATUS-AND-PLAN.md
 
 ======================================================================
@@ -24,6 +24,8 @@ ZROBIONE
 [x] Krok E  Equipment Manager: magazyn, warianty, konwoje z zapisu; dodawanie sprzętu
             komendą add_equipment ze sprawdzeniem w następnym zapisie (sprawdzone w grze),
             także WŁASNYCH PROJEKTÓW po nazwie (np. "Test Tank"; sprawdzone dla czołgów)
+            + deficyt sprzętu (szacunek), grupy wariantów rozwijane/zwijane
+            + magazyn NA ŻYWO z pamięci i edycja ilości (lokalnie, tylko singleplayer)
 
 ======================================================================
 DO ZROBIENIA (w tej kolejności)
@@ -37,13 +39,15 @@ DO ZROBIENIA (w tej kolejności)
 [ ] Krok G  Intelligence Lab (poziomy wywiadu) i Game Tools (narzędzia lokalne)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)
             -> wymaga drugiego komputera/konta
-[ ] Krok I  Raport kompatybilności, instrukcja użytkownika, narzędzie na aktualizację gry
+[ ] Krok I  Raport kompatybilności, instrukcja użytkownika, narzędzie na aktualizację gry,
+            szybszy odczyt zapisów (wspólny indeks)
 
 ======================================================================
 ZNANE OGRANICZENIA
 ======================================================================
 - Odczyt na żywo tylko dla wersji gry 1.19.3.0.c01a (po aktualizacji gry: do ponownego ustalenia).
-- Stany, manpower, lista państw, sprzęt - z ostatniego zapisu (migawka), nie na żywo.
+- Stany, manpower, lista państw - z ostatniego zapisu (migawka); magazyn sprzętu także na żywo.
+- Pierwsze otwarcie widoku po nowym zapisie binarnym trwa 2-4 s (do poprawy: wspólny indeks zapisu).
 - Sprzętu nie da się usuwać (komenda gry tylko dodaje).
 - Mody dodające nowe tagi państw: nieprzetestowane.
 - Multiplayer: nieprzetestowany. Zapis do pamięci w MP jest celowo zablokowany.

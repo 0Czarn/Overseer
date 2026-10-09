@@ -61,6 +61,99 @@ function groupTable(groups, tag, ctx) {
     onInput: (e) => { filter = e.target.value; render(); } }), host];
 }
 
+const DIRECT_PREF = 'hoi4dbg.directWrite'; // shared with the Country Editor
+const directEnabled = () => { try { return localStorage.getItem(DIRECT_PREF) === '1'; } catch { return false; } };
+
+/** Stockpile read from game memory every few seconds; with direct writes enabled each variant can be set
+ *  (LOCAL memory write, single player only - the backend refuses it in multiplayer). */
+function liveStockpileCard(ctx, tag) {
+  const host = h('div', null, h('p', { class: 'muted' }, 'Reading game memory…'));
+  const badge = h('span');
+  const result = h('div');
+  const open = new Set(JSON.parse(sessionStorage.getItem('hoi4dbg.eqLiveOpen') ?? '[]'));
+  let entries = [];
+  let timer = null;
+  let stopped = false;
+  let editing = false;
+  const toggleBox = h('input', { type: 'checkbox', checked: directEnabled(), onChange: (e) => {
+    try { localStorage.setItem(DIRECT_PREF, e.target.checked ? '1' : '0'); } catch { /* preference only */ }
+    render();
+  } });
+  const setAmount = async (entry, input) => {
+    try {
+      const res = await ctx.api.post('/api/live/stockpile', { tag, id: entry.id, amount: Number(input.value),
+        expected_before: entry.amount, confirm_local: true });
+      result.replaceChildren(notice('info', [h('b', null, 'LOCAL WRITE: '), `${res.name || entry.type_name || res.id} `
+        + `${fmtInt(res.before)} -> ${fmtInt(res.after)} (read back from memory). This client only.`]));
+      ctx.api.log('warning', `Local stockpile write ${res.tag} ${res.id}: ${res.before} -> ${res.after}`);
+      editing = false;
+      tick();
+    } catch (err) { result.replaceChildren(notice('warn', err.message)); }
+  };
+  function render() {
+    const groups = new Map();
+    for (const e of entries) {
+      const key = e.archetype ?? e.type ?? `#${e.id}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(e);
+    }
+    const allowed = directEnabled();
+    const rows = [];
+    for (const [key, list] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const total = list.reduce((n, e) => n + e.amount, 0);
+      const isOpen = open.has(key);
+      rows.push(h('tr', { class: 'eq-group', onClick: () => {
+        if (isOpen) open.delete(key); else open.add(key);
+        try { sessionStorage.setItem('hoi4dbg.eqLiveOpen', JSON.stringify([...open])); } catch { /* convenience */ }
+        render();
+      } }, h('td', null, h('span', { class: 'eq-caret' }, isOpen ? '▼' : '▶'), h('b', null, list[0].type_name && list.length === 1
+        ? list[0].type_name : key.replace(/_/g, ' ')), h('span', { class: 'muted' }, ` (${list.length})`)),
+      h('td', { class: 'num' }, fmtInt(total)), h('td', null)));
+      if (!isOpen) continue;
+      for (const e of list) {
+        const input = h('input', { class: 'input input-small', type: 'number', min: '0', step: '1', value: String(Math.round(e.amount)),
+          'aria-label': 'New amount', onFocus: () => { editing = true; }, onBlur: () => { editing = false; } });
+        rows.push(h('tr', { class: 'eq-variant' },
+          h('td', null, h('span', { class: 'eq-indent' }), e.name || h('span', { class: 'muted' }, `${e.type_name ?? e.type ?? e.id} (base)`),
+            h('span', { class: 'muted' }, ` · ${e.type ?? ''} · id ${e.id}`)),
+          h('td', { class: 'num' }, fmtInt(e.amount)),
+          h('td', null, allowed ? h('span', { class: 'btn-row' }, input,
+            h('button', { class: 'btn btn-small btn-primary', onClick: () => setAmount(e, input) }, 'Set')) : null)));
+      }
+    }
+    host.replaceChildren(
+      h('label', { class: 'switch' }, toggleBox, h('span', null, 'Enable direct memory writes (LOCAL, single player only)')),
+      h('div', { class: 'table-wrap' }, h('table', { class: 'table eq-table' },
+        h('thead', null, h('tr', null, h('th', null, 'Equipment'), h('th', { class: 'num' }, 'Live amount'), h('th', null, allowed ? 'Set to' : ''))),
+        h('tbody', null, rows.length ? rows : h('tr', null, h('td', { colspan: '3', class: 'muted' }, 'Empty stockpile'))))),
+      result);
+  }
+  async function tick() {
+    if (stopped) return;
+    clearTimeout(timer);
+    if (!editing) {
+      try {
+        entries = (await ctx.api.get(`/api/live/stockpile?tag=${encodeURIComponent(tag)}`)).data.entries;
+        badge.replaceChildren(h('span', { class: 'badge badge-live' }, 'LIVE'));
+        render();
+      } catch (err) {
+        badge.replaceChildren(h('span', { class: 'badge badge-na' }, 'NO LIVE DATA'));
+        host.replaceChildren(notice('muted', `Live stockpile unavailable: ${err.message}`));
+      }
+    }
+    timer = setTimeout(tick, 3000);
+  }
+  tick();
+  return {
+    el: card(`Live stockpile of ${tag} (game memory)`, [
+      notice('warn', ['Setting an amount writes game memory directly - ', scopeBadge('local'), ' only. Single player: in '
+        + 'multiplayer it would exist on your client only, so the app refuses it there. Only variants that already have a '
+        + 'stockpile entry can be set (add a new one once with "Add equipment" below).']),
+      host], { extra: badge }),
+    stop: () => { stopped = true; clearTimeout(timer); },
+  };
+}
+
 const POLL_MS = 3000;
 const FINAL = ['confirmed', 'mismatch', 'expired'];
 
@@ -139,6 +232,7 @@ export default {
       ctx.api.get(`/api/equipment/${encodeURIComponent(tag)}`), countryPicker(ctx)]);
     const fromSave = res.source === 'save';
     const adder = fromSave ? addCard(ctx, tag, res.data.items, res.data.designs ?? []) : null;
+    const liveStock = fromSave ? liveStockpileCard(ctx, tag) : null;
 
     root.append(...[
       viewHeader('Equipment Manager', 'Stockpiles and variants of the selected country.',
@@ -147,8 +241,9 @@ export default {
       fromSave ? null : notice('info', 'Adding or removing equipment stays disabled until a safe method has been '
         + 'implemented and tested.'),
       card(fromSave ? `Equipment of ${tag}` : 'Stockpile', fromSave ? groupTable(res.data.groups ?? [], tag, ctx) : demoTable(res, tag)),
+      liveStock?.el,
       adder?.el,
     ].filter(Boolean));
-    return () => adder?.stop();
+    return () => { adder?.stop(); liveStock?.stop(); };
   },
 };

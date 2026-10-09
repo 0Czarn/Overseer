@@ -467,6 +467,71 @@ class LiveService:
             return None
         return found[-1] if found else None
 
+    def _with_country(self, process: dict, tag: str, fn, writer: bool = False):
+        """Runs fn(memory, country object) for `tag` in the running game (country table)."""
+        key = (process["pid"], process.get("started"))
+        install = process.get("install") or ""
+        if install not in self._tags:
+            self._tags[install] = pointers.tag_order(Path(install))
+        try:
+            with (self._open_writer if writer else self._open_memory)(process["pid"]) as mem:
+                if key not in self._module_base:
+                    self._module_base[key] = mem.modules()[pointers.MODULE][0]
+                return fn(mem, pointers.country_object(mem, self._module_base[key], self._tags[install], tag))
+        except pointers.PointerError as exc:
+            raise LiveError(exc.code, str(exc)) from exc
+        except (MemoryAccessError, OSError, KeyError) as exc:
+            raise LiveError("memory_error", f"Game memory access failed: {exc}") from exc
+
+    def stockpile(self, tag: str | None = None) -> dict:
+        """Live equipment stockpile of `tag` (default: player): {"tag", "entries": [{id, name, amount}]}."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Live stockpile reading is only verified for 1.19.3.0.c01a")
+        tag = tag or self.player_tag(process)
+        entries = self._with_country(process, tag, pointers.read_stockpile)
+        return {"tag": tag, "entries": [{k: e[k] for k in ("id", "name", "amount")} for e in entries],
+                "read_at": self._clock()}
+
+    def write_stockpile(self, equipment_id: str, amount: float, tag: str | None = None,
+                        expected_before: float | None = None) -> dict:
+        """LOCAL write of one stockpile entry (existing entries only; single player only, like write_value)."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Direct writes are only available for the verified game version")
+        lo, hi = pointers.STOCKPILE_RANGE
+        if not isinstance(amount, (int, float)) or amount != amount or not lo <= amount <= hi or amount != int(amount):
+            raise LiveError("out_of_range", f"Amount must be a whole number between {lo:g} and {hi:g}")
+        self._require_single_player()
+        tag = tag or self.player_tag(process)
+        packed = ENCODINGS["fixed64_100000"].pack(amount)
+
+        def write(mem, country):
+            entries = [e for e in pointers.read_stockpile(mem, country) if e["id"] == str(equipment_id)]
+            if not entries:
+                raise LiveError("not_in_stockpile", f"Equipment {equipment_id} has no stockpile entry for {tag} - add "
+                                                    "it once with the console command, then it can be edited")
+            entry = entries[0]
+            if expected_before is not None and abs(sum(e["amount"] for e in entries) - expected_before) > 1e-6:
+                raise LiveError("value_changed", f"Stockpile of {equipment_id} is {entry['amount']:g} now, not "
+                                                 f"{expected_before:g} - check the value and try again")
+            before = entry["amount"]
+            mem.write(entry["address"], packed)
+            after = next(e["amount"] for e in pointers.read_stockpile(mem, country) if e["address"] == entry["address"])
+            return before, after, entry["name"]
+        before, after, name = self._with_country(process, tag, write, writer=True)
+        self.log.warning("LOCAL memory write %s stockpile %s (%s): %s -> %s", tag, equipment_id, name, before, after)
+        return {"tag": tag, "id": str(equipment_id), "name": name, "before": before, "after": after,
+                "scope": "local", "written_at": self._clock()}
+
+    def _require_single_player(self) -> None:
+        mode = self.game_mode()
+        if mode != "SINGLEPLAYER":
+            raise LiveError("multiplayer" if mode else "mode_unknown",
+                            (f"The running game is {mode}" if mode else "Single player could not be confirmed from "
+                             "game.log") + ": a memory write would change this client only and desynchronise a "
+                             "multiplayer game - use the console command instead")
+
     def write_value(self, field: str, value: float, tag: str | None = None,
                     expected_before: float | None = None) -> dict:
         """LOCAL direct write of one country field into game memory (opt-in, single player only).
@@ -481,12 +546,7 @@ class LiveService:
         lo, hi = pointers.WRITE_RANGES[field]
         if not isinstance(value, (int, float)) or value != value or not lo <= value <= hi:
             raise LiveError("out_of_range", f"{field} must be between {lo:g} and {hi:g}")
-        mode = self.game_mode()
-        if mode != "SINGLEPLAYER":
-            raise LiveError("multiplayer" if mode else "mode_unknown",
-                            (f"The running game is {mode}" if mode else "Single player could not be confirmed from "
-                             "game.log") + ": a memory write would change this client only and desynchronise a "
-                             "multiplayer game - use the console command instead")
+        self._require_single_player()
         humans = []
         tag = tag or self.player_tag(process)
         key = (process["pid"], process.get("started"))

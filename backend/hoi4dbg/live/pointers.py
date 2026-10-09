@@ -171,3 +171,35 @@ def read_focus(memory, country: int) -> dict:
         if fid:
             completed.append(fid)
     return {"current": current or None, "progress_days": progress, "completed": completed}
+
+
+# Equipment stockpile: [country + 0xf68] = production object; +0x220 -> array of {variant*, amount (fixed64_100000)}
+# entries, +0x22c = entry count (int32); variant object: +0xc = equipment id as in the save, +0x28 = design name.
+# Verified 2026-10-09 (magazyn.hoi4): non-zero stockpile of all 99 countries identical to the save.
+STOCKPILE = {"production": 0xF68, "array": 0x220, "count": 0x22C, "entry": 16, "amount": 8}
+VARIANT = {"id": 0xC, "name": 0x28}
+MAX_STOCKPILE_ENTRIES = 5000
+STOCKPILE_RANGE = (0.0, 10_000_000.0)
+
+
+def read_stockpile(memory, country: int) -> list[dict]:
+    """[{"id": equipment id, "name": design name or None, "amount": float, "address": amount address}]."""
+    production = _ptr(memory, country + STOCKPILE["production"])
+    if production is None:
+        raise PointerError("unreadable", "Production object of the country is not readable")
+    raw = memory.read(production + STOCKPILE["count"], 4)
+    count = struct.unpack("<i", raw)[0] if raw else -1
+    if not 0 <= count <= MAX_STOCKPILE_ENTRIES:
+        raise PointerError("implausible", f"Stockpile size {count} - layout does not match")
+    array = _ptr(memory, production + STOCKPILE["array"]) if count else None
+    data = memory.read(array, STOCKPILE["entry"] * count) if array else b""
+    out = []
+    for i in range(len(data or b"") // STOCKPILE["entry"]):
+        variant, amount = struct.unpack_from("<Qq", data, STOCKPILE["entry"] * i)
+        raw_id = memory.read(variant + VARIANT["id"], 4) if 0x10000 <= variant < 0x7FFF_FFFF_FFFF else None
+        if raw_id is None:
+            continue
+        out.append({"id": str(struct.unpack("<i", raw_id)[0]),
+                    "name": _msvc_string(memory, variant + VARIANT["name"], 120),
+                    "amount": amount / 100000, "address": array + STOCKPILE["entry"] * i + STOCKPILE["amount"]})
+    return out

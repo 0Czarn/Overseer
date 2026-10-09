@@ -59,6 +59,14 @@ def build_routes(svc: DebuggerService) -> list[Route]:
                                   str(body.get("tag") or "").upper() or None,
                                   _number(before) if before is not None else None)
 
+    def stockpile_write(body: dict) -> dict:
+        if body.get("confirm_local") is not True:
+            raise LiveError("not_confirmed", "Direct memory writes must be enabled explicitly (local only)")
+        before = body.get("expected_before")
+        return live().write_stockpile(str(body.get("id", "")), _number(body.get("amount")),
+                                      str(body.get("tag") or "").upper() or None,
+                                      _number(before) if before is not None else None)
+
     def calibration(body: dict) -> dict:
         field, action = str(body.get("field", "")), body.get("action")
         if action == "start":
@@ -93,6 +101,8 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("GET", "/api/live/values", lambda q, b: {"data": live().values(_str(q, "tag").upper() or None)}),
         r("POST", "/api/live/calibration", lambda q, b: calibration(b)),
         r("POST", "/api/live/write", lambda q, b: live_write(b)),
+        r("GET", "/api/live/stockpile", lambda q, b: svc.live_stockpile(_str(q, "tag").upper() or None)),
+        r("POST", "/api/live/stockpile", lambda q, b: stockpile_write(b)),
         r("POST", "/api/live/operations", lambda q, b: live().create_operation(
             str(b.get("field", "")), str(b.get("mode", "")), _number(b.get("amount")))),
         r("GET", r"/api/live/operations/(?P<op>op-[0-9]{1,9})", lambda q, b, op: live().poll_operation(op)),

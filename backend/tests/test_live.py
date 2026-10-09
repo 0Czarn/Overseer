@@ -703,6 +703,40 @@ class CountryTableTests(TempDirMixin, unittest.TestCase):
         self.assertEqual(self.svc.players(), ["GER", "ITA"])
         self.assertEqual(self.svc.read("stability")["tag"], "ITA")
 
+    def put_stockpile(self, tag, items):
+        """items: [(equipment id, amount)] -> production object, entry array and variant objects."""
+        c = self.countries[tag]
+        prod, array, variants = c + 0x1E00, BASE + 0x6000, BASE + 0x6800
+        self.mem.put(c + pointers.STOCKPILE["production"], "Q", prod)
+        self.mem.put(prod + pointers.STOCKPILE["array"], "Q", array)
+        self.mem.put(prod + pointers.STOCKPILE["count"], "i", len(items))
+        for i, (eq_id, amount) in enumerate(items):
+            v = variants + 0x80 * i
+            self.mem.put(v + pointers.VARIANT["id"], "i", eq_id)
+            self.mem.put(array + 16 * i, "Q", v)
+            self.mem.put(array + 16 * i + 8, "q", round(amount * 100000))
+
+    def test_stockpile_read_and_local_write(self):
+        self.put_stockpile("ITA", [(1785, 394), (1820, 205), (1817, 0)])
+        res = self.svc.stockpile()
+        self.assertEqual(res["tag"], "ITA")
+        self.assertEqual([(e["id"], e["amount"]) for e in res["entries"]], [("1785", 394.0), ("1820", 205.0), ("1817", 0.0)])
+        self.writer()
+        done = self.svc.write_stockpile("1817", 500, expected_before=0)
+        self.assertEqual((done["before"], done["after"], done["scope"]), (0.0, 500.0, "local"))
+        self.assertEqual(self.svc.stockpile()["entries"][2]["amount"], 500.0)
+        for args, code in ((("9999", 5), "not_in_stockpile"), (("1785", -5), "out_of_range"), (("1785", 2.5), "out_of_range")):
+            with self.assertRaises(LiveError) as ctx:
+                self.svc.write_stockpile(*args)
+            self.assertEqual(ctx.exception.code, code, args)
+        with self.assertRaises(LiveError) as ctx:
+            self.svc.write_stockpile("1785", 10, expected_before=1)                # value moved
+        self.assertEqual(ctx.exception.code, "value_changed")
+        self.game_log("MULTIPLAYER")
+        with self.assertRaises(LiveError) as ctx:
+            self.svc.write_stockpile("1785", 10)
+        self.assertEqual(ctx.exception.code, "multiplayer")
+
     def test_writer_module_requests_only_the_rights_it_needs(self):
         from hoi4dbg.integration import memory_write
         self.assertEqual(memory_write.WRITE_ACCESS_RIGHTS, 0x0400 | 0x0010 | 0x0020 | 0x0008)

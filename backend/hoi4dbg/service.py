@@ -338,6 +338,30 @@ class DebuggerService:
             "event": event, "read_at": live["read_at"],
         }}
 
+    def live_stockpile(self, tag: str | None = None) -> dict:
+        """Live stockpile (game memory) with archetype / equipment type from the newest save's variant table."""
+        if self.live is None:
+            raise NotFound("Live game access is disabled")
+        live = self.live.stockpile(tag)
+        install = self._install_path()
+        picked = self._pick_save(None)
+        variants, names, archetypes = {}, {}, {}
+        if install and picked is not None:
+            try:
+                variants = self.saves.equipment(picked[0], live["tag"])["variants"]
+            except SaveFormatError:
+                variants = {}
+            names = gamefiles.equipment_names(install)
+            archetypes = deficit.tables(install)[1]
+        entries = []
+        for e in live["entries"]:
+            v = variants.get(e["id"]) or {}
+            eq_type = v.get("type")
+            entries.append({**e, "type": eq_type, "type_name": names.get(eq_type, eq_type) if eq_type else None,
+                            "archetype": deficit.archetype_of(eq_type, archetypes) if eq_type else None,
+                            "name": e["name"] or v.get("name")})
+        return {"data": {"tag": live["tag"], "entries": entries, "read_at": live["read_at"]}}
+
     def _focus_queue_file(self) -> Path:
         return Path(self.data_dir) / "focus-queues.json"
 
