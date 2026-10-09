@@ -19,7 +19,7 @@ Legenda: ✅ zrobione · 🟡 w toku / częściowo · ⏳ zaplanowane · ⛔ wym
 |---|---|---|
 | 1 | Aplikacja desktopowa, UI (9 zakładek), logi, testy, dokumentacja | ✅ |
 | 2 | Wykrywanie procesu HOI4 i wersji gry | ✅ |
-| 3 | Wiarygodny odczyt danych z aktywnej rozgrywki | ⛔ czeka na wybór metody ([STAGE3-OPTIONS.md](STAGE3-OPTIONS.md)) |
+| 3 | Wiarygodny odczyt danych z aktywnej rozgrywki | 🟡 metoda A (zapisy): nagłówek, gracze, mody ✅; wartości państw/stanów ⛔ wymaga kalibracji nazw pól |
 | 4 | Prototyp modyfikacji pojedynczej wartości (SP) + weryfikacja | ⏳ |
 | 5 | Edytory państw, stanów, sprzętu | ⏳ |
 | 6 | Cele narodowe, narzędzia debugowania | ⏳ |
@@ -83,6 +83,67 @@ Legenda: ✅ zrobione · 🟡 w toku / częściowo · ⏳ zaplanowane · ⛔ wym
 - `npm run test:js` – 14 testów, OK
 - `npm run smoke` (z wykrywaniem gry) – 18/18 widoków, 0 błędów konsoli
 
+---
+
+## Etap 3 (część 1) – odczyt zapisów, metoda A 🟡
+
+Decyzja użytkownika (prompt2.md, 2026-10-09): metoda A jako pierwszy krok docelowego debuggera; bez zapisu do pamięci
+i bez modyfikacji save'ów.
+
+**Badanie formatu** (szczegóły i dowody: [SAVE-FORMAT.md](SAVE-FORMAT.md))
+- Wszystkie 158 zapisów na maszynie to `HOI4bin`: binarny strumień 16-bitowych tokenów. Struktura została zweryfikowana
+  pełną walidacją gramatyki na 11 plikach z wersji 1.16.10–1.19.3.
+- Ustalono, że token `0x000d` ma 4 B w 1.16.x i 8 B od 1.17.0. Parser wybiera wariant po walidacji całego pliku.
+- Znaczenie 7 pól nagłówka potwierdzono krzyżowo:
+  - tag = nazwa pliku 121/121;
+  - data = nazwa pliku 121/121;
+  - mody = zainstalowane mody 14/14.
+- Ideologia i poziom trudności są oznaczone jako „inferred”.
+- Dodatkowa biblioteka nie jest potrzebna (stdlib `struct`). Brakuje mapy nazw pól, a nie parsera.
+
+**Zrobione**
+- `backend/hoi4dbg/saves/`:
+  - `binary.py`: lekser, walidator gramatyki, wybór szerokości, parser nagłówka z limitem rozmiaru;
+  - `fields.py`: tabela znaczeń pól z dowodami, dekodowanie daty;
+  - `reader.py`: lista zapisów, bezpieczna kopia do cache (wykrywanie pliku w trakcie zapisu), analiza nagłówka,
+    walidacja w tle, cache wyników.
+- Obsługa błędów z kodami: `empty`, `unknown_format`, `compressed`, `text_unsupported`, `truncated`, `corrupt`,
+  `unsupported`, `in_progress`, `io_error`. Uszkodzone ciało pliku daje nagłówek z ostrzeżeniem `corrupt`.
+- Aktualność: nowe źródło `save` (plakietka SAVE) i kategorie `current_session` / `previous_session` / `game_not_running`
+  (`is_live` zawsze `false`). Do tego kontrola zgodności wersji zapisu z uruchomioną grą i flaga „nie najnowszy zapis”.
+- API: `GET /api/saves`, `GET /api/saves/analysis?name=`, `GET /api/saves/fields`.
+- UI (9 zakładek zachowanych):
+  - Countries & Players: panel „Players (from save file)” z wyborem zapisu, bannerem źródła, daty i aktualności,
+    graczami, nagłówkiem i modami; lista państw nadal DEMO, w osobnej, wyraźnie oznaczonej karcie;
+  - Dashboard: karta „Newest save file”;
+  - Game Tools: „Save inspector”.
+- Raport: [REPORT-LIVE-AND-WRITE.md](REPORT-LIVE-AND-WRITE.md) opisuje drogę od zapisu do odczytu na żywo i bezpiecznej
+  modyfikacji, na podstawie dokumentacji komend i efektów dostarczanej z grą.
+
+**Weryfikacja na prawdziwych danych (kopie)**
+- Najnowszy zapis `autosave.hoi4` (1.19.3, 54,6 MB):
+  - GER, 1937.3.1.2, gracz „Czarny”, 14 modów, struktura poprawna;
+  - UI oznacza go na czerwono jako „From an EARLIER session – NOT the current game state” (zapis z 3.10, gra uruchomiona 9.10).
+- Zapis MP `AUS_1943_02_01_01.hoi4` (1.16.10): 31 graczy, szerokość 4, flaga niezgodności wersji.
+- SHA-1 i mtime oryginałów bez zmian po analizie.
+
+**Testy (2026-10-09)**
+- `npm run test:py`: 74 testy, OK. W tym 26 nowych dla zapisów:
+  - syntetyczne zapisy o strukturze prawdziwych;
+  - pliki uszkodzone, ucięte, puste, zip i tekstowe;
+  - path traversal i kategorie aktualności;
+  - test na kopii najnowszego prawdziwego zapisu z kontrolą niezmienności oryginału.
+- `npm run test:js`: 17 testów, OK.
+- `npm run smoke` (z grą): 18/18 widoków, 0 błędów konsoli.
+
+**Ograniczenia, które zostają**
+- Wartości państw (PP, stabilność itd.), stany, cele, sprzęt i wywiad nadal są DEMO. Wymagają mapy nazw pól
+  (kalibracja binarny ↔ tekst, raport §2.2).
+- Skala liczb `0x000d` / `0x0167` / `0x0317` nie została ustalona, więc nie są prezentowane.
+- Zapisy tekstowe i zip są rozpoznawane, ale nieczytane.
+- Pola `#3035` i `#000b` w bloku gracza mają nieznane znaczenie.
+- Zapis jest migawką. Odczyt aktywnej rozgrywki nie istnieje.
+
 ## Decyzje i założenia
 - **Electron + Python zamiast jednego języka:** UI w Electronie jest nowoczesne i przenośne, a Python z `ctypes`
   pozwala w przyszłości dostać się do WinAPI bez kompilowania natywnych modułów Node.
@@ -90,7 +151,7 @@ Legenda: ✅ zrobione · 🟡 w toku / częściowo · ⏳ zaplanowane · ⛔ wym
 - **Brak zapisu do pamięci w tym etapie** – zgodnie z poleceniem.
 
 ## Otwarte kwestie / do decyzji
-- ⛔ Metoda odczytu danych rozgrywki (etap 3) – opcje, ograniczenia i ryzyko: [STAGE3-OPTIONS.md](STAGE3-OPTIONS.md).
-  Rekomendacja: zacząć od parsera plików zapisu (nieinwazyjny).
-- Zapisy gry są binarne (`HOI4bin`), ale nagłówek zawiera listę tag → gracz – kandydat na wykrywanie graczy.
+- ✅ Metoda etapu 3: A (zapisy) – zatwierdzona 2026-10-09.
+- ⛔ Zgoda na tymczasowe `save_as_binary=no` (kalibracja nazw pól) – [REPORT-LIVE-AND-WRITE.md](REPORT-LIVE-AND-WRITE.md) §5.
+- ⛔ Metoda modyfikacji dla etapu 4 (proponowany generator komend konsoli) – j.w.
 - `zalozenia.md` jest pusty – jeśli miał zawierać dodatkowe wymagania, trzeba go uzupełnić.

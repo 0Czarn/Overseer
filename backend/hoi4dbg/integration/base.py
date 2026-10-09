@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Protocol
 
 
@@ -22,6 +23,10 @@ class GameIntegration(Protocol):
     def game_log_names(self) -> list[str]:
         ...
 
+    def saves_dir(self) -> Path | None:
+        """The game's "save games" folder, if found."""
+        ...
+
 
 class NullIntegration:
     """Integration that never finds the game. Used in tests and as a safe fallback."""
@@ -38,3 +43,6 @@ class NullIntegration:
 
     def game_log_names(self) -> list[str]:
         return []
+
+    def saves_dir(self) -> Path | None:
+        return None

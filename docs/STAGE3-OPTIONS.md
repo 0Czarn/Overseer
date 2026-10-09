@@ -1,7 +1,7 @@
 # Etap 3 – metody odczytu danych rozgrywki (do zatwierdzenia)
 
 Zgodnie z regułą 8 przed implementacją czegokolwiek bardziej inwazyjnego niż etap 2 przedstawiam metody,
-ograniczenia i ryzyko. **Nic z poniższego nie jest jeszcze zaimplementowane.**
+ograniczenia i ryzyko. Metoda A jest częściowo zaimplementowana (etap 3, część 1); B i C nie.
 
 ## Ustalenia z prawdziwej instalacji (2026-10-09, HOI4 1.19.3.0)
 
@@ -53,4 +53,5 @@ ograniczenia i ryzyko. **Nic z poniższego nie jest jeszcze zaimplementowane.**
 3. **C** rozpatrzyć przy etapach 4–7. Zmiany wspólnego stanu w MP muszą przejść przez mechanizm gry,
    a lokalna zmiana pamięci tego nie zapewnia.
 
-**Potrzebna decyzja:** którą metodę (lub kolejność) zatwierdzasz dla etapu 3?
+**Decyzja (2026-10-09):** zatwierdzona metoda A jako pierwszy krok docelowego debuggera. Realizacja: [SAVE-FORMAT.md](SAVE-FORMAT.md),
+dalsza droga: [REPORT-LIVE-AND-WRITE.md](REPORT-LIVE-AND-WRITE.md).

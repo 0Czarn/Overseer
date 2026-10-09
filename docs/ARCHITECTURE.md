@@ -15,7 +15,7 @@
    (procesy, pliki gry, w przyszłości ewentualnie pamięć), znajduje się tylko w `backend/hoi4dbg/integration/`
    i implementuje interfejs `GameIntegration`.
 2. **Każda odpowiedź mówi, skąd pochodzą dane:** `source` = `live` (odczyt z gry/systemu),
-   `demo` (dane przykładowe), `unavailable`. UI pokazuje to plakietką, a dla DEMO dodatkowo banerem.
+   `save` (kopia pliku zapisu – migawka, z oceną aktualności), `demo` (dane przykładowe), `unavailable`. UI pokazuje to plakietką, a dla DEMO dodatkowo banerem.
    Lista obszarów i ich źródeł jest w `service.CAPABILITIES` (jedno źródło prawdy, widoczne na Dashboardzie).
 3. **Lokalne vs wspólne.** Narzędzia mają `scope`: `local` (tylko ta aplikacja / ten klient) albo
    `shared` (zmiana wspólnego stanu gry). Narzędzia `shared` pozostają `planned`, dopóki nie zostaną
@@ -31,3 +31,9 @@
 `views/<nazwa>.js` eksportuje `{ id, title, short, render(root, ctx) }`. `render` może zwrócić funkcję
 sprzątającą (np. zatrzymanie pollingu). `ctx` udostępnia `api`, `state` (m.in. `selectedCountry`, czyli państwo
 wybrane niezależnie od kontrolowanego przez gracza), `setState`, `navigate`, `onStatus`, `refreshStatus`.
+
+## Zapisy gry (`backend/hoi4dbg/saves/`)
+
+`reader.SaveSnapshotter` kopiuje oryginał do cache (nigdy nie czyta go w miejscu). `reader.SaveAnalyzer` czyta nagłówek
+od razu, a pełną walidację struktury uruchamia w tle. `binary.py` to format, a `fields.py` to znaczenia pól z dowodami.
+Szczegóły: [SAVE-FORMAT.md](SAVE-FORMAT.md).

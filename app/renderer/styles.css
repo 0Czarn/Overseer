@@ -116,6 +116,19 @@ p { margin: 0; }
 .badge-na { background: var(--bg-elev-2); color: var(--text-muted); border-color: var(--border); }
 .badge-local { background: rgba(90, 169, 230, 0.14); color: var(--info); border-color: rgba(90, 169, 230, 0.35); }
 .badge-shared { background: rgba(239, 100, 97, 0.14); color: var(--bad); border-color: rgba(239, 100, 97, 0.4); }
+.badge-save { background: rgba(90, 169, 230, 0.10); color: #9cc9ef; border-color: rgba(90, 169, 230, 0.45); border-style: dashed; }
+.save-banner { display: flex; flex-direction: column; gap: 6px; padding: 10px 14px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-elev-2); border-left-width: 4px; }
+.save-banner-line { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.save-banner .fresh { font-weight: 700; }
+.fresh-current { border-left-color: var(--info); }
+.fresh-current .fresh { color: var(--info); }
+.fresh-stale { border-left-color: var(--bad); }
+.fresh-stale .fresh { color: var(--bad); }
+.fresh-offline { border-left-color: var(--warn); }
+.fresh-offline .fresh { color: var(--warn); }
+.chip-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { padding: 2px 8px; border-radius: 6px; background: var(--bg-elev-2); border: 1px solid var(--border); font-size: 12px; }
+details > summary { cursor: pointer; color: var(--text-muted); }
 .badge-debug { background: rgba(180, 140, 242, 0.14); color: var(--debug); border-color: rgba(180, 140, 242, 0.4); }
 
 .demo-banner {

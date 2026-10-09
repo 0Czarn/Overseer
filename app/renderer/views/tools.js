@@ -18,6 +18,8 @@ function actionFor(tool, ctx) {
         const res = await ctx.bridge.openGameLogsFolder();
         toast(res.ok ? `Opened ${res.path}` : res.error, res.ok ? 'ok' : 'error');
       } }, 'Open');
+    case 'save_inspector':
+      return h('button', { class: 'btn btn-small', onClick: () => ctx.navigate('countries') }, 'Open');
     default:
       return h('button', { class: 'btn btn-small', disabled: true }, 'Planned');
   }

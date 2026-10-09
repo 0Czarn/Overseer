@@ -1,8 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  filterByText, formatDuration, formatValue, groupFocuses, humanize, scopeInfo, sourceInfo, stockBalance,
+  filterByText, formatAge, formatBytes, formatDuration, formatValue, freshnessInfo, groupFocuses, humanize, scopeInfo,
+  sourceInfo, stockBalance,
 } from '../renderer/lib/format.js';
+
+test('save data has its own source badge and is never labelled live', () => {
+  assert.equal(sourceInfo('save').label, 'SAVE');
+  assert.notEqual(sourceInfo('save').cls, sourceInfo('live').cls);
+});
+
+test('freshnessInfo marks earlier sessions as stale', () => {
+  assert.equal(freshnessInfo('previous_session').cls, 'fresh-stale');
+  assert.equal(freshnessInfo('current_session').cls, 'fresh-current');
+  assert.equal(freshnessInfo('game_not_running').cls, 'fresh-offline');
+  assert.equal(freshnessInfo('weird').cls, 'fresh-offline');
+});
+
+test('formatAge and formatBytes', () => {
+  assert.equal(formatAge(125), '2m 5s ago');
+  assert.equal(formatAge(undefined), '—');
+  assert.equal(formatBytes(512), '512 B');
+  assert.equal(formatBytes(2048), '2.0 KB');
+  assert.equal(formatBytes(57260582), '54.6 MB');
+});
 
 test('formatValue handles every unit and missing values', () => {
   assert.equal(formatValue(0.625, 'percent'), '63%');

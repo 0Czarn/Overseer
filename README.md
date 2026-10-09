@@ -2,7 +2,8 @@
 
 Desktopowa aplikacja do debugowania aktywnej rozgrywki Hearts of Iron IV (Windows, Steam).
 
-> **Status:** wczesny prototyp. Dane rozgrywki (państwa, stany, cele, sprzęt, wywiad) są na razie
+> **Status:** wczesny prototyp. Z plików zapisu (kopii) czytane są nagłówek, gracze → państwa i mody (plakietka **SAVE**,
+> z datą i oceną aktualności). Pozostałe dane rozgrywki (wartości państw, stany, cele, sprzęt, wywiad) są na razie
 > **DEMO** i są tak oznaczone w interfejsie. Aplikacja **niczego nie zapisuje** do gry, jej pamięci,
 > plików ani zapisów. Aktualny stan prac: [`docs/PROGRESS.md`](docs/PROGRESS.md).
 
@@ -36,6 +37,7 @@ Przydatne zmienne środowiskowe:
 | `HOI4DBG_PYTHON` | ścieżka do interpretera Pythona |
 | `HOI4DBG_NO_GAME=1` | backend w ogóle nie dotyka gry (praca nad UI, testy) |
 | `HOI4DBG_GAME_USER_DIR` | inny folder danych użytkownika HOI4 (domyślnie z `launcher-settings.json` → Dokumenty) |
+| `HOI4DBG_REAL_SAVES` | folder zapisów dla testu na prawdziwym zapisie (domyślnie folder gry; test pracuje na kopii) |
 | `HOI4DBG_DATA_DIR` | katalog na logi i raporty aplikacji (domyślnie `%LOCALAPPDATA%\HOI4Debugger`) |
 
 Backend można też uruchomić samodzielnie (wypisze port i token):
@@ -61,6 +63,7 @@ backend/hoi4dbg/          Python: lokalne API JSON (127.0.0.1 + token)
   service.py              logika: łączy integrację, dane DEMO i raporty
   server.py               routing HTTP
   demo.py                 dane DEMO
+  saves/                  odczyt zapisów HOI4bin (zawsze z kopii)
   reports.py              raporty testerów (JSON + Markdown)
   applog.py               log aplikacji (plik + bufor dla UI)
 backend/tests/            testy unittest
@@ -73,4 +76,7 @@ docs/                     PROGRESS.md, ARCHITECTURE.md
 ```
 
 Gdzie aplikacja zapisuje swoje dane: `%LOCALAPPDATA%\HOI4Debugger\logs\app.log` i
-`%LOCALAPPDATA%\HOI4Debugger\reports\*.json|*.md`.
+`%LOCALAPPDATA%\HOI4Debugger\reports\*.json|*.md` oraz kopie analizowanych zapisów w
+`%LOCALAPPDATA%\HOI4Debugger\save-cache` (3 ostatnie). Oryginalne zapisy gry nie są modyfikowane.
+
+Dokumentacja: [PROGRESS](docs/PROGRESS.md) · [ARCHITECTURE](docs/ARCHITECTURE.md) · [SAVE-FORMAT](docs/SAVE-FORMAT.md) · [REPORT-LIVE-AND-WRITE](docs/REPORT-LIVE-AND-WRITE.md)

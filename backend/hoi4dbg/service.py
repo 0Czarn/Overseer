@@ -3,18 +3,24 @@ into the payloads served by the API. Contains no HTTP and no UI code."""
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 import platform
 import sys
+import time
 
 from . import __version__, demo
 from .applog import RingBufferHandler
 from .integration import GameIntegration, NullIntegration
 from .reports import ReportStore
+from .saves import fields as save_fields
+from .saves.reader import SaveAnalyzer, list_saves
 
-LIVE, DEMO, UNAVAILABLE = "live", "demo", "unavailable"
+LIVE, DEMO, UNAVAILABLE, SAVE = "live", "demo", "unavailable", "save"
 
-DEMO_NOTE = "DEMO data - not read from the game. Live reading is planned for Stage 3."
+DEMO_NOTE = "DEMO data - not read from the game."
+SAVE_NOTE = ("Read from a save file (copy). A save is a snapshot from the moment it was written, "
+             "never the live state of the game.")
 WRITE_NOTE = "Editing is disabled: no write method exists yet (planned Stage 4, singleplayer first)."
 
 # Which data domains are live vs DEMO right now. Single source of truth for the UI badges.
@@ -22,7 +28,9 @@ CAPABILITIES: dict[str, dict] = {
     "detection": {"source": LIVE, "write": False, "note": "Process, install and version detection."},
     "game_logs": {"source": LIVE, "write": False, "note": "Read-only tail of the game's own log files."},
     "countries": {"source": DEMO, "write": False, "note": DEMO_NOTE},
-    "players": {"source": DEMO, "write": False, "note": DEMO_NOTE},
+    "players": {"source": SAVE, "write": False, "note": "Player -> country assignment from the newest save. " + SAVE_NOTE},
+    "save_header": {"source": SAVE, "write": False,
+                    "note": "Save header: country, in-game date, version, difficulty, ideology, mods."},
     "country_values": {"source": DEMO, "write": False, "note": WRITE_NOTE},
     "states": {"source": DEMO, "write": False, "note": WRITE_NOTE},
     "focus": {"source": DEMO, "write": False, "note": "Read-only preview. Queueing is not implemented."},
@@ -41,6 +49,8 @@ TOOLS: list[dict] = [
      "description": "Runs process/version detection again. Read-only."},
     {"id": "open_logs", "name": "Open HOI4 logs folder", "scope": "local", "status": "available",
      "description": "Opens the game's log folder in Explorer. Read-only."},
+    {"id": "save_inspector", "name": "Save inspector", "scope": "local", "status": "available",
+     "description": "Reads a copy of any save file (header, players, mods, structure check). Never modifies saves."},
     {"id": "debug_overlay", "name": "Debug visibility preview", "scope": "local", "status": "planned",
      "description": "Shows extra information inside the debugger only. Never changes what other players see."},
     {"id": "value_edit", "name": "Shared value change", "scope": "shared", "status": "planned",
@@ -57,9 +67,35 @@ class NotFound(LookupError):
     pass
 
 
+def version_core(version: str | None) -> str | None:
+    """'Operation Postern v1.19.3.0.c01a (ff0e)' -> 'Operation Postern v1.19.3.0.c01a'.
+    The suffix in parentheses differs between saves of the same build, so it is not compared."""
+    if not version:
+        return None
+    return version.split(" (")[0].strip()
+
+
+def save_freshness(save_mtime: float, game: dict, now: float | None = None) -> dict:
+    """How a save relates to the game that is running right now. A save is never live."""
+    now = time.time() if now is None else now
+    age_s = max(0, int(now - save_mtime))
+    process = game.get("process")
+    started = process.get("started") if process else None
+    if process is None:
+        category, label = "game_not_running", "Game not running - this is the last saved state, not a live game"
+    elif started is None:
+        category, label = "unknown_session", "Game running, but its start time is unknown - cannot tell if this save is current"
+    elif save_mtime >= dt.datetime.fromisoformat(started).timestamp():
+        category, label = "current_session", "Snapshot written during the current game session - the game has moved on since"
+    else:
+        category, label = "previous_session", "From an EARLIER session - NOT the current game state"
+    return {"category": category, "label": label, "age_s": age_s, "is_live": False}
+
+
 class DebuggerService:
     def __init__(self, integration: GameIntegration, reports: ReportStore, ring: RingBufferHandler,
-                 logger: logging.Logger, data_dir: str = "") -> None:
+                 logger: logging.Logger, data_dir: str = "", saves: SaveAnalyzer | None = None) -> None:
+        self.saves = saves
         self.integration = integration
         self.reports = reports
         self.ring = ring
@@ -139,6 +175,45 @@ class DebuggerService:
             "visible_rule": "DEMO rule: a value is shown to the observer when civilian intel >= 30%.",
             "visible": target_country["values"] if levels["civilian"] >= 0.30 else None,
         }, DEMO_NOTE)
+
+    # -- save files ---------------------------------------------------------------------
+    def saves_list(self) -> dict:
+        directory = self.integration.saves_dir()
+        if directory is None:
+            return envelope(UNAVAILABLE, [], "Save folder not found")
+        game = self.detect()
+        items = list_saves(directory)
+        for item in items:
+            item["freshness"] = save_freshness(item["mtime"], game)
+        return envelope(SAVE, {"directory": str(directory), "saves": items}, SAVE_NOTE)
+
+    def save_analysis(self, name: str | None) -> dict:
+        directory = self.integration.saves_dir()
+        if directory is None or self.saves is None:
+            return envelope(UNAVAILABLE, None, "Save folder not found")
+        items = list_saves(directory)
+        if not items:
+            return envelope(UNAVAILABLE, None, "No save files found")
+        if name:
+            match = next((i for i in items if i["name"] == name), None)  # only names that exist in the folder
+            if match is None:
+                raise NotFound(f"Unknown save: {name}")
+        else:
+            match = items[0]
+        result = self.saves.analyse(directory / match["name"])
+        game = self.detect()
+        result["freshness"] = save_freshness(result["file"]["mtime"], game)
+        result["is_latest"] = match["name"] == items[0]["name"]
+        running = ((game.get("install") or {}).get("version") or {}).get("display") if game.get("process") else None
+        saved = (result.get("header") or {}).get("version")
+        result["version_check"] = {
+            "running": running, "save": saved,
+            "match": None if not (running and saved) else version_core(running) == version_core(saved),
+        }
+        return envelope(SAVE, result, SAVE_NOTE)
+
+    def save_fields(self) -> dict:
+        return envelope(LIVE, save_fields.field_catalog())
 
     def tools(self) -> dict:
         return envelope(LIVE, TOOLS)

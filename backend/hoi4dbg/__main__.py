@@ -17,6 +17,7 @@ from . import __version__, applog, paths
 from .integration import NullIntegration
 from .integration.hoi4 import Hoi4Integration
 from .reports import ReportStore
+from .saves.reader import SaveAnalyzer, SaveSnapshotter
 from .server import make_server
 from .service import DebuggerService
 
@@ -39,8 +40,9 @@ def main(argv: list[str] | None = None) -> int:
     logger, ring = applog.setup(data_dir / "logs")
     logger.info("HOI4 Debugger backend %s starting (data dir: %s)", __version__, data_dir)
 
+    saves = SaveAnalyzer(SaveSnapshotter(data_dir / "save-cache"), logger)
     service = DebuggerService(build_integration(args.no_game), ReportStore(data_dir / "reports"), ring,
-                              logger, str(data_dir))
+                              logger, str(data_dir), saves=saves)
     server = make_server(service, token, args.port)
     port = server.server_address[1]
 

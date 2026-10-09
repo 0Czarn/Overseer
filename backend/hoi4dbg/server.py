@@ -47,6 +47,9 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("GET", f"/api/intel/(?P<observer>[A-Za-z0-9_]{{1,8}})/{tag}",
           lambda q, b, observer, tag: svc.intel(observer, tag)),
         r("GET", "/api/tools", lambda q, b: svc.tools()),
+        r("GET", "/api/saves", lambda q, b: svc.saves_list()),
+        r("GET", "/api/saves/analysis", lambda q, b: svc.save_analysis(_str(q, "name") or None)),
+        r("GET", "/api/saves/fields", lambda q, b: svc.save_fields()),
         r("GET", "/api/logs/app", lambda q, b: svc.app_log(
             _int(q, "limit", 200, 1, 2000), _str(q, "level", "debug"), _int(q, "after", 0, 0, 10**12))),
         r("POST", "/api/logs/app", lambda q, b: svc.client_log(b)),

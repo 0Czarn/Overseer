@@ -151,3 +151,7 @@ class Hoi4Integration:
 
     def game_log(self, name: str, lines: int) -> dict | None:
         return self._user_data(self._install(None, [])).tail(name, lines)
+
+    def saves_dir(self) -> Path | None:
+        path = self._user_data(self._install(None, [])).root / "save games"
+        return path if path.is_dir() else None

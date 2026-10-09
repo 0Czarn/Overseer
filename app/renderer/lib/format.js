@@ -20,7 +20,30 @@ export const SOURCES = {
   live: { label: 'LIVE', cls: 'badge-live', title: 'Read from the running game or your system' },
   demo: { label: 'DEMO', cls: 'badge-demo', title: 'Sample data - not read from the game' },
   unavailable: { label: 'N/A', cls: 'badge-na', title: 'Not available right now' },
+  save: { label: 'SAVE', cls: 'badge-save', title: 'Read from a copy of a save file - a snapshot, never live' },
 };
+
+export const FRESHNESS = {
+  current_session: { cls: 'fresh-current', short: 'Current session (snapshot)' },
+  previous_session: { cls: 'fresh-stale', short: 'Earlier session - not current' },
+  game_not_running: { cls: 'fresh-offline', short: 'Game not running' },
+  unknown_session: { cls: 'fresh-offline', short: 'Session unknown' },
+};
+
+export function freshnessInfo(category) {
+  return FRESHNESS[category] ?? { cls: 'fresh-offline', short: String(category ?? 'unknown') };
+}
+
+export function formatAge(seconds) {
+  return Number.isFinite(seconds) ? `${formatDuration(seconds)} ago` : '—';
+}
+
+export function formatBytes(bytes) {
+  if (!Number.isFinite(bytes)) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
 
 export function sourceInfo(source) {
   return SOURCES[source] ?? { label: String(source ?? '?').toUpperCase(), cls: 'badge-na', title: '' };

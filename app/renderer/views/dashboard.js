@@ -1,5 +1,6 @@
 import { h, card, keyValues, notice, sourceBadge, table, viewHeader } from '../lib/dom.js';
 import { formatDuration, humanize } from '../lib/format.js';
+import { headerDetails, pollAnalysis, saveBanner, saveError } from './save-ui.js';
 
 function processCard(game) {
   const proc = game.process;
@@ -58,6 +59,18 @@ function sessionCard(game) {
   ], { extra: sourceBadge(session ? 'live' : 'unavailable') });
 }
 
+function latestSaveCard(ctx) {
+  const body = h('div', { class: 'card-body-inner' }, h('p', { class: 'muted' }, 'Reading the newest save…'));
+  const stop = pollAnalysis(ctx, null, (res) => {
+    const analysis = res.data;
+    body.replaceChildren(...(analysis
+      ? [saveBanner(analysis), saveError(analysis) ?? '', headerDetails(analysis) ?? '',
+        h('button', { class: 'btn btn-small', onClick: () => ctx.navigate('countries') }, 'Players & other saves')]
+      : [notice('muted', res.note ?? 'No save available.')]));
+  });
+  return { el: card('Newest save file', body, { extra: sourceBadge('save'), cls: 'span-2' }), stop };
+}
+
 function pathsCard(game) {
   return card('Paths', keyValues([
     ['Install', game.install?.path ? h('code', null, game.install.path) : null],
@@ -88,6 +101,7 @@ export default {
       ctx.api.get('/api/logs/app?limit=6&level=warning'),
     ]);
     const { game, capabilities, app } = status;
+    const latestSave = latestSaveCard(ctx);
 
     root.append(
       viewHeader('Dashboard', `Backend ${app.version} - Python ${app.python}`),
@@ -96,6 +110,7 @@ export default {
         versionCard(game),
         sessionCard(game),
         pathsCard(game),
+        latestSave.el,
         capabilitiesCard(capabilities),
         card('Recent warnings', warnings.data.length
           ? h('ul', { class: 'log-mini' }, warnings.data.map((e) =>
@@ -105,8 +120,12 @@ export default {
     );
     // Re-render when detection changes (game started/stopped).
     const detected = game.detected;
-    return ctx.onStatus((next) => {
+    const unsubscribe = ctx.onStatus((next) => {
       if (next.game.detected !== detected) ctx.rerender();
     });
+    return () => {
+      unsubscribe();
+      latestSave.stop();
+    };
   },
 };
