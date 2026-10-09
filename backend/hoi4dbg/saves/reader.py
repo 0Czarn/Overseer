@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from . import binary, binvalues, countries, fields, states, text
+from . import binary, binvalues, countries, equipment, fields, states, text
 
 SAVE_SUFFIX = ".hoi4"
 SNIFF_BYTES = 16
@@ -109,6 +109,7 @@ class SaveAnalyzer:
         self._results: dict[tuple, dict] = {}
         self._country_lists: dict[str, dict] = {}  # copy path -> summary (copies are per save version)
         self._states: dict[str, dict] = {}         # copy path -> states.read() result
+        self._equipment: dict[tuple, dict] = {}    # (copy path, tag) -> equipment.read() result
 
     def analyse(self, path: Path) -> dict:
         stat = path.stat()
@@ -202,6 +203,22 @@ class SaveAnalyzer:
                 self._states = {result["copy"]: cached}  # keep only the newest
         return {"analysis": result, **cached}
 
+    def equipment(self, path: Path, tag: str) -> dict:
+        """Variant table, stockpile and convoys of one country from the cached copy of a save."""
+        result = self.analyse(path)
+        if result["error"]:
+            raise binary.SaveFormatError(result["error"]["code"], result["error"]["message"])
+        key = (result["copy"], tag)
+        with self._lock:
+            cached = self._equipment.get(key)
+        if cached is None:
+            cached = equipment.read(Path(result["copy"]).read_bytes(), result["format"], result.get("float_width"),
+                                    (result.get("header") or {}).get("version"), tag)
+            with self._lock:
+                self._equipment = {k: v for k, v in self._equipment.items() if k[0] == result["copy"]}
+                self._equipment[key] = cached
+        return {"analysis": result, **cached}
+
     def country_values(self, path: Path, tag: str) -> dict:
         """Country Editor values for `tag` from the cached copy of a save (text, or binary 1.19.3)."""
         result = self.analyse(path)
@@ -219,7 +236,20 @@ class SaveAnalyzer:
                 raise binary.SaveFormatError("country_missing", f"Country {tag} does not exist in this save")
             values = text.country_values(block, text.equipment_names(data))
         values["manpower"] = self._manpower(path, tag, values.get("manpower") or {})
+        if (values.get("convoys") or {}).get("status") != "read":
+            values["convoys"] = self._convoys(path, tag, values.get("convoys") or {})
         return {"analysis": result, "values": values}
+
+    def _convoys(self, path: Path, tag: str, fallback: dict) -> dict:
+        """Convoys from the equipment reader (binary saves have no names table for text.convoys())."""
+        try:
+            data = self.equipment(path, tag)
+        except binary.SaveFormatError:
+            return fallback
+        parts = [(data["variants"].get(i, {}).get("type", f"#{i}"), i, n) for i, n in data["convoys"].items()]
+        total = sum(n for t, _, n in parts if t.startswith("convoy"))
+        return {"value": total, "status": "read", "path": "convoys.equipment",
+                "raw": " + ".join(f"{t}#{i}={n:g}" for t, i, n in parts) or "0"}
 
     def _manpower(self, path: Path, tag: str, extra: dict) -> dict:
         """Manpower shown in game = available pool of the owned states (+ country `manpower.current`, which only

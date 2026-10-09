@@ -1,0 +1,41 @@
+HOI4 DEBUGGER - STAN PROJEKTU
+Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-09 (koniec kroku E)
+Szczegóły i dowody: docs/PROGRESS.md, plan: docs/STATUS-AND-PLAN.md
+
+======================================================================
+ZROBIONE
+======================================================================
+[x] Etap 1  Aplikacja desktopowa: 9 zakładek, logi, raporty, testy, dokumentacja
+[x] Etap 2  Wykrywanie gry: proces, wersja, instalacja, restart
+[x] Odczyt zapisów gry: tekstowe (każda wersja) i binarne (wersja 1.19.3)
+[x] Odczyt NA ŻYWO z pamięci gry (tylko odczyt, bez kalibracji):
+      PP, stabilność, poparcie wojny, CP, paliwo, doświadczenie armii/floty/lotnictwa
+      - dla DOWOLNEGO państwa, przez tablicę państw gry (sprawdzone po restartach gry)
+[x] Zmiana wartości z aplikacji (komenda konsoli + sprawdzenie w pamięci):
+      PP, stabilność, poparcie wojny, CP, paliwo - sprawdzone w grze
+[x] Krok A  Countries & Players: lista państw, nazwy z gry, partia, liczba stanów, gracze
+[x] Krok B  Automatyczne mapowanie pól zapisu na pamięć (wszystkie państwa naraz)
+[x] Krok C  Gracz rozpoznawany z pamięci gry (bez zapisu)
+[x] Krok D  State Editor: 1081 stanów (właściciel, kontroler, budynki, zasoby, rdzenie,
+            roszczenia, manpower stanu); manpower państwa zgodny z paskiem gry
+[x] Krok E  Equipment Manager: magazyn, warianty, konwoje z zapisu; dodawanie sprzętu
+            komendą add_equipment ze sprawdzeniem w następnym zapisie (sprawdzone w grze)
+
+======================================================================
+DO ZROBIENIA (w tej kolejności)
+======================================================================
+[ ] Krok F  National Focus Manager: aktualny cel, ukończone, postęp, drzewo z plików gry
+            (kolejkowanie tylko jeśli gra to umożliwia; bez natychmiastowego kończenia)  <- NASTĘPNY
+[ ] Krok G  Intelligence Lab (poziomy wywiadu) i Game Tools (narzędzia lokalne)
+[ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)
+            -> wymaga drugiego komputera/konta
+[ ] Krok I  Raport kompatybilności, instrukcja użytkownika, narzędzie na aktualizację gry
+
+======================================================================
+ZNANE OGRANICZENIA
+======================================================================
+- Odczyt na żywo tylko dla wersji gry 1.19.3.0.c01a (po aktualizacji gry: do ponownego ustalenia).
+- Stany, manpower, lista państw, sprzęt - z ostatniego zapisu (migawka), nie na żywo.
+- Sprzętu nie da się usuwać (komenda gry tylko dodaje).
+- Mody dodające nowe tagi państw: nieprzetestowane.
+- Multiplayer: nieprzetestowany.

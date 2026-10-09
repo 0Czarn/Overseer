@@ -448,3 +448,21 @@ gubione przy restarcie) i szybka kalibracja z zapamiętanego układu (`python -m
 - Ograniczenie: odczyt manpower **na żywo** nie jest zaimplementowany (pule leżą w obiektach stanów, nie państwa);
   stara kalibracja `manpower` czyta tylko `manpower.current` – służy jedynie do weryfikacji komendy `manpower`.
 - Testy: backend 148 OK (test na prawdziwej parze zapisów zaktualizowany: 1 332 620 → 203 332 620), smoke 18/18.
+
+---
+
+## Krok E: Equipment Manager (2026-10-09) ✅
+
+- `saves/equipment.py`: tabela wariantów (4504; typ, nazwa wariantu, projektant, przestarzały), magazyn państwa
+  (`production.equipments`) i konwoje (`convoys.equipment`); nazwy typów z lokalizacji gry. Tokeny binarne 1.19.3
+  z dopasowania pary tekst/binarny; **kontrola: tabela wariantów i magazyn GER identyczne** w obu formatach.
+- Konwoje w Country Editorze działają teraz także dla zapisów binarnych (GER: 2337 w obu formatach).
+- **Dodawanie sprzętu ze sprawdzeniem** (`equipment_changes.py`, `POST /api/equipment/{tag}/changes`):
+  komenda `add_equipment N <typ>` → wykrycie w historii konsoli → porównanie z następnym zapisem.
+  Testy w grze (SOV, pauza): `add_equipment 100 infantry_equipment_1` → +100; przez aplikację:
+  25 (100 → 125) i 10 (125 → 135, **confirmed**).
+- `add_equipment -50 train_equipment_1` **dodało 1000** zamiast odjąć – odejmowanie tą komendą niemożliwe,
+  aplikacja przyjmuje tylko dodatnie liczby całkowite.
+- Naprawa (regresja z testu w grze): sprawdzanie czeka, gdy gra jeszcze zapisuje plik (wcześniej przerywało).
+- Ograniczenia: magazyn z zapisu (migawka), nie na żywo; zmiana tylko dla państwa gracza; usuwanie sprzętu niedostępne.
+- Testy: backend 156 OK, JS 24 OK, smoke 18/18 (Equipment Manager bez DEMO).

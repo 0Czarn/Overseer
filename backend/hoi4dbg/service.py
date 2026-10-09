@@ -14,6 +14,7 @@ from . import __version__, demo, gamefiles
 from .applog import RingBufferHandler
 from .integration import GameIntegration, NullIntegration
 from .reports import ReportStore
+from .saves import equipment as save_equipment
 from .saves import fields as save_fields
 from .saves import states as save_states
 from .saves.binary import SaveFormatError
@@ -229,7 +230,29 @@ class DebuggerService:
                         DEMO_NOTE)
 
     def equipment(self, tag: str) -> dict:
-        return envelope(DEMO, {"tag": tag.upper(), "items": demo.equipment(tag), "editable": False}, DEMO_NOTE)
+        """Stockpile and convoys of `tag` from the newest save, names from the game files; DEMO without them."""
+        tag = tag.upper()
+        install = self._install_path()
+        picked = self._pick_save(None)
+        if install and picked is not None:
+            try:
+                data = self.saves.equipment(picked[0], tag)
+            except SaveFormatError as exc:
+                note = f"Equipment not read from {picked[0].name}: {exc}"
+            else:
+                analysis = data["analysis"]
+                header = analysis.get("header") or {}
+                return envelope(SAVE, {
+                    "tag": tag, "items": save_equipment.rows(data, gamefiles.equipment_names(install)),
+                    "editable": False, "file": analysis["file"], "in_game_date": header.get("date"),
+                    "player_tag": header.get("player_tag"),
+                    "freshness": save_freshness(analysis["file"]["mtime"], self.detect()),
+                }, f"Stockpile of {tag} from {picked[0].name} ({(header.get('date') or {}).get('text') or '?'}). "
+                   "Snapshot - not live.")
+        else:
+            note = None
+        return envelope(DEMO, {"tag": tag, "items": demo.equipment(tag), "editable": False},
+                        f"{note} {DEMO_NOTE}" if note else DEMO_NOTE)
 
     def intel(self, observer: str, target: str) -> dict:
         target_country = demo.country(target)

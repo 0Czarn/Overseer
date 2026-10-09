@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable
 from urllib.parse import parse_qs, urlsplit
 
+from .equipment_changes import ChangeError, EquipmentChanges
 from .live.service import LiveError
 from .reports import ReportError
 from .service import DebuggerService, NotFound
@@ -43,6 +44,7 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         return method, re.compile(f"^{pattern}$"), fn
 
     tag = r"(?P<tag>[A-Za-z0-9_]{1,8})"
+    changes = EquipmentChanges(svc)
 
     def live():
         if svc.live is None:
@@ -68,6 +70,9 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("GET", "/api/states", lambda q, b: svc.states(_str(q, "owner") or None)),
         r("GET", f"/api/focus/{tag}", lambda q, b, tag: svc.focus(tag)),
         r("GET", f"/api/equipment/{tag}", lambda q, b, tag: svc.equipment(tag)),
+        r("POST", f"/api/equipment/{tag}/changes", lambda q, b, tag: changes.create(
+            tag, str(b.get("archetype", "")), b.get("amount"))),
+        r("GET", r"/api/equipment/changes/(?P<op>eq-[0-9]{1,9})", lambda q, b, op: changes.poll(op)),
         r("GET", f"/api/intel/(?P<observer>[A-Za-z0-9_]{{1,8}})/{tag}",
           lambda q, b, observer, tag: svc.intel(observer, tag)),
         r("GET", "/api/tools", lambda q, b: svc.tools()),
@@ -152,7 +157,7 @@ def make_handler(svc: DebuggerService, token: str) -> type[BaseHTTPRequestHandle
                     self._send(HTTPStatus.NOT_FOUND, {"error": str(exc)})
                 except ReportError as exc:
                     self._send(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
-                except LiveError as exc:
+                except (LiveError, ChangeError) as exc:
                     self._send(HTTPStatus.CONFLICT, {"error": str(exc), "code": exc.code})
                 except Exception as exc:  # keep the server alive, surface the error in the app log
                     svc.log.exception("Unhandled error on %s %s", method, parts.path)

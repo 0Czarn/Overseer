@@ -71,3 +71,19 @@ def state_names(install: Path, lang: str = "english") -> dict[str, str]:
     if not path.is_file():
         return {}
     return dict(STATE_NAME_LINE.findall(path.read_text(encoding="utf-8-sig", errors="replace")))
+
+
+EQUIPMENT_NAME_LINE = re.compile(r'^\s*([a-z][a-z0-9_]*):\d*\s*"(.*)"', re.M)
+
+
+def equipment_names(install: Path, lang: str = "english") -> dict[str, str]:
+    """Equipment archetype key -> localised name (infantry_equipment_1 -> Infantry Equipment I)."""
+    return dict(_equipment_names(str(install), lang))
+
+
+@lru_cache(maxsize=2)
+def _equipment_names(install: str, lang: str) -> tuple:
+    path = Path(install) / "localisation" / lang / f"equipment_l_{lang}.yml"
+    if not path.is_file():
+        return ()
+    return tuple(EQUIPMENT_NAME_LINE.findall(path.read_text(encoding="utf-8-sig", errors="replace")))
