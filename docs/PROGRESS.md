@@ -437,3 +437,14 @@ gubione przy restarcie) i szybka kalibracja z zapamiętanego układu (`python -m
   Budynki i zasoby wg nazw z zapisu – także dodane przez mody; nieznane tokeny jako `#xxxx`.
 - Migawka z najnowszego zapisu (nie na żywo); edycja stanów – niedostępna.
 - Testy: backend 148 OK (zapis tekstowy i binarny, odrzucenie innej wersji), JS 24 OK, smoke 18/18.
+
+## Krok D (część 2): manpower państwa (2026-10-09) ✅
+
+- Manpower z interfejsu gry = suma `manpower_pool.available` stanów posiadanych przez państwo + `manpower.current`
+  państwa (istnieje tylko po dodaniu przez konsolę/zdarzenia). **Potwierdzone z górnym paskiem gry:**
+  SOV (`mapa.hoi4`) 1 187 817 = „1,18M”; GER po komendach `manpower` 1 639 884 + 201 692 736 = „203.3M”
+  (zapis nazwany przez testera wg paska) – to wyjaśnia otwartą wcześniej „różnicę” przy manpower.
+- Country Editor (wartości z zapisu) pokazuje tę sumę z opisem źródła.
+- Ograniczenie: odczyt manpower **na żywo** nie jest zaimplementowany (pule leżą w obiektach stanów, nie państwa);
+  stara kalibracja `manpower` czyta tylko `manpower.current` – służy jedynie do weryfikacji komendy `manpower`.
+- Testy: backend 148 OK (test na prawdziwej parze zapisów zaktualizowany: 1 332 620 → 203 332 620), smoke 18/18.

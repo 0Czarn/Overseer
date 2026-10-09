@@ -321,8 +321,11 @@ class RealManpowerConvoyTests(TempDirMixin, unittest.TestCase):
         analyzer = reader.SaveAnalyzer(reader.SaveSnapshotter(self.tmp / "cache"), logger)
         before, after = (analyzer.country_values(Path(shutil.copy2(p, self.tmp / p.name)), "GER")["values"]
                          for p in manpower_test_pair())
-        self.assertEqual(before["manpower"]["status"], "absent")
-        self.assertEqual(after["manpower"]["value"], 201692736)
+        # manpower = available pool of owned states + manpower.current (console additions); the second save is
+        # named after the game's top bar: "Manpower 203.3" (M)
+        self.assertEqual(before["manpower"]["value"], 1332620)
+        self.assertEqual(after["manpower"]["value"], 1639884 + 201692736)
+        self.assertEqual(int(after["manpower"]["value"] / 100000) / 10, 203.3)
         self.assertEqual((before["convoys"]["value"], after["convoys"]["value"]), (200, 15))
         self.assertEqual(before["political_power"]["value"], after["political_power"]["value"])
 

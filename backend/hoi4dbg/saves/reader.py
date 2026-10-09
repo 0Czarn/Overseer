@@ -213,11 +213,28 @@ class SaveAnalyzer:
                                               (result.get("header") or {}).get("version"))
             if values is None:
                 raise binary.SaveFormatError("country_missing", f"Country {tag} does not exist in this save")
-            return {"analysis": result, "values": values}
-        block = text.country_block(data, tag)
-        if block is None:
-            raise binary.SaveFormatError("country_missing", f"Country {tag} does not exist in this save")
-        return {"analysis": result, "values": text.country_values(block, text.equipment_names(data))}
+        else:
+            block = text.country_block(data, tag)
+            if block is None:
+                raise binary.SaveFormatError("country_missing", f"Country {tag} does not exist in this save")
+            values = text.country_values(block, text.equipment_names(data))
+        values["manpower"] = self._manpower(path, tag, values.get("manpower") or {})
+        return {"analysis": result, "values": values}
+
+    def _manpower(self, path: Path, tag: str, extra: dict) -> dict:
+        """Manpower shown in game = available pool of the owned states (+ country `manpower.current`, which only
+        exists after console/event additions). Verified 2026-10-09 against the game's top bar: SOV in mapa.hoi4
+        1 187 817 = "1,18M"; GER after `manpower` commands 1 639 884 + 201 692 736 = "203.3M"."""
+        try:
+            owned = [s for s in self.states(path)["states"].values() if s["owner"] == tag]
+        except binary.SaveFormatError as exc:
+            return {**extra, "note": f"State pools not readable: {exc}"}
+        pool = sum(s["manpower"].get("available") or 0 for s in owned)
+        current = extra.get("value") if extra.get("status") == "read" else 0
+        return {"value": pool + (current or 0), "status": "read",
+                "path": "sum(states.manpower_pool.available)" + (" + manpower.current" if current else ""),
+                "raw": f"{int(pool)}" + (f" + {int(current)}" if current else ""),
+                "note": f"{len(owned)} owned states" + ("; + manpower.current (console/event additions)" if current else "")}
 
     def wait_idle(self, timeout: float = 60.0) -> None:
         """Test helper: wait until no validation is pending."""
