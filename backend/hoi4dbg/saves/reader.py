@@ -107,10 +107,14 @@ class SaveAnalyzer:
         self.snapshotter = snapshotter
         self.log = logger
         self._lock = threading.Lock()
+        # one heavy parse at a time: a second request for the same save waits and then uses the cache
+        # (parsing is pure Python - parallel parses only compete for the interpreter)
+        self._parse_lock = threading.Lock()
         self._results: dict[tuple, dict] = {}
         self._country_lists: dict[str, dict] = {}  # copy path -> summary (copies are per save version)
         self._states: dict[str, dict] = {}         # copy path -> states.read() result
         self._equipment: dict[tuple, dict] = {}    # (copy path, tag) -> equipment.read() result
+        self._focus: dict[str, dict] = {}          # copy path -> {tag: focus block} (one pass for all countries)
 
     def analyse(self, path: Path) -> dict:
         stat = path.stat()
@@ -180,6 +184,14 @@ class SaveAnalyzer:
         with self._lock:
             cached = self._country_lists.get(result["copy"])
         if cached is None:
+            with self._parse_lock:
+                return self._country_list_locked(result)
+        return {"analysis": result, **copy_module.deepcopy(cached)}
+
+    def _country_list_locked(self, result: dict) -> dict:
+        with self._lock:
+            cached = self._country_lists.get(result["copy"])
+        if cached is None:
             data = Path(result["copy"]).read_bytes()
             if result["format"] == "text":
                 cached = countries.summary_text(data)
@@ -198,10 +210,14 @@ class SaveAnalyzer:
         with self._lock:
             cached = self._states.get(result["copy"])
         if cached is None:
-            cached = states.read(Path(result["copy"]).read_bytes(), result["format"], result.get("float_width"),
-                                 (result.get("header") or {}).get("version"))
-            with self._lock:
-                self._states = {result["copy"]: cached}  # keep only the newest
+            with self._parse_lock:
+                with self._lock:
+                    cached = self._states.get(result["copy"])
+                if cached is None:
+                    cached = states.read(Path(result["copy"]).read_bytes(), result["format"],
+                                         result.get("float_width"), (result.get("header") or {}).get("version"))
+                    with self._lock:
+                        self._states = {result["copy"]: cached}  # keep only the newest
         return {"analysis": result, **cached}
 
     def equipment(self, path: Path, tag: str) -> dict:
@@ -225,12 +241,22 @@ class SaveAnalyzer:
         result = self.analyse(path)
         if result["error"]:
             raise binary.SaveFormatError(result["error"]["code"], result["error"]["message"])
-        data = Path(result["copy"]).read_bytes()
         if result["format"] == "text":
-            block = text.country_block(data, tag)
+            block = text.country_block(Path(result["copy"]).read_bytes(), tag)
         else:
-            block = binvalues.country_blocks(data, {tag}, result.get("float_width"),
-                                             (result.get("header") or {}).get("version")).get(tag)
+            with self._lock:
+                blocks = self._focus.get(result["copy"])
+            if blocks is None:
+                with self._parse_lock:
+                    with self._lock:
+                        blocks = self._focus.get(result["copy"])
+                    if blocks is None:
+                        blocks = countries.focus_states_binary(
+                            Path(result["copy"]).read_bytes(), result.get("float_width"),
+                            (result.get("header") or {}).get("version"))
+                        with self._lock:
+                            self._focus = {result["copy"]: blocks}  # keep only the newest
+            block = blocks.get(tag)
         if block is None:
             raise binary.SaveFormatError("country_missing", f"Country {tag} does not exist in this save")
         return {"analysis": result, **focus.save_state(block)}

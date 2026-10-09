@@ -99,8 +99,31 @@ export default {
     let queue = d.queue;
     const treeHost = h('div');
     const queueHost = h('div');
-    const current = byId.get(d.current);
     const fresh = freshnessInfo(d.freshness?.category);
+    const currentHost = h('div');
+    const showCurrent = (live) => {
+      const id = live ? live.current : d.current;
+      const f = byId.get(id ?? '');
+      const days = live ? live.progress_days : d.progress_days;
+      currentHost.replaceChildren(...[
+        live ? h('span', { class: 'badge badge-live' }, 'LIVE') : sourceBadge('save'),
+        f ? [h('div', { class: 'focus-name' }, f.name), h('code', { class: 'focus-id' }, f.id),
+          meter(f.days ? Math.min(1, days / f.days) : 0),
+          h('div', { class: 'focus-meta' }, `${Math.round(days)} of ${f.days} days${!live && d.paused ? ' · paused' : ''}`)]
+          : notice('warn', 'No focus in progress - start one in the game.'),
+        live?.next ? h('p', { class: 'hint' }, `Next in your plan: ${live.next.name} (${live.next.days} days)`) : null,
+      ].flat().filter(Boolean));
+    };
+    showCurrent(null);
+    let liveTimer = null;
+    const pollLive = async () => {
+      try {
+        const live = (await ctx.api.get(`/api/live/focus?tag=${encodeURIComponent(tag)}`)).data;
+        showCurrent(live);
+      } catch { /* live reading unavailable - keep the save snapshot */ }
+      liveTimer = setTimeout(pollLive, 4000);
+    };
+    pollLive();
 
     const save = async (ids) => {
       try {
@@ -130,20 +153,17 @@ export default {
           h('span', { class: 'muted' }, `file written ${new Date(d.file.modified).toLocaleString()} (${formatAge(d.freshness?.age_s)})`)),
         h('div', { class: 'fresh' }, `SNAPSHOT - ${d.freshness?.label ?? fresh.short}`)),
       h('div', { class: 'split' },
-        card('Current focus', current
-          ? [h('div', { class: 'focus-name' }, current.name), h('code', { class: 'focus-id' }, current.id),
-            meter(current.progress ?? 0), h('div', { class: 'focus-meta' },
-              `${Math.round(d.progress_days)} of ${current.days} days${d.paused ? ' · paused' : ''}`)]
-          : notice('warn', 'No focus in progress.')),
+        card('Current focus', currentHost),
         card(`Planned order (${queue.length})`, [queueHost,
-          notice('info', 'This is a plan checked against prerequisites and exclusions. The game has no documented command '
-            + 'that STARTS a focus, so the app does not start them by itself; focuses are never completed instantly.')])),
+          notice('info', 'The plan is checked against prerequisites and exclusions. When the current focus ends, the app '
+            + 'notifies you which one to start next (the game has no command that starts a focus; focuses are never '
+            + 'completed instantly).')])),
       card(`Tree ${d.tree} - ${d.focuses.length} focuses (${counts.completed?.length ?? 0} completed, `
         + `${counts.available?.length ?? 0} available)`, [
         h('p', { class: 'hint' }, 'Click a focus to add it to the plan or remove it. Dashed lines: one of several prerequisites. '
           + '"Available" means the prerequisites are met - the game may still require other conditions.'),
         treeHost]),
     );
-    return undefined;
+    return () => clearTimeout(liveTimer);
   },
 };

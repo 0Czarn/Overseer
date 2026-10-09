@@ -92,6 +92,48 @@ def summary_binary(data: bytes, float_width: int, version: str | None) -> dict:
     return {"owners": owners, "ruling": ruling}
 
 
+def focus_states_binary(data: bytes, float_width: int, version: str | None) -> dict[str, list]:
+    """{tag: [("focus_tree", id), ("focus", [...])]} for every country, in one pass (other keys skipped)."""
+    if not binvalues.VERIFIED_VERSION.search(version or "") or float_width != 8:
+        raise binary.SaveFormatError("binary_values_unmapped", f"Binary focus state is only mapped for 1.19.3 "
+                                     f"(this save: {version or 'unknown'}). Use a text save (-force_text_save).")
+    wanted = {binvalues.TOKENS["focus_tree"], binvalues.TOKENS["focus"]}
+    out: dict[str, list] = {}
+    p = binary.Parser(data, float_width)
+    while p.peek() is not None:
+        key = p._u16()
+        if p._u16() != binary.EQUALS:
+            raise binary.SaveFormatError("corrupt", "Expected '=' after a top-level field", p.pos - 2)
+        if key != binvalues.TOKENS["countries"] or p.peek() != binary.OPEN:
+            p.skip_value()
+            continue
+        p._u16()
+        while p.peek() not in (None, binary.CLOSE):
+            tag = p.scalar(p._u16())
+            p._u16()
+            if p.peek() != binary.OPEN:
+                p.skip_value()
+                continue
+            p._u16()
+            items = []
+            while p.peek() not in (None, binary.CLOSE):
+                if p.peek() == binary.OPEN:
+                    p.skip_value()
+                    continue
+                k = p.scalar(p._u16())
+                if p.peek() != binary.EQUALS:
+                    continue
+                p._u16()
+                if isinstance(k, binary.Token) and k.id in wanted:
+                    items.append((k, p.value([1_000_000])))
+                else:
+                    p.skip_value()
+            p._u16()
+            out[tag] = binvalues._named(items)
+        break
+    return out
+
+
 def _ruling_party(p: binary.Parser) -> str | None:
     """Reads one country block (cursor after its '{'), returning politics.ruling_party; skips everything else."""
     party = None

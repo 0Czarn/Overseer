@@ -106,3 +106,49 @@ def read_field(memory, country: int, field: str) -> float:
     if field in ("stability", "war_support") and not -0.001 <= value <= 1.001:
         raise PointerError("implausible", f"{field} = {value} is outside 0..1 - the layout does not match")
     return value
+
+
+# National focus of a country: [country + 0x1380] = focus state; +0x10 -> focus definition whose id (MSVC
+# std::string) is at +0x18; +0x38 = progress in days (fixed64_100000). Verified 2026-10-09 (wariant3.hoi4):
+# progress 99/99 countries (incl. SIA 23 vs 30 elsewhere), current focus id 99/99 countries.
+# +0x40 -> array of completed focus definitions, +0x48 = count (int32): after 5 game days the list of every
+# country contained all completed focuses of the save (99/99), the new ones being mostly the save's current focus.
+FOCUS = {"state": 0x1380, "definition": 0x10, "id": 0x18, "progress": 0x38, "completed": 0x40, "completed_count": 0x48}
+MAX_COMPLETED = 2000
+
+
+def _msvc_string(memory, address: int, max_len: int = 200) -> str | None:
+    raw = memory.read(address, 32)
+    if not raw:
+        return None
+    size, capacity = struct.unpack_from("<QQ", raw, 16)
+    if size > max_len or capacity < size:
+        return None
+    data = raw[:size] if capacity < 16 else (memory.read(struct.unpack_from("<Q", raw, 0)[0], size) if size else b"")
+    return data.decode("utf-8", "replace") if data is not None else None
+
+
+def read_focus(memory, country: int) -> dict:
+    """{"current": focus id or None, "progress_days": float, "completed": [focus ids]}."""
+    state = _ptr(memory, country + FOCUS["state"])
+    if state is None:
+        raise PointerError("unreadable", "Focus state of the country is not readable")
+    data = memory.read(state + FOCUS["progress"], 8)
+    progress = ENCODINGS["fixed64_100000"].unpack(data) if data else 0.0
+    definition = _ptr(memory, state + FOCUS["definition"])
+    current = _msvc_string(memory, definition + FOCUS["id"]) if definition else None
+    if current is not None and not re.fullmatch(r"[A-Za-z0-9_.\-]{1,200}", current):
+        raise PointerError("implausible", f"Focus id {current!r} does not look like an id - layout does not match")
+    raw = memory.read(state + FOCUS["completed_count"], 4)
+    count = struct.unpack("<I", raw)[0] if raw else 0
+    array = _ptr(memory, state + FOCUS["completed"]) if count else None
+    completed = []
+    if count > MAX_COMPLETED:
+        raise PointerError("implausible", f"{count} completed focuses - layout does not match")
+    table = memory.read(array, 8 * count) if array else b""
+    for i in range(len(table or b"") // 8):
+        definition_i = struct.unpack_from("<Q", table, 8 * i)[0]
+        fid = _msvc_string(memory, definition_i + FOCUS["id"]) if 0x10000 <= definition_i < 0x7FFF_FFFF_FFFF else None
+        if fid:
+            completed.append(fid)
+    return {"current": current or None, "progress_days": progress, "completed": completed}

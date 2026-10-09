@@ -42,6 +42,7 @@ function registerIpc() {
   ipcMain.handle('backend:info', () => ({
     running: Boolean(backend),
     python: backend ? [backend.candidate.command, ...backend.candidate.args].join(' ') : null,
+    smoke: Boolean(SMOKE_DIR),
   }));
   ipcMain.handle('window:setAlwaysOnTop', (_event, enabled) => {
     mainWindow?.setAlwaysOnTop(Boolean(enabled), 'floating');
@@ -89,6 +90,9 @@ function createWindow() {
     });
   }
 }
+
+// Windows shows system notifications (focus alerts) only for an app with a user model id.
+if (process.platform === 'win32') app.setAppUserModelId('HOI4Debugger');
 
 app.whenReady().then(async () => {
   serveRenderer();

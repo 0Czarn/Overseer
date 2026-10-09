@@ -9,6 +9,7 @@ from pathlib import Path
 import logging
 import platform
 import sys
+import threading
 import time
 
 from . import __version__, demo, equipment_changes, gamefiles
@@ -268,6 +269,72 @@ class DebuggerService:
             "freshness": save_freshness(analysis["file"]["mtime"], self.detect()),
         }, f"Focus tree {state['tree']} from the game files; state of {tag} from {analysis['file']['name']} "
            f"({(header.get('date') or {}).get('text') or '?'}). Snapshot - not live.")
+
+    def _focus_context_cached(self, tag: str, wait: bool = True):
+        """_focus_context() cached per newest save (parsing a binary save takes seconds). With wait=False a
+        missing context is built in the background and None is returned meanwhile ("loading")."""
+        picked = self._pick_save(None)
+        key = (tag, picked[0].name if picked else None, picked[0].stat().st_mtime if picked else None)
+        cache = getattr(self, "_focus_cache", None)
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        if wait:
+            self._focus_cache = (key, self._focus_context(tag))
+            return self._focus_cache[1]
+        if getattr(self, "_focus_loading", None) != key:
+            self._focus_loading = key
+
+            def build() -> None:
+                try:
+                    self._focus_cache = (key, self._focus_context(tag))
+                except (SaveFormatError, OSError, ValueError) as exc:
+                    self.log.warning("Focus tree for %s not read: %s", tag, exc)
+            threading.Thread(target=build, daemon=True).start()
+        return None
+
+    def live_focus(self, tag: str | None = None) -> dict:
+        """Live current focus of `tag` (default: player) + the next focus of the planned queue.
+
+        Completed focuses come from game memory (the country's completed list), so the queue moves on without
+        a new save; a focus newly in that list is reported once as `event`. `idle` = no focus selected: the
+        moment to start the next one (the app notifies; the game has no command to start a focus)."""
+        if self.live is None:
+            raise NotFound("Live game access is disabled")
+        live = self.live.focus(tag)
+        tag = live["tag"]
+        ctx = self._focus_context_cached(tag, wait=False)
+        if ctx is None:  # tree still being read: report the live focus without queue information
+            return {"data": {"tag": tag, "tree": None, "current": live["current"], "current_name": live["current"],
+                             "progress_days": live["progress_days"], "days": None, "idle": live["current"] is None,
+                             "next": None, "completed_since_save": [], "event": None, "loading": True,
+                             "read_at": live["read_at"]}}
+        state, focuses = ctx
+        by_id = {f["id"]: f for f in focuses}
+        tracks = getattr(self, "_focus_tracks", None)
+        if tracks is None:
+            tracks = self._focus_tracks = {}
+        track = tracks.setdefault((tag, state["tree"]), {"seen": None})
+        event = None
+        if track["seen"] is not None:
+            new = [f for f in live["completed"] if f not in track["seen"]]
+            if new:
+                event = {"completed": new[-1], "name": (by_id.get(new[-1]) or {}).get("name", new[-1]),
+                         "all": new}
+                self.log.info("Focus completed (live) %s: %s", tag, ", ".join(new))
+        track["seen"] = set(live["completed"])
+        done = list(dict.fromkeys(state["completed"] + live["completed"]))
+        now = {"completed": done, "current": live["current"], "progress": live["progress_days"]}
+        queue = focus_mod.validate_queue(focuses, now, self._focus_queues().get(f"{tag}:{state['tree']}", []))
+        nxt = next((q for q in queue if q["ok"]), None)
+        cur = by_id.get(live["current"] or "")
+        return {"data": {
+            "tag": tag, "tree": state["tree"], "current": live["current"],
+            "current_name": cur["name"] if cur else None, "progress_days": live["progress_days"],
+            "days": cur["days"] if cur else None, "idle": live["current"] is None,
+            "next": {"id": nxt["id"], "name": by_id[nxt["id"]]["name"], "days": by_id[nxt["id"]]["days"]} if nxt else None,
+            "completed_since_save": [f for f in live["completed"] if f not in state["completed"]],
+            "event": event, "read_at": live["read_at"],
+        }}
 
     def _focus_queue_file(self) -> Path:
         return Path(self.data_dir) / "focus-queues.json"

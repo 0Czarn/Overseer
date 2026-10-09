@@ -1,6 +1,7 @@
 // Renderer entry: navigation, shared state, status polling.
 import { createApi } from './lib/api.js';
-import { clear, errorBox, h } from './lib/dom.js';
+import { clear, errorBox, h, toast } from './lib/dom.js';
+import { startFocusWatch } from './lib/focus-watch.js';
 import dashboard from './views/dashboard.js';
 import countries from './views/countries.js';
 import countryEditor from './views/country-editor.js';
@@ -94,12 +95,18 @@ async function renderView() {
 
   const root = h('div', { class: 'view-inner' });
   let viewCleanup = null;
+  // Views reading a large save can take seconds: say so instead of leaving the previous view on screen.
+  const slow = setTimeout(() => {
+    if (seq === renderSeq) clear(viewEl).append(h('div', { class: 'view-inner' }, h('div', { class: 'view-header' }, h('h1', null, view.title)),
+      h('p', { class: 'muted' }, 'Loading… (reading the newest save)')));
+  }, 300);
   try {
     viewCleanup = await view.render(root, ctx);
   } catch (err) {
     root.append(h('div', { class: 'view-header' }, h('h1', null, view.title)), errorBox(`Could not load this view: ${err.message}`));
     api.log('error', `View ${view.id} failed: ${err.message}`);
   }
+  clearTimeout(slow);
   if (seq !== renderSeq) {
     viewCleanup?.();
     return;
@@ -177,6 +184,14 @@ async function init() {
 
   await pollStatus();
   setInterval(pollStatus, STATUS_INTERVAL_MS);
+  // Focus alerts: in-app toast + system notification (shown even when the game has focus). Not in the UI smoke
+  // test (its logic has unit tests) - the first reading of a large save would slow the views under test.
+  const smoke = bridge ? (await bridge.backendInfo()).smoke : false;
+  if (!smoke) setTimeout(() => startFocusWatch(api, (message) => {
+    toast(message, 'info');
+    api.log('info', `Focus alert: ${message}`);
+    try { new Notification('HOI4 Debugger - national focus', { body: message }); } catch { /* notifications unavailable */ }
+  }), 5000);
   await renderView();
   document.body.dataset.ready = '1';
 }

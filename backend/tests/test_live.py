@@ -618,6 +618,36 @@ class CountryTableTests(TempDirMixin, unittest.TestCase):
         self.assertEqual(self.svc.players(), [])
         self.assertEqual(self.svc.read("stability")["tag"], "GER")
 
+    def put_string(self, at, text, heap):
+        """MSVC std::string at `at`: short strings inline, longer ones in a heap buffer at `heap`."""
+        raw = text.encode()
+        if len(raw) < 16:
+            self.mem.regions_data[BASE][at - BASE:at - BASE + len(raw)] = raw
+            cap = 15
+        else:
+            self.mem.regions_data[BASE][heap - BASE:heap - BASE + len(raw)] = raw
+            self.mem.put(at, "Q", heap)
+            cap = len(raw)
+        self.mem.put(at + 16, "Q", len(raw))
+        self.mem.put(at + 24, "Q", cap)
+
+    def test_focus_current_progress_and_completed(self):
+        c = self.countries["ITA"]
+        state, cur_def, done_def, array = BASE + 0x2000, BASE + 0x2100, BASE + 0x2200, BASE + 0x2300
+        self.mem.put(c + pointers.FOCUS["state"], "Q", state)
+        self.mem.put(state + pointers.FOCUS["definition"], "Q", cur_def)
+        self.mem.put(state + pointers.FOCUS["progress"], "q", 23 * 100000)
+        self.put_string(cur_def + pointers.FOCUS["id"], "ITA_preservation_of_independence", BASE + 0x2800)
+        self.mem.put(state + pointers.FOCUS["completed"], "Q", array)
+        self.mem.put(state + pointers.FOCUS["completed_count"], "I", 1)
+        self.mem.put(array, "Q", done_def)
+        self.put_string(done_def + pointers.FOCUS["id"], "ITA_army", BASE + 0x2900)  # short: inline
+        self.assertEqual(self.svc.focus()["current"], "ITA_preservation_of_independence")
+        res = self.svc.focus("ITA")
+        self.assertEqual((res["progress_days"], res["completed"]), (23.0, ["ITA_army"]))
+        self.mem.put(state + pointers.FOCUS["definition"], "Q", 0)        # nothing selected
+        self.assertIsNone(self.svc.focus("ITA")["current"])
+
     def test_missing_country_and_unknown_tag(self):
         with self.assertRaises(LiveError) as ctx:
             self.svc.read("stability", "ENG")    # slot empty

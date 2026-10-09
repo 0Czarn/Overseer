@@ -411,6 +411,31 @@ class LiveService:
         return {"value": value, "encoding": pointers.FIELDS[field][1], "copies": 1, "method": "country_table",
                 "field": field, "tag": tag, "read_at": self._clock()}
 
+    def focus(self, tag: str | None = None) -> dict:
+        """Current national focus and its progress (days) of `tag` (default: the player), from game memory."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Live focus reading is only verified for 1.19.3.0.c01a")
+        tag = tag or self.player_tag(process)
+        key = (process["pid"], process.get("started"))
+        install = process.get("install") or ""
+        if install not in self._tags:
+            self._tags[install] = pointers.tag_order(Path(install))
+        try:
+            with self._open_memory(process["pid"]) as mem:
+                if key not in self._module_base:
+                    module = mem.modules().get(pointers.MODULE)
+                    if not module:
+                        raise LiveError("no_module", f"{pointers.MODULE} is not loaded in the game process")
+                    self._module_base[key] = module[0]
+                country = pointers.country_object(mem, self._module_base[key], self._tags[install], tag)
+                out = pointers.read_focus(mem, country)
+        except pointers.PointerError as exc:
+            raise LiveError(exc.code, str(exc)) from exc
+        except (MemoryAccessError, OSError) as exc:
+            raise LiveError("memory_error", str(exc)) from exc
+        return {**out, "tag": tag, "read_at": self._clock()}
+
     def read(self, field: str, tag: str | None = None) -> dict:
         """Live value: through the game's country table (verified game version), else a calibrated location."""
         process = self._process()
