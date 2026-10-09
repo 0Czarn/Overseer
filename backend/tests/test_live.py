@@ -6,6 +6,7 @@ import sys
 import time
 import unittest
 from contextlib import contextmanager
+from unittest import mock
 from pathlib import Path
 
 from hoi4dbg.integration import memory
@@ -65,10 +66,28 @@ class MemoryModuleTests(unittest.TestCase):
 
     def test_encodings_round_trip(self):
         for enc in ENCODINGS.values():
+            if enc.scale == 1:
+                continue
             packed = enc.pack(12.324)
             self.assertAlmostEqual(enc.unpack(packed), 12.324, places=5)
         self.assertEqual(ENCODINGS["fixed32_1000"].pack(12.324), struct.pack("<i", 12324))
         self.assertIsNone(ENCODINGS["fixed32_1000"].pack(1e12))  # does not fit: no needle, no crash
+
+    def test_tolerance_needles(self):
+        """Regression: fuel (save 304092.84835, a double in memory) and manpower (plain integer) were never found."""
+        mem = FakeMemory()
+        mem.put(BASE + 0x10, "d", 304092.848351234)   # more precision than the save prints
+        mem.put(BASE + 0x40, "d", 304092.8484)        # outside +-0.000005
+        mem.put(BASE + 0x80, "i", 119692338)
+        hits = scan(mem, needles_for(304092.84835, tolerance=0.000005))
+        self.assertEqual({k: v for k, v in hits.items() if v}, {"float64": [BASE + 0x10]})
+        self.assertNotIn("fixed64_1000", hits)  # x1000 cannot hold 5 decimals -> not searched at all
+        hits = scan(mem, needles_for(119692338.0, tolerance=0.0005))
+        self.assertEqual(hits["int32"], [BASE + 0x80])
+        self.assertNotIn("int32", needles_for(12.324, tolerance=0.0005))  # not an integer -> not an int field
+        mem.put(BASE + 0x100, "f", 119707338.0)  # float32 stores 119707336: outside +-0.0005, still the field
+        hits = scan(mem, needles_for(119707338.0, tolerance=0.0005))
+        self.assertEqual(hits["float32"], [BASE + 0x100])
 
     def test_zero_has_no_needles(self):
         self.assertEqual(needles_for(0.0), {})
@@ -192,11 +211,19 @@ class ConsoleTests(TempDirMixin, unittest.TestCase):
         for bad in (0, 1.5, 6000):
             with self.assertRaises(ValueError):
                 console.build_command("political_power", bad)
+        self.assertEqual(console.build_command("stability", 0.05), "add_stability 5")  # 1 unit = 0.01
+        self.assertEqual(console.build_command("stability", -0.03), "add_stability -3")
         with self.assertRaises(ValueError):
-            console.build_command("stability", 1)
-        self.assertEqual(console.parse_command("  PP   10 "), ("political_power", 10.0))
-        self.assertIsNone(console.parse_command("pp ten"))
-        self.assertIsNone(console.parse_command("manpower 10"))
+            console.build_command("stability", 0.005)  # half a unit
+        self.assertEqual(console.parse_command("  PP   10 "), [("political_power", 10.0, 10.0)])
+        self.assertEqual(console.parse_command("political_power 2"), [("political_power", 2.0, 2.0)])  # alias
+        self.assertEqual(console.parse_command("pp ten"), [])
+        self.assertEqual(console.parse_command("ai"), [])
+        self.assertEqual(console.parse_command("st -5"), [("stability", -5.0, -0.05)])
+
+    def test_xp_changes_all_three_experience_fields(self):
+        self.assertEqual(sorted(f for f, _, _ in console.parse_command("xp 10")),
+                         ["air_experience", "army_experience", "navy_experience"])
 
     def test_history_detects_new_entries_only(self):
         path = self.tmp / console.HISTORY_FILE
@@ -224,6 +251,9 @@ class LiveServiceTests(TempDirMixin, unittest.TestCase):
         self.addr = BASE + 0x40
         self.pp = 12.324
         self.mem.put(self.addr, "i", fixed(self.pp))
+        self.stab_addr = BASE + 0x80
+        self.stab = 0.7
+        self.mem.put(self.stab_addr, "q", 70000)  # fixed64_100000
         self.process = {"pid": 7, "path": str(self.install / "hoi4.exe"), "started": "2026-10-09T12:00:00+00:00"}
         self.save_mtime = 100.0
         self.save_category = "current_session"
@@ -242,7 +272,9 @@ class LiveServiceTests(TempDirMixin, unittest.TestCase):
         return {"source": "save", "data": {
             "tag": "GER", "player_tag": "GER", "file": {"name": "s.hoi4", "mtime": self.save_mtime},
             "in_game_date": {"text": "1936.1.1.12"}, "freshness": {"category": self.save_category},
-            "values": {"political_power": {"status": "read", "value": self.pp}}}}
+            "values": {"political_power": {"status": "read", "value": self.pp},
+                       "stability": {"status": "read", "value": self.stab},
+                       "navy_experience": {"status": "absent", "value": None}}}}
 
     def set_pp(self, value):
         self.pp = value
@@ -348,6 +380,57 @@ class LiveServiceTests(TempDirMixin, unittest.TestCase):
         values = self.svc.values()["political_power"]
         self.assertEqual((values["status"], values["code"]), ("unavailable", "unverified"))
         self.assertNotIn("value", values)
+
+    def test_one_scan_calibrates_several_fields_and_records_command_units(self):
+        # behave as before the unit of add_stability was verified
+        with mock.patch.dict(console.COMMANDS, {"stability": {**console.COMMANDS["stability"], "factor": None}}):
+            self._calibrate_with_unverified_unit()
+        # with the verified unit (1 = 0.01) the app can prepare and verify a stability change
+        op = self.svc.create_operation("stability", "target", 0.73)
+        self.assertEqual((op["command"], op["expected"]), ("add_stability 5", 0.73))
+        self.type_command("add_stability 5")
+        self.mem.put(self.stab_addr, "q", 73000)
+        self.assertEqual(self.svc.poll_operation(op["id"])["state"], "confirmed")
+
+    def _calibrate_with_unverified_unit(self):
+        self.svc.start_calibrations(["political_power", "stability", "navy_experience"], background=False)
+        st = self.svc.status()
+        self.assertEqual(sorted(st["calibrations"]), ["political_power", "stability"])
+        self.assertIn("navy_experience", st["job"]["skipped"])
+        # unit of add_stability unknown: command evidence is refused, save evidence records the ratio
+        self.type_command("add_stability -5")
+        self.stab = 0.65
+        self.mem.put(self.stab_addr, "q", 65000)
+        with self.assertRaises(LiveError) as ctx:
+            self.svc.refine_calibration("stability", "command")
+        self.assertEqual(ctx.exception.code, "unit_unverified")
+        self.save_mtime += 10
+        res = self.svc.refine_calibration("stability", "save")
+        self.assertEqual(res["unit_evidence"][0]["ratio"], 0.01)
+        self.assertEqual(res["unit_evidence"][0]["commands"], ["add_stability -5"])
+        self.type_command("st 3")
+        self.stab = 0.68
+        self.mem.put(self.stab_addr, "q", 68000)
+        self.save_mtime += 10
+        res = self.svc.refine_calibration("stability", "save")
+        self.assertEqual(res["state"], "confirmed", res)
+        self.assertEqual(self.svc.read("stability")["value"], 0.68)
+        with self.assertRaises(LiveError) as ctx:
+            self.svc.create_operation("stability", "delta", 0.05)
+        self.assertEqual(ctx.exception.code, "unit_unverified")
+
+    def test_confirmed_location_is_not_refined_by_stale_evidence(self):
+        """Regression: a confirmed PP location was refined with old console commands against an old
+        baseline after game days passed, and ended up 'failed'."""
+        self.calibrate()
+        self.clock += 100
+        self.set_pp(40.0)          # days passed
+        self.type_command("pp 3")  # entered later, applied to a different baseline
+        self.set_pp(43.0)
+        with self.assertRaises(LiveError) as ctx:
+            self.svc.refine_calibration("political_power", "command")
+        self.assertEqual(ctx.exception.code, "already_confirmed")
+        self.assertEqual(self.svc.read("political_power")["value"], 43.0)
 
     def test_save_being_written_has_its_own_code(self):
         self.save_values = lambda: {"source": "unavailable", "note": "still writing [in_progress]",

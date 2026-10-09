@@ -17,7 +17,7 @@ from typing import Callable
 
 from ..integration.memory import MemoryAccessError, ProcessMemory
 from . import console
-from .calibration import CalibrationError, FieldCalibration
+from .calibration import CalibrationError, FieldCalibration, scan_many, tolerance_for
 
 TOLERANCE = 0.0005           # values are fixed point with 3 decimals
 OP_TIMEOUT_S = 600
@@ -132,41 +132,63 @@ class LiveService:
                 cals[field] = info
             return {"process": process, "error": error, "calibrations": cals, "job": dict(self._job or {}),
                     "invalidated": dict(self.invalidated),
-                    "commands": {k: v["doc"] for k, v in console.COMMANDS.items()}}
+                    "commands": {k: {"doc": v["doc"], "verified": v["factor"] is not None}
+                                 for k, v in console.COMMANDS.items()}}
 
     # -- calibration -----------------------------------------------------------------------
     def start_calibration(self, field: str, background: bool = True) -> dict:
-        if field not in console.COMMANDS:
-            raise LiveError("unsupported_field", f"Calibration is not available for {field}")
+        return self.start_calibrations([field], background)
+
+    def start_calibrations(self, fields: list[str], background: bool = True) -> dict:
+        """One memory scan for several fields, each for its exact value in a fresh save of the running game."""
+        unknown = [f for f in fields if f not in console.COMMANDS]
+        if unknown or not fields:
+            raise LiveError("unsupported_field", f"Calibration is not available for {', '.join(unknown) or 'nothing'}")
         process = self._process()
         save = self._fresh_save(process)
-        entry = save["values"].get(field) or {}
-        if entry.get("status") != "read":
-            raise LiveError("no_value", f"{field} is not present in {save['file']['name']}")
+        values, skipped = {}, {}
+        for field in fields:
+            entry = save["values"].get(field) or {}
+            if entry.get("status") != "read":
+                skipped[field] = f"not present in {save['file']['name']}"
+            elif not entry.get("value"):
+                skipped[field] = "value is 0 (matches everywhere) - change it in game first"
+            else:
+                values[field] = (entry["value"], tolerance_for(entry.get("raw")))
+        if not values:
+            raise LiveError("no_value", "Nothing to calibrate: " + "; ".join(f"{k} {v}" for k, v in skipped.items()))
         tag = save.get("player_tag") or save.get("tag")
         source = f"save {save['file']['name']} ({(save.get('in_game_date') or {}).get('text')})"
+        mark = _mark_tuple(self._history(process))
         with self._lock:
             if self._job and self._job.get("state") == "running":
                 raise LiveError("busy", "A memory scan is already running")
-            self._job = {"field": field, "state": "running", "progress": 0.0, "started": self._clock()}
-        cal = FieldCalibration(field, tag, process["pid"], process.get("started"))
-        cal.save_mtime = save["file"]["mtime"]
-        cal.history_mark = _mark_tuple(self._history(process))
+            self._job = {"field": ",".join(values), "fields": list(values), "skipped": skipped,
+                         "state": "running", "progress": 0.0, "started": self._clock()}
 
         def run() -> None:
             try:
                 with self._open_memory(process["pid"]) as mem:
-                    cal.start(mem, entry["value"], source, progress=self._progress)
+                    hits = scan_many(mem, values, progress=self._progress)
+                cals = {}
+                for field, value in values.items():
+                    cal = FieldCalibration(field, tag, process["pid"], process.get("started"))
+                    cal.save_mtime, cal.history_mark = save["file"]["mtime"], mark
+                    cal.tolerance = value[1]
+                    cal.start_from_hits(hits[field], value[0], source)
+                    cals[field] = cal
                 with self._lock:
-                    self.calibrations[field] = cal
+                    self.calibrations.update(cals)
+                    for field in cals:
+                        self.invalidated.pop(field, None)
                     self._save()
-                    self._job.update(state="done", progress=1.0, result=cal.as_dict())
-                    self.invalidated.pop(field, None)
-                self.log.info("Live calibration %s: scan of %s = %s -> %s", field, tag, entry["value"], cal.message)
+                    self._job.update(state="done", progress=1.0, result={f: c.as_dict() for f, c in cals.items()})
+                for field, cal in cals.items():
+                    self.log.info("Live calibration %s: scan of %s = %s -> %s", field, tag, values[field][0], cal.message)
             except (MemoryAccessError, OSError) as exc:
                 with self._lock:
                     self._job.update(state="error", error=str(exc))
-                self.log.warning("Live calibration %s failed: %s", field, exc)
+                self.log.warning("Live calibration %s failed: %s", ",".join(values), exc)
 
         if background:
             threading.Thread(target=run, daemon=True).start()
@@ -187,6 +209,10 @@ class LiveService:
                 raise LiveError("not_started", "Start the calibration first (needs a fresh save)")
             if cal.state == "failed":
                 raise LiveError("failed", cal.message)
+            if cal.state == "confirmed":
+                # Further "evidence" can only be stale (game time moved since the last step) and must never
+                # destroy a verified location. Checks of a confirmed value go through read()/operations.
+                raise LiveError("already_confirmed", f"{field} is already confirmed")
             last = cal.steps[-1]
             if source == "save":
                 save = self._fresh_save(process)
@@ -198,16 +224,24 @@ class LiveService:
                 value = entry["value"]
                 label = f"save {save['file']['name']} ({(save.get('in_game_date') or {}).get('text')})"
                 cal.save_mtime = save["file"]["mtime"]
+                if cal.history_mark is not None:
+                    entries = self._history(process).new_entries(console.HistoryMark(*cal.history_mark))
+                    used = [(e, arg) for e in entries for f, arg, _ in console.parse_command(e) if f == field]
+                    if used:
+                        cal.add_unit_evidence(sum(a for _, a in used), value - last.value, [e for e, _ in used])
             elif source == "command":
+                if not console.verified(field):
+                    raise LiveError("unit_unverified", f"The unit of `{console.COMMANDS[field]['command']}` is not "
+                                                       "verified yet - refine from a save instead")
                 history = self._history(process)
                 if cal.history_mark is None:
                     raise LiveError("no_history", "Console history position unknown - start the calibration again")
                 entries = history.new_entries(console.HistoryMark(*cal.history_mark))
-                deltas = [p[1] for p in map(console.parse_command, entries) if p and p[0] == field]
+                deltas = [change for e in entries for f, _, change in console.parse_command(e) if f == field]
                 if not deltas:
                     raise LiveError("no_command", f"No {field} console command entered since the previous step "
                                                   f"(new entries: {entries})")
-                value = round(last.value + sum(deltas), 3)
+                value = round(last.value + sum(deltas), 6)
                 label = f"expected after {', '.join(f'`{e.strip()}`' for e in entries)} ({last.value} + {sum(deltas):g})"
             else:
                 raise LiveError("bad_source", "source must be 'save' or 'command'")
@@ -263,7 +297,9 @@ class LiveService:
         else:
             raise LiveError("bad_mode", "mode must be 'target' or 'delta'")
         spec = console.COMMANDS[field]
-        if spec["integer_only"] and delta != int(delta):
+        if spec["factor"] is None:
+            raise LiveError("unit_unverified", f"The unit of `{spec['command']}` is not verified in game yet")
+        if spec["integer_only"] and round(delta / spec["factor"], 6) != int(round(delta / spec["factor"], 6)):
             raise LiveError("not_integer", f"`{spec['command']}` takes whole numbers; change would be {delta:g}. "
                                            f"Pick a target that differs by a whole number "
                                            f"(e.g. {before['value'] + round(delta):g}).")

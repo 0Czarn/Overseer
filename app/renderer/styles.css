@@ -307,3 +307,5 @@ textarea.input { resize: vertical; width: 100%; }
 .live-cal h3 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
 .live-change .input { width: auto; flex: 0 0 auto; }
 .live-change input.input { width: 120px; }
+.live-grid { margin-bottom: 12px; }
+.live-mini .stat-value { font-size: 1.2em; }

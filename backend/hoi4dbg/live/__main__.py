@@ -6,7 +6,7 @@ python -m hoi4dbg.live refine political_power save|command
 python -m hoi4dbg.live read political_power [seconds]
 python -m hoi4dbg.live change political_power delta|target N
 python -m hoi4dbg.live reset political_power
-python -m hoi4dbg.live auto political_power [seconds]
+python -m hoi4dbg.live auto all|field[,field...] [seconds] [--use-newest]
 python -m hoi4dbg.live check political_power [seconds]
 """
 
@@ -21,6 +21,7 @@ from ..integration.hoi4 import Hoi4Integration
 from ..reports import ReportStore
 from ..saves.reader import SaveAnalyzer, SaveSnapshotter
 from ..service import DebuggerService
+from . import console
 from .service import LiveError, LiveService
 
 
@@ -40,46 +41,60 @@ def stamp(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
-def auto(live: LiveService, field: str, duration: float) -> None:
-    """Calibrates from the evidence the tester produces in game: a fresh save starts the scan,
-    each documented console command and each newer save refines it. Once confirmed, every further
-    command/save is used as an independent check of the live value."""
+QUIET = ("already_confirmed", "no_command", "no_new_save", "stale_save", "save_in_progress", "unit_unverified")
+
+
+def auto(live: LiveService, fields: list[str], duration: float, use_newest: bool = False) -> None:
+    """Calibrates from the evidence the tester produces in game: a fresh save starts one scan for all
+    fields, each documented console command (verified units only) and each newer save refines them.
+    Once confirmed, every further step is an independent check of the live value."""
     end = time.time() + duration
-    started_at = time.time()
-    last_live = None
+    # Only saves written after start trigger a scan, unless the newest save of the running game may be used
+    # (the tester confirms the game stayed paused since it was written).
+    scanned_save = 0.0 if use_newest else time.time()
+    last_live: dict[str, float] = {}
     last_error = None
     while time.time() < end:
-        st = live.status()
-        cal = st["calibrations"].get(field)
         try:
-            if cal is None or not cal["current_process"] or cal["state"] == "failed":
-                save = live._fresh_save(live._process())
-                if save["file"]["mtime"] > started_at:
-                    stamp(f"fresh save {save['file']['name']} -> scanning memory")
-                    t = time.time()
-                    res = live.start_calibration(field, background=False)
-                    c = res["calibrations"].get(field) or {}
-                    stamp(f"scan done in {time.time() - t:.0f}s: {c.get('message') or res['job']}")
-                    print("SCAN_DONE", flush=True)
-            else:
+            cals = live.status()["calibrations"]
+            for field in fields:
+                cal = cals.get(field)
+                if cal is None or cal["state"] == "failed":
+                    continue
                 for source in ("command", "save"):
                     try:
-                        before = last_live
                         res = live.refine_calibration(field, source)
-                        stamp(f"refine {source}: {res['steps'][-1]['source']} -> {res['message']}")
-                        if res["state"] == "confirmed":
-                            now = live.read(field)
-                            stamp(f"LIVE {field} = {now['value']} ({now['encoding']}, {now['copies']} copies)"
-                                  + (f"; previous live {before}" if before is not None else ""))
-                            last_live = now["value"]
+                        stamp(f"{field} refine {source}: {res['steps'][-1]['source']} -> {res['message']}")
+                        if source == "save" and res.get("unit_evidence"):
+                            stamp(f"  {field} unit evidence: {res['unit_evidence'][-1]}")
                     except LiveError as exc:
-                        if exc.code not in ("no_command", "no_new_save", "stale_save", "save_in_progress"):
-                            stamp(f"refine {source}: {exc.code}: {exc}")
-                if cal["state"] == "confirmed":
+                        if exc.code not in QUIET:
+                            stamp(f"{field} refine {source}: {exc.code}: {exc}")
+                if live.status()["calibrations"].get(field, {}).get("state") == "confirmed":
                     v = live.read(field)["value"]
-                    if v != last_live:
-                        stamp(f"LIVE {field} changed: {last_live} -> {v}")
-                        last_live = v
+                    if v != last_live.get(field):
+                        stamp(f"LIVE {field}: {last_live.get(field)} -> {v}")
+                        last_live[field] = v
+            # Fields without a usable calibration: one scan per new save of the running game.
+            cals = live.status()["calibrations"]
+            pending = [f for f in fields if f not in cals or cals[f]["state"] == "failed"]
+            if pending:
+                save = live._fresh_save(live._process())
+                if save["file"]["mtime"] > scanned_save:
+                    scanned_save = save["file"]["mtime"]
+                    stamp(f"fresh save {save['file']['name']} -> scanning memory for {', '.join(pending)}")
+                    t = time.time()
+                    try:
+                        res = live.start_calibrations(pending, background=False)
+                    except LiveError as exc:
+                        stamp(f"scan skipped: {exc.code}: {exc}")
+                    else:
+                        stamp(f"scan done in {time.time() - t:.0f}s; skipped: {res['job'].get('skipped')}")
+                        for f in pending:
+                            if f in res["calibrations"]:
+                                stamp(f"  {f}: {res['calibrations'][f]['message']}")
+                        print("SCAN_DONE", flush=True)
+            last_error = None
         except LiveError as exc:
             if exc.code not in ("stale_save", "save_in_progress") and str(exc) != last_error:
                 stamp(f"{exc.code}: {exc}")
@@ -144,7 +159,9 @@ def main(argv: list[str]) -> int:
         elif cmd == "check":
             check(live, args[0], float(args[1]) if len(args) > 1 else 1800)
         elif cmd == "auto":
-            auto(live, args[0], float(args[1]) if len(args) > 1 else 1800)
+            fields = list(console.COMMANDS) if args[0] == "all" else args[0].split(",")
+            rest = [a for a in args[1:] if a != "--use-newest"]
+            auto(live, fields, float(rest[0]) if rest else 1800, use_newest="--use-newest" in args)
         else:
             print(__doc__)
             return 2

@@ -19,7 +19,7 @@ Legenda: ✅ zrobione · 🟡 w toku / częściowo · ⏳ zaplanowane · ⛔ wym
 |---|---|---|
 | 1 | Aplikacja desktopowa, UI (9 zakładek), logi, testy, dokumentacja | ✅ |
 | 2 | Wykrywanie procesu HOI4 i wersji gry | ✅ |
-| 3 | Wiarygodny odczyt danych z aktywnej rozgrywki | 🟡 zapisy ✅; **PP z pamięci procesu ✅ (tylko odczyt, po kalibracji)**; pozostałe pola z pamięci ❌ |
+| 3 | Wiarygodny odczyt danych z aktywnej rozgrywki | 🟡 zapisy ✅; z pamięci (po kalibracji): PP, stabilność, poparcie wojny, CP ✅; manpower, paliwo, doświadczenie ❌ |
 | 4 | Prototyp modyfikacji pojedynczej wartości (SP) + weryfikacja | ✅ PP: zmiana z aplikacji (komenda `pp` + weryfikacja w pamięci), sprawdzone w grze; MP nietestowane |
 | 5 | Edytory państw, stanów, sprzętu | ⏳ |
 | 6 | Cele narodowe, narzędzia debugowania | ⏳ |
@@ -270,3 +270,35 @@ Liczba tylko w stanie LIVE (i przekreślona jako STALE).
 - Ograniczenia: tester musi wpisać komendę sam; działa na kraj gracza; gra musi być na pauzie (inaczej dzienny przyrost
   daje `mismatch`); MP nietestowane.
 - Testy: backend 117 OK, JS 24 OK, smoke 18/18 (z uruchomioną grą: karta pokazuje LIVE 760.300).
+
+---
+
+## Etap 5 (część 1): kolejne pola Country Editor z pamięci (2026-10-09) 🟡
+
+- Jeden skan pamięci dla wielu pól (`start_calibrations`, `python -m hoi4dbg.live auto all [--use-newest]`).
+- Komendy z dokumentacji gry: `add_stability` (`st`), `add_war_support` (`ws`), `cp`, `fuel`, `manpower`, `xp`
+  (zmienia doświadczenie armii, floty i lotnictwa naraz). Jednostki argumentów nie są opisane w dokumentacji →
+  do czasu weryfikacji pole kalibruje się tylko z zapisów, a zmiana z aplikacji jest zablokowana (`unit_unverified`).
+- **Jednostki zweryfikowane parami zapisów (gra na pauzie):** stabilność i poparcie wojny 1 = 0.01 (−5 → −0.05, +3 → +0.03),
+  CP 1 = 1 (−5, +3), manpower 1 = 1 (+10000, +5000), `xp` 1 = 1 (+10, jedna obserwacja). Paliwo – niezweryfikowane.
+- Skan z tolerancją wynikającą z liczby cyfr w zapisie (wartości stałoprzecinkowe zapisywane są skrócone, np. `760.3`,
+  a liczby zmiennoprzecinkowe z 5 miejscami, np. `304092.84835`); dodane kodowania `int32`/`int64`; dla float uwzględniany
+  krok reprezentacji (float32 przy 1.2e8 = 8).
+
+**Wynik w grze (PID 28728):** potwierdzone, każde 1 adres, `fixed64_100000`, 3 różne wartości:
+PP 760.3 → 764.3 → 766.3; stabilność 0.75 → 0.70 → 0.73; poparcie wojny 0.35 → 0.30 → 0.33; CP 76.682 → 71.682 → 74.682.
+Stabilność, poparcie wojny i CP leżą w jednym obiekcie państwa (adresy różnią się o 8 B i ~0xEE0 B).
+
+**Nierozwiązane**
+- Manpower: jedyny kandydat (`int32` w obiekcie państwa) to kopia odświeżana z opóźnieniem – po `manpower 5000`
+  zapis pokazał +5000, pamięć nie. Kalibracja słusznie go odrzuciła. Ponowny skan (float32) przerwany przez brak zapisu tekstowego.
+- Paliwo i doświadczenie: brak trafienia w żadnym kodowaniu (także z tolerancją) i brak w promieniu 256 KB od obiektu państwa.
+  Prawdopodobnie inne przechowywanie (osobny obiekt / inna skala) – do zbadania.
+- Ok. 17:44 gra (ten sam proces, `save_as_binary=yes` bez zmian, uruchomiona z `-force_text_save`) zaczęła zapisywać
+  binarnie, także przy `savegame`. Przyczyna nieznana. Bez zapisu tekstowego nie da się kalibrować kolejnych pól.
+- Zmiana z aplikacji dla stabilności, poparcia wojny i CP działa w testach jednostkowych; **w grze nie testowana**.
+
+**Naprawy w tej części:** potwierdzona kalibracja nie jest już „zawężana” starymi komendami (wcześniej zniszczyło to
+potwierdzone PP po 18 dniach gry); tryb `auto` nie pomija zapisu zrobionego tuż przed startem (`--use-newest`).
+
+**Testy (2026-10-09):** backend 121 OK, JS 24 OK, smoke 18/18 (z grą: PP/stabilność/poparcie/CP jako LIVE, reszta UNVERIFIED).

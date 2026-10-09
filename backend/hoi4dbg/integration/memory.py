@@ -57,11 +57,30 @@ class MemoryAccessError(OSError):
 
 
 @dataclass(frozen=True)
+class Needle:
+    """Bytes to search for. The value itself starts `offset` bytes before the match; when lo/hi are set,
+    every match is checked by decoding the whole value (prefix needles for tolerance searches)."""
+    data: bytes
+    align: int
+    offset: int = 0
+    size: int = 0
+    encoding: "Encoding | None" = None
+    lo: float | None = None
+    hi: float | None = None
+
+    def accepts(self, raw: bytes) -> bool:
+        if self.encoding is None or self.lo is None:
+            return True
+        value = self.encoding.unpack(raw)
+        return self.lo <= value <= self.hi
+
+
+@dataclass(frozen=True)
 class Encoding:
     """How a decimal game value might be stored. `pack` returns the exact bytes for a value."""
     name: str
     fmt: str
-    scale: int | None  # fixed-point scale; None = IEEE float
+    scale: int | None  # fixed-point scale (1 = plain integer); None = IEEE float
 
     @property
     def size(self) -> int:
@@ -79,10 +98,44 @@ class Encoding:
         raw = struct.unpack("<" + self.fmt, data)[0]
         return raw if self.scale is None else raw / self.scale
 
+    def needle(self, value: float, tolerance: float = 0.0) -> Needle | None:
+        """Search pattern for a value known to +-tolerance (e.g. a save value printed with N decimals).
+
+        Fixed point: only if the value is representable at this scale (else this cannot be the encoding).
+        Float: the high-order bytes shared by value-tolerance and value+tolerance, verified on each match.
+        Zero / unrepresentable / too unspecific (< 3 bytes) -> None."""
+        lo, hi = value - tolerance, value + tolerance
+        if self.scale is not None:
+            scaled = value * self.scale
+            if abs(scaled - round(scaled)) > tolerance * self.scale + 1e-9:
+                return None
+            exact = self.pack(value)
+            if exact is None or not exact.strip(b"\0"):
+                return None
+            return Needle(exact, self.size, 0, self.size, self, lo, hi)
+        nearest = self.pack(value)
+        if nearest is None:
+            return None
+        # A float field holds the nearest representable value, which may lie outside the save's precision
+        # (float32 at 1.2e8 has a step of 8): widen the window to include it.
+        near = self.unpack(nearest)
+        lo, hi = min(lo, near), max(hi, near)
+        a, b = self.pack(lo), self.pack(hi)
+        if a is None or b is None:
+            return None
+        common = 0
+        while common < self.size and a[self.size - 1 - common] == b[self.size - 1 - common]:
+            common += 1
+        if common < 3 or not a[self.size - common:].strip(b"\0"):
+            return None
+        return Needle(a[self.size - common:], self.size, self.size - common, self.size, self, lo, hi)
+
 
 # Candidate encodings. Clausewitz games store most values as fixed point; which one a field
 # uses in 1.19.3 is decided by calibration evidence, not by this list.
 ENCODINGS: dict[str, Encoding] = {e.name: e for e in (
+    Encoding("int32", "i", 1),
+    Encoding("int64", "q", 1),
     Encoding("fixed32_1000", "i", 1000),
     Encoding("fixed64_1000", "q", 1000),
     Encoding("fixed64_100000", "q", 100000),
@@ -137,16 +190,18 @@ class ProcessMemory:
         return buf.raw
 
 
-def scan(memory, needles: dict[str, tuple[bytes, int]], chunk: int = 32 << 20,
+def scan(memory, needles: dict[str, "Needle | tuple[bytes, int]"], chunk: int = 32 << 20,
          progress: Callable[[int, int], None] | None = None, limit: int = 200_000) -> dict[str, list[int]]:
-    """Finds every aligned occurrence of each needle {key: (bytes, alignment)} in the scannable regions.
+    """Finds every aligned value matching each needle in the scannable regions -> {key: [value address]}.
 
-    `memory` needs regions() and read(); chunks overlap so values on chunk borders are found.
+    `memory` needs regions() and read(); chunks overlap so values on chunk borders are found once.
+    A plain (bytes, alignment) tuple is an exact needle.
     """
+    needles = {k: (v if isinstance(v, Needle) else Needle(v[0], v[1], 0, len(v[0]))) for k, v in needles.items()}
     regions = list(memory.regions())
     total = sum(size for _, size in regions) or 1
     done = 0
-    overlap = max((len(n) for n, _ in needles.values()), default=1) - 1
+    overlap = max((max(n.size, len(n.data) + n.offset) for n in needles.values()), default=1)
     hits: dict[str, list[int]] = {key: [] for key in needles}
     for base, size in regions:
         offset = 0
@@ -154,13 +209,16 @@ def scan(memory, needles: dict[str, tuple[bytes, int]], chunk: int = 32 << 20,
             n = min(chunk, size - offset)
             data = memory.read(base + offset, min(n + overlap, size - offset))
             if data:
-                for key, (needle, align) in needles.items():
+                for key, nd in needles.items():
                     found = hits[key]
-                    i = data.find(needle)
-                    while i != -1 and i < n and len(found) < limit:
-                        if (base + offset + i) % align == 0:
-                            found.append(base + offset + i)
-                        i = data.find(needle, i + 1)
+                    i = data.find(nd.data)
+                    while i != -1 and len(found) < limit:
+                        start = i - nd.offset
+                        if start >= n:
+                            break
+                        if start >= 0 and (base + offset + start) % nd.align == 0                                 and nd.accepts(data[start:start + nd.size]):
+                            found.append(base + offset + start)
+                        i = data.find(nd.data, i + 1)
             offset += n
             done += n
             if progress:
@@ -168,10 +226,10 @@ def scan(memory, needles: dict[str, tuple[bytes, int]], chunk: int = 32 << 20,
     return hits
 
 
-def needles_for(value: float, encodings: dict[str, Encoding] = ENCODINGS) -> dict[str, tuple[bytes, int]]:
+def needles_for(value: float, encodings: dict[str, Encoding] = ENCODINGS, tolerance: float = 0.0) -> dict[str, Needle]:
     out = {}
     for name, enc in encodings.items():
-        packed = enc.pack(value)
-        if packed is not None and packed.strip(b"\0"):  # zero would match everywhere
-            out[name] = (packed, enc.size)
+        nd = enc.needle(value, tolerance)
+        if nd is not None:
+            out[name] = nd
     return out
