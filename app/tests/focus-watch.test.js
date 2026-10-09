@@ -9,7 +9,7 @@ test('no alert while a focus is running', () => {
 });
 
 test('completion with nothing selected names the next planned focus', () => {
-  const data = { ...running, idle: true, current: null, event: { completed: 'SOV_heavy_industry', name: 'Heavy Industry' } };
+  const data = { ...running, idle: true, current: null, event: { id: 'e0', completed: 'SOV_heavy_industry', name: 'Heavy Industry' } };
   assert.equal(focusAlert({ idle: false }, data).message,
     'Completed: Heavy Industry. Start next: Infrastructure Effort (35 days).');
 });
@@ -22,6 +22,13 @@ test('idle alert only once, and an empty plan is said so', () => {
 });
 
 test('completion followed by an immediately chosen focus still reports the completion', () => {
-  const data = { idle: false, current: 'SOV_x', event: { completed: 'SOV_heavy_industry', name: 'Heavy Industry' } };
+  const data = { idle: false, current: 'SOV_x', event: { id: 'e1', completed: 'SOV_heavy_industry', name: 'Heavy Industry' } };
   assert.equal(focusAlert({ idle: false }, data).message, 'Completed: Heavy Industry.');
+});
+
+test('a kept event is announced once (backend keeps it for all pollers)', () => {
+  const data = { ...running, idle: true, current: null, event: { id: 'e1', completed: 'SOV_heavy_industry', name: 'Heavy Industry' } };
+  const first = focusAlert({ idle: false }, data);
+  assert.ok(first.message);
+  assert.equal(focusAlert(first.next, data).message, null);
 });

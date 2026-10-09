@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyLive, formatLiveValue } from '../renderer/lib/live.js';
+import { classifyLive, formatLiveValue, toValueUnits } from '../renderer/lib/live.js';
 
 const okStatus = { process: { pid: 1 }, error: null };
 const live = { status: 'live', value: 712.324, encoding: 'fixed32_1000', copies: 1, read_at: 100 };
@@ -36,4 +36,12 @@ test('an old read turns STALE instead of looking live', () => {
   assert.equal(stale.state, 'stale');
   assert.equal(stale.value, 712.324);
   assert.equal(classifyLive({ value: null, error: { message: 'backend down' } }).state, 'error');
+});
+
+test('stability and war support are shown and typed in percent', () => {
+  assert.equal(formatLiveValue(0.71, 'stability'), '71%');
+  assert.equal(formatLiveValue(0.355, 'war_support'), '35.5%');
+  assert.equal(formatLiveValue(12.5, 'political_power'), '12.500');
+  assert.equal(toValueUnits(80, 'stability'), 0.8);
+  assert.equal(toValueUnits(5, 'command_power'), 5);
 });

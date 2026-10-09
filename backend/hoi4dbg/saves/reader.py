@@ -121,6 +121,10 @@ class SaveAnalyzer:
         key = (path.name, stat.st_size, stat.st_mtime_ns)
         with self._lock:
             cached = self._results.get(key)
+            # regression: the cached copy can be pruned when other saves are analysed (keep=3) -> copy again
+            if cached is not None and cached.get("copy") and not Path(cached["copy"]).exists():
+                del self._results[key]
+                cached = None
             if cached is not None:
                 return copy_module.deepcopy(cached)
         result: dict = {

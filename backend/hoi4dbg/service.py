@@ -313,15 +313,17 @@ class DebuggerService:
         tracks = getattr(self, "_focus_tracks", None)
         if tracks is None:
             tracks = self._focus_tracks = {}
-        track = tracks.setdefault((tag, state["tree"]), {"seen": None})
-        event = None
+        track = tracks.setdefault((tag, state["tree"]), {"seen": None, "event": None})
         if track["seen"] is not None:
             new = [f for f in live["completed"] if f not in track["seen"]]
             if new:
-                event = {"completed": new[-1], "name": (by_id.get(new[-1]) or {}).get("name", new[-1]),
-                         "all": new}
+                # kept (not consumed): several pollers (watcher, focus view) must all see it; clients de-duplicate by id
+                track["event"] = {"id": f"{tag}:{new[-1]}:{len(live['completed'])}", "completed": new[-1],
+                                  "name": (by_id.get(new[-1]) or {}).get("name", new[-1]), "all": new,
+                                  "at": live["read_at"]}
                 self.log.info("Focus completed (live) %s: %s", tag, ", ".join(new))
         track["seen"] = set(live["completed"])
+        event = track["event"] if track["event"] and live["read_at"] - track["event"]["at"] < 600 else None
         done = list(dict.fromkeys(state["completed"] + live["completed"]))
         now = {"completed": done, "current": live["current"], "progress": live["progress_days"]}
         queue = focus_mod.validate_queue(focuses, now, self._focus_queues().get(f"{tag}:{state['tree']}", []))

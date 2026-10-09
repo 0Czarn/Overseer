@@ -1,11 +1,11 @@
 // Live Political Power read from game memory (read-only) + calibration controls.
 // A number is shown only when the backend confirmed the memory location for the running process.
 import { h, card, keyValues, notice, scopeBadge, toast } from '../lib/dom.js';
-import { classifyLive, formatLiveValue } from '../lib/live.js';
+import { PERCENT_FIELDS, classifyLive, formatLiveValue, toValueUnits } from '../lib/live.js';
 
 const FIELD = 'political_power';
 const FIELD_LABELS = {
-  political_power: 'Political Power', stability: 'Stability', war_support: 'War Support',
+  political_power: 'Political Power', stability: 'Stability (base value)', war_support: 'War Support (base value)',
   command_power: 'Command Power', fuel: 'Fuel', manpower: 'Manpower',
   army_experience: 'Army XP', navy_experience: 'Navy XP', air_experience: 'Air XP',
 };
@@ -63,7 +63,13 @@ function changeSection(ctx, enabled) {
     Object.entries(FIELD_LABELS).map(([k, label]) => h('option', { value: k }, label)));
   const mode = h('select', { class: 'input input-small', 'aria-label': 'Change mode' },
     h('option', { value: 'delta' }, 'Add'), h('option', { value: 'target' }, 'Set to'));
-  const amount = h('input', { class: 'input input-small', type: 'number', step: 'any', value: '10', 'aria-label': 'Amount (value units; stability 0.05 = 5%)' });
+  const amount = h('input', { class: 'input input-small', type: 'number', step: 'any', value: '10', 'aria-label': 'Amount' });
+  const unit = h('span', { class: 'muted' });
+  // Stability / war support are typed in percent like in the game (Set to 80 = 80%); the backend works in 0..1.
+  const syncUnit = () => { unit.textContent = PERCENT_FIELDS.has(fieldSel.value) ? '%' : ''; };
+  fieldSel.addEventListener('change', syncUnit);
+  syncUnit();
+  const pct = (field, v) => (PERCENT_FIELDS.has(field) ? formatLiveValue(v, field) : v);
   const result = h('div');
   let pollTimer = null;
   let current = null;
@@ -75,7 +81,7 @@ function changeSection(ctx, enabled) {
     } }, 'Copy');
     const lines = [
       h('div', null, 'Command: ', h('code', { class: 'cmd' }, op.command), ' ', OP_DONE.includes(op.state) ? null : copy),
-      h('div', { class: 'muted' }, `${FIELD_LABELS[op.field] ?? op.field} ${op.tag}: ${op.before} -> expected ${op.expected}${op.actual !== undefined ? `, memory ${op.actual}` : ''}`),
+      h('div', { class: 'muted' }, `${FIELD_LABELS[op.field] ?? op.field} ${op.tag}: ${pct(op.field, op.before)} -> expected ${pct(op.field, op.expected)}${op.actual !== undefined ? `, memory ${pct(op.field, op.actual)}` : ''}`),
     ];
     if (OP_DONE.includes(op.state)) {
       result.replaceChildren(notice(OP_KIND[op.state], [h('b', null, op.state.toUpperCase()), ': ', op.message]), ...lines);
@@ -92,7 +98,8 @@ function changeSection(ctx, enabled) {
   const create = async () => {
     clearTimeout(pollTimer);
     try {
-      show(await ctx.api.post('/api/live/operations', { field: fieldSel.value, mode: mode.value, amount: Number(amount.value) }));
+      show(await ctx.api.post('/api/live/operations', { field: fieldSel.value, mode: mode.value,
+        amount: toValueUnits(Number(amount.value), fieldSel.value) }));
       ctx.api.log('info', `Live change prepared (${fieldSel.value}): ${current.command} (expected ${current.expected})`);
       pollTimer = setTimeout(poll, 1000);
     } catch (err) {
@@ -104,7 +111,7 @@ function changeSection(ctx, enabled) {
     notice('info', ['Changes the ', scopeBadge('shared'), '. The game must be PAUSED and the player country must be the one shown. '
       + 'The app prepares a documented console command (', h('code', null, 'pp'), ', ', h('code', null, 'add_stability'), ', ', h('code', null, 'cp'), ' …); you enter it in the game console; '
       + 'the result is verified by re-reading game memory. Game memory is never written.']),
-    h('div', { class: 'toolbar live-change' }, fieldSel, mode, amount,
+    h('div', { class: 'toolbar live-change' }, fieldSel, mode, amount, unit,
       h('button', { class: 'btn btn-small btn-primary', disabled: !enabled, onClick: create }, 'Prepare command')),
     enabled ? null : h('p', { class: 'muted' }, 'Available once the live value is confirmed (state LIVE).'),
     result);
@@ -121,7 +128,7 @@ function otherFields(last) {
     const info = classifyLive({ status: last.status, value: entry, fetchedAt: entry.status === 'live' ? now : NaN, now });
     return h('div', { class: `stat-tile live-mini live-${info.state}`, title: info.message },
       h('div', { class: 'stat-label' }, FIELD_LABELS[f]),
-      h('div', { class: 'stat-value' }, info.value !== undefined ? formatLiveValue(info.value) : '—'),
+      h('div', { class: 'stat-value' }, info.value !== undefined ? formatLiveValue(info.value, f) : '—'),
       h('div', { class: 'stat-source' }, info.label));
   }).filter(Boolean);
   return tiles.length ? h('div', { class: 'tile-grid live-grid' }, tiles) : null;

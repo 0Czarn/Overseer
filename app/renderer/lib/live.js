@@ -56,6 +56,16 @@ export function classifyLive({ status, value, error, fetchedAt, now }) {
     { value: value.value });
 }
 
-export function formatLiveValue(value) {
-  return Number.isFinite(value) ? value.toFixed(3) : '—';
+// Stored as 0..1 in game memory; the game shows them as percent.
+export const PERCENT_FIELDS = new Set(['stability', 'war_support']);
+
+export function formatLiveValue(value, field) {
+  if (!Number.isFinite(value)) return '—';
+  if (PERCENT_FIELDS.has(field)) return `${(value * 100).toFixed(1).replace(/\.0$/, '')}%`;
+  return value.toFixed(3);
+}
+
+/** Amount typed by the user (percent for stability/war support) -> value units used by the backend. */
+export function toValueUnits(amount, field) {
+  return PERCENT_FIELDS.has(field) ? amount / 100 : amount;
 }
