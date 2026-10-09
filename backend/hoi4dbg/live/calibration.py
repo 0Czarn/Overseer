@@ -203,10 +203,11 @@ def _read_many(memory, addrs: list[int], size: int):
 
 
 def tolerance_for(raw: str | None) -> float:
-    """Half of the last printed digit, at least 3 decimals: saves print fixed-point values trimmed
-    (`760.3` is exact) and doubles with 5 decimals (`304092.84835` is rounded)."""
+    """One unit of the last printed digit, at least 3 decimals: text saves print x100000 values trimmed
+    (`760.3` is exact) and x32768 values truncated to 5 decimals (`304092.84835` = 304092.848358...).
+    Binary-save values are exact (full repr), which gives a negligible tolerance."""
     decimals = len(raw.split(".", 1)[1]) if raw and "." in raw else 0
-    return 0.5 * 10 ** -max(decimals, 3)
+    return 10.0 ** -max(decimals, 3)
 
 
 def scan_many(memory, values: dict[str, tuple[float, float]], progress=None) -> dict[str, dict[str, list[int]]]:

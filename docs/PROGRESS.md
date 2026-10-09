@@ -302,3 +302,18 @@ Stabilność, poparcie wojny i CP leżą w jednym obiekcie państwa (adresy ró�
 potwierdzone PP po 18 dniach gry); tryb `auto` nie pomija zapisu zrobionego tuż przed startem (`--use-newest`).
 
 **Testy (2026-10-09):** backend 121 OK, JS 24 OK, smoke 18/18 (z grą: PP/stabilność/poparcie/CP jako LIVE, reszta UNVERIFIED).
+
+---
+
+## Etap 5 (część 2): wartości państwa z zapisów binarnych 1.19.3 (2026-10-09) 🟡
+
+- `saves/binvalues.py`: Country Editor czyta wartości także z zapisu **binarnego** gry 1.19.3 (mapa tokenów ustalona
+  na parze zapis tekstowy/binarny tej samej gry: 82/82 kluczy najwyższego poziomu zgodne). Inne wersje gry →
+  `binary_values_unmapped` (prośba o `-force_text_save`).
+- Typy wartości w zapisie binarnym: `0x000d` = int64/100000, `0x0167` = int64/**32768** (paliwo, doświadczenie;
+  zapis tekstowy obcina je do 5 miejsc), `0x0317` = int64.
+- Nowe kodowanie pamięci `fixed64_32768` – prawdopodobna przyczyna braku trafień dla paliwa i doświadczenia.
+  Tolerancja skanu = 1 jednostka ostatniej wypisanej cyfry (wartości obcinane, nie zaokrąglane).
+- **W grze jeszcze niesprawdzone.** Nowy proces gry (PID 24536) → wszystkie kalibracje do powtórzenia.
+
+**Testy (2026-10-09):** backend 122 OK, JS 24 OK.

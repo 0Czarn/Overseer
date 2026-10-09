@@ -69,7 +69,7 @@ class MemoryModuleTests(unittest.TestCase):
             if enc.scale == 1:
                 continue
             packed = enc.pack(12.324)
-            self.assertAlmostEqual(enc.unpack(packed), 12.324, places=5)
+            self.assertAlmostEqual(enc.unpack(packed), 12.324, places=4)
         self.assertEqual(ENCODINGS["fixed32_1000"].pack(12.324), struct.pack("<i", 12324))
         self.assertIsNone(ENCODINGS["fixed32_1000"].pack(1e12))  # does not fit: no needle, no crash
 
@@ -82,6 +82,10 @@ class MemoryModuleTests(unittest.TestCase):
         hits = scan(mem, needles_for(304092.84835, tolerance=0.000005))
         self.assertEqual({k: v for k, v in hits.items() if v}, {"float64": [BASE + 0x10]})
         self.assertNotIn("fixed64_1000", hits)  # x1000 cannot hold 5 decimals -> not searched at all
+        # x32768 (binary-save type of fuel/experience): the save truncates to 5 decimals, memory holds raw/32768
+        mem.put(BASE + 0x200, "q", 9964514455)  # 304092.848358...
+        hits = scan(mem, needles_for(304092.84835, tolerance=0.00001))
+        self.assertEqual(hits["fixed64_32768"], [BASE + 0x200])
         hits = scan(mem, needles_for(119692338.0, tolerance=0.0005))
         self.assertEqual(hits["int32"], [BASE + 0x80])
         self.assertNotIn("int32", needles_for(12.324, tolerance=0.0005))  # not an integer -> not an int field

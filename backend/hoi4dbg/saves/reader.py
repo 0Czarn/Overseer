@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from . import binary, fields, text
+from . import binary, binvalues, fields, text
 
 SAVE_SUFFIX = ".hoi4"
 SNIFF_BYTES = 16
@@ -169,15 +169,17 @@ class SaveAnalyzer:
         self.log.info("Save %s validated: %s (%s)", key[0], update["status"], update.get("message"))
 
     def country_values(self, path: Path, tag: str) -> dict:
-        """Country Editor values for `tag` from the cached copy of a text save."""
+        """Country Editor values for `tag` from the cached copy of a save (text, or binary 1.19.3)."""
         result = self.analyse(path)
         if result["error"]:
             raise binary.SaveFormatError(result["error"]["code"], result["error"]["message"])
-        if result["format"] != "text":
-            raise binary.SaveFormatError(
-                "binary_values_unmapped", "This save is binary. Country values are only mapped for text saves - "
-                "start the game with -force_text_save and save again.")
         data = Path(result["copy"]).read_bytes()
+        if result["format"] != "text":
+            values = binvalues.country_values(data, tag, result.get("float_width"),
+                                              (result.get("header") or {}).get("version"))
+            if values is None:
+                raise binary.SaveFormatError("country_missing", f"Country {tag} does not exist in this save")
+            return {"analysis": result, "values": values}
         block = text.country_block(data, tag)
         if block is None:
             raise binary.SaveFormatError("country_missing", f"Country {tag} does not exist in this save")

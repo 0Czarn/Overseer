@@ -11,6 +11,7 @@ Value encodings are hypotheses to be confirmed by calibration (see hoi4dbg/live/
 
 from __future__ import annotations
 
+import math
 import struct
 import sys
 from dataclasses import dataclass
@@ -106,11 +107,16 @@ class Encoding:
         Zero / unrepresentable / too unspecific (< 3 bytes) -> None."""
         lo, hi = value - tolerance, value + tolerance
         if self.scale is not None:
-            scaled = value * self.scale
-            if abs(scaled - round(scaled)) > tolerance * self.scale + 1e-9:
+            # The stored integer must lie in [lo, hi] * scale. One integer there -> that one (e.g. x32768 from a
+            # value printed with 5 decimals); several -> the printed value is exact at this scale; none -> not this encoding.
+            first, last = math.ceil(lo * self.scale - 1e-9), math.floor(hi * self.scale + 1e-9)
+            if first > last:
                 return None
-            exact = self.pack(value)
-            if exact is None or not exact.strip(b"\0"):
+            try:
+                exact = struct.pack("<" + self.fmt, first if first == last else round(value * self.scale))
+            except struct.error:
+                return None
+            if not exact.strip(b"\0"):
                 return None
             return Needle(exact, self.size, 0, self.size, self, lo, hi)
         nearest = self.pack(value)
@@ -139,6 +145,8 @@ ENCODINGS: dict[str, Encoding] = {e.name: e for e in (
     Encoding("fixed32_1000", "i", 1000),
     Encoding("fixed64_1000", "q", 1000),
     Encoding("fixed64_100000", "q", 100000),
+    # binary saves store fuel/experience as int64 / 32768 (see hoi4dbg/saves/binvalues.py)
+    Encoding("fixed64_32768", "q", 32768),
     Encoding("float32", "f", None),
     Encoding("float64", "d", None),
 )}

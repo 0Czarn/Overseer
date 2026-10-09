@@ -7,11 +7,13 @@ import unittest
 from pathlib import Path
 
 from hoi4dbg import applog
-from hoi4dbg.saves import binary, reader, text
+from hoi4dbg.saves import binary, binvalues, reader, text
+from hoi4dbg.saves import binary as b
+from hoi4dbg.saves import fields as f
 from hoi4dbg.service import NotFound
 
 from helpers import TempDirMixin, make_service
-from savebuilder import realistic_save
+from savebuilder import Builder, realistic_save
 from test_saves import FakeSaveIntegration, real_saves_dir
 
 # Shape copied from the real 1.19.3 text save PROJEKT-OVERSEER.hoi4 (values shortened).
@@ -198,12 +200,36 @@ class CountrySaveValuesServiceTests(TempDirMixin, unittest.TestCase):
         self.assertTrue(data["is_latest"])
         self.assertTrue(data["read_at"])
 
-    def test_binary_save_is_reported_as_unmapped(self):
-        self.write("GER.hoi4", realistic_save())
+    def test_binary_save_of_other_version_is_reported_as_unmapped(self):
+        self.write("GER.hoi4", realistic_save(version="Gotterdammerung v1.17.0.0 (abcd)"))
         payload = self.service().country_save_values("GER", None)
         self.assertEqual(payload["source"], "unavailable")
         self.assertEqual(payload["data"]["error"]["code"], "binary_values_unmapped")
         self.assertIn("-force_text_save", payload["note"])
+
+    def test_binary_1_19_3_country_values(self):
+        """Token ids and value types verified on a real text/binary pair (saves/binvalues.py)."""
+        T = binvalues.TOKENS
+        bld = Builder(8)
+        bld.key(f.VERSION).qstr("Operation Postern v1.19.3.0.c01a (5468)")
+        bld.key(T["countries"]).open().qstr("ENG").tok(b.EQUALS).open().key(T["stability"]).f(50000).close()
+        bld.qstr("GER").tok(b.EQUALS).open()
+        bld.key(T["politics"]).open().key(T["political_power"]).f(76630000).close()
+        bld.key(T["stability"]).f(73000).key(0x1234).i32(5)
+        bld.key(T["fuel_status"]).open().key(T["fuel"]).tok(b.F64)
+        bld.out += (9964514455).to_bytes(8, "little", signed=True)
+        bld.close()
+        bld.key(T["manpower"]).open().key(T["current"]).i32(119692338).close()
+        bld.close().close()
+        self.write("GER_bin.hoi4", bld.bytes())
+        payload = self.service().country_save_values("GER", None)
+        self.assertEqual(payload["source"], "save", payload)
+        values = payload["data"]["values"]
+        self.assertEqual(values["political_power"]["value"], 766.3)
+        self.assertEqual(values["stability"]["value"], 0.73)
+        self.assertAlmostEqual(values["fuel"]["value"], 304092.848358, places=5)
+        self.assertEqual(values["manpower"]["value"], 119692338)
+        self.assertEqual(values["command_power"]["status"], "absent")
 
     def test_missing_country_and_bad_tag(self):
         self.write("t.hoi4", TEXT_SAVE.encode())
