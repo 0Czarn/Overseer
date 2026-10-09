@@ -12,24 +12,32 @@ function amounts(obj) {
   return h('ul', { class: 'amounts' }, entries.map(([k, v]) => h('li', null, h('span', null, humanize(k)), h('b', null, v))));
 }
 
+const fmtInt = (v) => (v === null || v === undefined ? '—' : Math.round(v).toLocaleString());
+
 function detail(state) {
   if (!state) return notice('muted', 'Select a state to see details.');
   const occupied = state.owner !== state.controller;
+  const split = Object.keys(state.controllers ?? {}).length > 1;
   return [
     h('h3', null, state.name, ' ', h('code', { class: 'muted' }, state.id)),
     keyValues([
       ['Owner', tagChip(state.owner)],
       ['Controller', [tagChip(state.controller, occupied ? 'tag-chip-warn' : ''),
-        occupied ? h('span', { class: 'warn-text' }, ' controlled by another country') : null]],
+        occupied ? h('span', { class: 'warn-text' }, ' controlled by another country') : null,
+        split ? h('span', { class: 'muted' }, ` (provinces: ${Object.entries(state.controllers).map(([t, n]) => `${t} ${n}`).join(', ')})`) : null]],
       ['Cores', chips(state.cores)],
       ['Claims', chips(state.claims)],
-    ]),
+      state.category ? ['Category', humanize(state.category)] : null,
+      state.manpower ? ['Manpower pool', `${fmtInt(state.manpower.available)} available · ${fmtInt(state.manpower.locked)} locked · ${fmtInt(state.manpower.total)} total`] : null,
+      state.provinces ? ['Provinces', String(state.provinces)] : null,
+    ].filter(Boolean)),
     h('div', { class: 'two-col' },
-      h('div', null, h('h4', null, 'Buildings'), amounts(state.buildings)),
+      h('div', null, h('h4', null, 'State buildings'), amounts(state.buildings)),
       h('div', null, h('h4', null, 'Resources'), amounts(state.resources))),
-    h('p', { class: 'hint' }, 'Modded buildings and resources will be listed here once live reading '
-      + 'confirms how they appear in the game data.'),
-  ];
+    state.province_buildings ? h('div', null, h('h4', null, 'Province buildings (sum of levels)'), amounts(state.province_buildings)) : null,
+    h('p', { class: 'hint' }, 'Buildings and resources are listed by the names the save uses, including ones added by mods. '
+      + 'Names shown as #xxxx are binary-save codes not mapped yet.'),
+  ].filter(Boolean);
 }
 
 export default {
@@ -53,7 +61,8 @@ export default {
         { key: 'controller', label: 'Controller',
           render: (s) => tagChip(s.controller, s.controller !== s.owner ? 'tag-chip-warn' : '') },
         { key: 'cores', label: 'Cores', render: (s) => chips(s.cores) },
-      ], rows, { selectedKey: selected, onRowClick: (s) => { selected = s.id; rerender(); }, empty: 'No states match' }));
+      ], rows.slice(0, 400), { selectedKey: selected, onRowClick: (s) => { selected = s.id; rerender(); }, empty: 'No states match' }),
+      ...(rows.length > 400 ? [h('p', { class: 'hint' }, `Showing 400 of ${rows.length} states - use the filter or the country selector.`)] : []));
       detailHost.replaceChildren(...[detail(res.data.find((s) => s.id === selected))].flat());
     };
     rerender();
@@ -61,7 +70,7 @@ export default {
     root.append(
       viewHeader('State Editor', 'Owner vs controller, buildings, resources, cores and claims.',
         sourceBadge(res.source, res.note)),
-      res.source === 'demo' ? demoBanner(res.note) : null,
+      res.source === 'demo' ? demoBanner(res.note) : h('p', { class: 'hint' }, res.note),
       h('div', { class: 'split' },
         card('States', [
           h('div', { class: 'toolbar' },

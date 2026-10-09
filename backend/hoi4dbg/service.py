@@ -15,6 +15,7 @@ from .applog import RingBufferHandler
 from .integration import GameIntegration, NullIntegration
 from .reports import ReportStore
 from .saves import fields as save_fields
+from .saves import states as save_states
 from .saves.binary import SaveFormatError
 from .saves.reader import SaveAnalyzer, list_saves
 
@@ -200,11 +201,28 @@ class DebuggerService:
                         "values come from /save-values and live memory.")
 
     def states(self, owner: str | None = None) -> dict:
-        items = demo.states()
+        """States of the newest save (snapshot) with names and provinces from the game files; DEMO without them."""
+        install = self._install_path()
+        picked = self._pick_save(None)
+        items, note, source = None, None, DEMO
+        if install and picked is not None:
+            try:
+                data = self.saves.states(picked[0])
+            except SaveFormatError as exc:
+                note = f"States not read from {picked[0].name}: {exc}"
+            else:
+                items = save_states.assemble(data, gamefiles.state_definitions(install), gamefiles.state_names(install))
+                header = data["analysis"].get("header") or {}
+                source = SAVE
+                note = (f"{len(items)} states from {picked[0].name} ({(header.get('date') or {}).get('text') or 'date unknown'})"
+                        "; names and provinces from the game files. Snapshot - not live.")
+        if items is None:
+            items = demo.states()
+            note = f"{note} {DEMO_NOTE}" if note else DEMO_NOTE
         if owner:
             owner = owner.upper()
             items = [s for s in items if owner in (s["owner"], s["controller"])]
-        return envelope(DEMO, items, DEMO_NOTE)
+        return envelope(source, items, note)
 
     def focus(self, tag: str) -> dict:
         return envelope(DEMO, {"tag": tag.upper(), "focuses": demo.focuses(tag), "queue_supported": False},

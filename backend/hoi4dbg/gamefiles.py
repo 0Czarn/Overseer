@@ -41,3 +41,33 @@ def _country_names(install: str, lang: str) -> tuple[tuple[str, str], ...]:
             for tag, name in NAME_LINE.findall(path.read_text(encoding="utf-8-sig", errors="replace")):
                 names.setdefault(tag, name)
     return tuple(names.items())
+
+
+STATE_ID = re.compile(r"\bid\s*=\s*(\d+)")
+STATE_NAME = re.compile(r'\bname\s*=\s*"([^"]+)"')
+STATE_PROVINCES = re.compile(r"\bprovinces\s*=\s*\{([^}]*)\}")
+STATE_NAME_LINE = re.compile(r'^\s*(STATE_\d+):\d*\s*"(.*)"', re.M)
+
+
+def state_definitions(install: Path) -> dict[int, dict]:
+    """State id -> {"name_key", "provinces"} from history/states/*.txt."""
+    return dict(_state_definitions(str(install)))
+
+
+@lru_cache(maxsize=2)
+def _state_definitions(install: str) -> tuple:
+    out = {}
+    for path in sorted((Path(install) / "history" / "states").glob("*.txt")):
+        text = re.sub(r"#[^\n]*", "", path.read_text(encoding="utf-8-sig", errors="replace"))
+        sid, name, provs = STATE_ID.search(text), STATE_NAME.search(text), STATE_PROVINCES.search(text)
+        if sid:
+            out[int(sid.group(1))] = {"name_key": name.group(1) if name else None,
+                                     "provinces": [int(x) for x in provs.group(1).split() if x.isdigit()] if provs else []}
+    return tuple(out.items())
+
+
+def state_names(install: Path, lang: str = "english") -> dict[str, str]:
+    path = Path(install) / "localisation" / lang / f"state_names_l_{lang}.yml"
+    if not path.is_file():
+        return {}
+    return dict(STATE_NAME_LINE.findall(path.read_text(encoding="utf-8-sig", errors="replace")))

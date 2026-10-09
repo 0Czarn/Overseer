@@ -421,3 +421,19 @@ gubione przy restarcie) i szybka kalibracja z zapamiętanego układu (`python -m
 - Ograniczenia: sprawdzone w jednym procesie gry (3 stany); odstęp w obiekcie, jak pozostałe pola, powinien być
   stały po restarcie – do potwierdzenia przy najbliższym uruchomieniu. MP nietestowane.
 - Testy: backend 145 OK (gracz z flagi zamiast starego zapisu; zapas, gdy flaga nieczytelna), JS 24 OK, smoke 18/18.
+
+---
+
+## Krok D (część 1): State Editor z zapisu (2026-10-09) ✅
+
+- `saves/states.py` + `gamefiles.state_definitions/state_names`: 1081 stanów – właściciel, kontroler (z prowincji;
+  zapis podaje go tylko tam, gdzie różni się od właściciela), budynki stanu i prowincji, zasoby, kategoria,
+  pula manpower (available/locked/total), rdzenie i roszczenia (z bloków państw), nazwy i prowincje z plików gry.
+- Tokeny binarne 1.19.3 ustalone automatycznym dopasowaniem struktury pary tekst/binarny (11.hoi4 / 2-1.hoi4):
+  provinces 0x2830, controller 0x283f, buildings 0x2f59, level 0x286c, manpower_pool 0x3635, resources 0x2e42,
+  cores 0x3361, claims 0x3360; nazwy budynków/zasobów częściowo jako tokeny (głosowanie po 1032/534/… stanach),
+  częściowo jako tekst. **Kontrola: 0 różnic** między zapisem tekstowym a binarnym dla wszystkich 1081 stanów.
+- UI: State Editor bez DEMO (lista, filtr po państwie, szczegóły; lista do 400 wierszy z informacją).
+  Budynki i zasoby wg nazw z zapisu – także dodane przez mody; nieznane tokeny jako `#xxxx`.
+- Migawka z najnowszego zapisu (nie na żywo); edycja stanów – niedostępna.
+- Testy: backend 148 OK (zapis tekstowy i binarny, odrzucenie innej wersji), JS 24 OK, smoke 18/18.
