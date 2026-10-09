@@ -27,7 +27,8 @@ COMMANDS: dict[str, dict] = {
                         "integer_only": True, "max_abs": 5000},
     # Units verified 2026-10-09 from save pairs (game paused): `add_stability -5` -> -0.05, `add_stability 3` -> +0.03;
     # same for add_war_support; `cp -5` -> -5, `cp 3` -> +3; `manpower 10000` -> +10000, `manpower 5000` -> +5000;
-    # `xp 10` -> +10 army, navy and air experience (one observation).
+    # `xp 10` -> +10 army, navy and air experience (one observation); `xp 10`, `xp 5` confirmed again in a new process.
+    # `fuel 1000` -> +1000, `fuel 500` -> +500 (saves runda 1 / runda 2, PID 24536).
     "stability": {"command": "add_stability", "aliases": ("st",), "factor": 0.01,
                   "doc": "add_stability (st) - Gives/removes stability from player (argument: unity amount)",
                   "integer_only": True, "max_abs": 100},
@@ -37,7 +38,7 @@ COMMANDS: dict[str, dict] = {
     "command_power": {"command": "cp", "aliases": (), "factor": 1.0,
                       "doc": "cp - Gives command power to player (argument: CP amount)",
                       "integer_only": True, "max_abs": 1000},
-    "fuel": {"command": "fuel", "aliases": ("army_juice",), "factor": None,
+    "fuel": {"command": "fuel", "aliases": ("army_juice",), "factor": 1.0,
              "doc": "fuel (army_juice) - Adds/removes fuel to the player (argument: Fuel amount)",
              "integer_only": True, "max_abs": 10_000_000},
     "manpower": {"command": "manpower", "aliases": (), "factor": 1.0,

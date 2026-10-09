@@ -250,7 +250,7 @@ Liczba tylko w stanie LIVE (i przekreślona jako STALE).
 
 **Ograniczenia**
 - Po każdym uruchomieniu gry kalibrację trzeba powtórzyć (adres sterty zmienia się); powtarzalność w nowym procesie
-  niesprawdzona. Wczytanie innego zapisu w tym samym procesie prawdopodobnie unieważnia adres (wykrywane jako
+  niesprawdzona. [Etap 5.2: wczytanie zapisu w tym samym procesie NIE unieważnia adresu.] Wczytanie innego zapisu w tym samym procesie prawdopodobnie unieważnia adres (wykrywane jako
   `unreadable`/zmiana wartości dopiero przy weryfikacji – niesprawdzone).
 - Tylko PP i tylko kraj gracza. Wymaga zapisu tekstowego (`-force_text_save`) jako źródła wartości bazowej.
 - MP: nietestowane. Odczyt pamięci pokazuje stan lokalnego klienta.
@@ -305,7 +305,7 @@ potwierdzone PP po 18 dniach gry); tryb `auto` nie pomija zapisu zrobionego tuż
 
 ---
 
-## Etap 5 (część 2): wartości państwa z zapisów binarnych 1.19.3 (2026-10-09) 🟡
+## Etap 5 (część 2): zapisy binarne 1.19.3 + kalibracja 9 pól w grze (2026-10-09) ✅
 
 - `saves/binvalues.py`: Country Editor czyta wartości także z zapisu **binarnego** gry 1.19.3 (mapa tokenów ustalona
   na parze zapis tekstowy/binarny tej samej gry: 82/82 kluczy najwyższego poziomu zgodne). Inne wersje gry →
@@ -314,6 +314,17 @@ potwierdzone PP po 18 dniach gry); tryb `auto` nie pomija zapisu zrobionego tuż
   zapis tekstowy obcina je do 5 miejsc), `0x0317` = int64.
 - Nowe kodowanie pamięci `fixed64_32768` – prawdopodobna przyczyna braku trafień dla paliwa i doświadczenia.
   Tolerancja skanu = 1 jednostka ostatniej wypisanej cyfry (wartości obcinane, nie zaokrąglane).
-- **W grze jeszcze niesprawdzone.** Nowy proces gry (PID 24536) → wszystkie kalibracje do powtórzenia.
+- Sprawdzone w grze (poniżej).
+
+**Wynik w grze (SP, GER, PID 24536, nowy proces → kalibracja od zera):** jeden skan pamięci dla 9 pól (354 s),
+dwie rundy komend + zapis po każdej → **wszystkie 9 pól potwierdzone**, każde 1 adres, 3 różne wartości:
+PP, stabilność, poparcie wojny, CP – `fixed64_100000`; manpower – `int32` (tym razem zmienia się od razu po komendzie);
+paliwo i doświadczenie armii/floty/lotnictwa – `fixed64_32768`.
+- Jednostka `fuel` zweryfikowana (1000 → +1000, 500 → +500) → zmiana paliwa z aplikacji odblokowana.
+- Zmiana z aplikacji (konsola, weryfikacja w pamięci) – **confirmed** w grze: stabilność 0.71 → 0.75, poparcie wojny
+  0.34 → 0.31, CP 72.682 → 74.682, paliwo 305 593 → 306 293.
+- Gra bez pauzy: odczyt śledzi dzienne przyrosty (PP +1.344/dzień, manpower −22/dzień, paliwo co godzinę).
+- **Wczytanie zapisu w tym samym procesie nie unieważnia adresów**: po wczytaniu „runda 2” wartości na chwilę 0,
+  potem dokładnie stan zapisu. Kontrola niezależna (zapis `kontrola.hoi4` vs pamięć): 9/9 PASS, różnica 0.
 
 **Testy (2026-10-09):** backend 122 OK, JS 24 OK.
