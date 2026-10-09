@@ -1,0 +1,18 @@
+{
+  "name": "hoi4-debugger",
+  "version": "0.1.0",
+  "description": "Desktop debugger for live Hearts of Iron IV sessions",
+  "private": true,
+  "type": "module",
+  "main": "app/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "npm run test:py && npm run test:js",
+    "test:py": "cd backend && python -m unittest discover -s tests",
+    "test:js": "node --test \"app/tests/*.test.js\"",
+    "smoke": "node app/tests/smoke-run.mjs"
+  },
+  "devDependencies": {
+    "electron": "44.4.5"
+  }
+}

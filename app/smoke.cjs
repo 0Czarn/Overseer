@@ -1,0 +1,69 @@
+'use strict';
+// Smoke test driver (HOI4DBG_SMOKE_DIR set): visits every tab, captures screenshots,
+// records renderer console errors, writes result.json and quits.
+
+const fs = require('node:fs');
+const path = require('node:path');
+
+const TABS = ['dashboard', 'countries', 'country-editor', 'state-editor', 'focus', 'equipment', 'tools',
+  'intel', 'logs'];
+const SIZES = [{ name: 'wide', width: 1320, height: 860 }, { name: 'narrow', width: 480, height: 820 }];
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function waitFor(webContents, expression, timeoutMs = 8000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (await webContents.executeJavaScript(expression)) return true;
+    await sleep(100);
+  }
+  return false;
+}
+
+function runSmoke(win, outDir, quit) {
+  fs.mkdirSync(outDir, { recursive: true });
+  const consoleErrors = [];
+  const wc = win.webContents;
+  wc.on('console-message', (event, legacyLevel, legacyMessage) => {
+    const level = event.level ?? (legacyLevel === 3 ? 'error' : String(legacyLevel));
+    const message = event.message ?? legacyMessage;
+    if (level === 'error') consoleErrors.push(message);
+  });
+
+  wc.once('did-finish-load', async () => {
+    const result = { tabs: [], consoleErrors, failures: [] };
+    try {
+      if (!(await waitFor(wc, "document.body.dataset.ready === '1'"))) result.failures.push('app never became ready');
+      for (const size of SIZES) {
+        win.setContentSize(size.width, size.height);
+        await sleep(300);
+        for (const tab of TABS) {
+          await wc.executeJavaScript(`location.hash = '#/${tab}'`);
+          const ok = await waitFor(wc,
+            `document.body.dataset.view === '${tab}' && document.body.dataset.loading === '0'`);
+          await sleep(250);
+          const info = await wc.executeJavaScript(`({
+            heading: document.querySelector('.view-header h1')?.textContent ?? null,
+            demoBadges: document.querySelectorAll('.badge-demo').length,
+            errors: [...document.querySelectorAll('.view .error-box')].map((e) => e.textContent),
+            hScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+          })`);
+          const image = await wc.capturePage();
+          const file = path.join(outDir, `${size.name}-${tab}.png`);
+          fs.writeFileSync(file, image.toPNG());
+          result.tabs.push({ size: size.name, tab, loaded: ok, ...info, screenshot: file });
+          if (!ok) result.failures.push(`${size.name}/${tab}: view did not finish loading`);
+          if (info.errors.length) result.failures.push(`${size.name}/${tab}: ${info.errors.join('; ')}`);
+          if (info.hScroll) result.failures.push(`${size.name}/${tab}: horizontal page scroll`);
+        }
+      }
+    } catch (err) {
+      result.failures.push(`smoke crashed: ${err.stack || err}`);
+    }
+    if (consoleErrors.length) result.failures.push(`console errors: ${consoleErrors.length}`);
+    fs.writeFileSync(path.join(outDir, 'result.json'), JSON.stringify(result, null, 2));
+    quit(result.failures.length ? 1 : 0);
+  });
+}
+
+module.exports = { runSmoke, TABS };
