@@ -1,5 +1,5 @@
 HOI4 DEBUGGER - STAN PROJEKTU
-Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-09 (koniec kroku E)
+Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-09 (krok F, część 1)
 Szczegóły i dowody: docs/PROGRESS.md, plan: docs/STATUS-AND-PLAN.md
 
 ======================================================================
@@ -25,8 +25,11 @@ ZROBIONE
 ======================================================================
 DO ZROBIENIA (w tej kolejności)
 ======================================================================
-[ ] Krok F  National Focus Manager: aktualny cel, ukończone, postęp, drzewo z plików gry
-            (kolejkowanie tylko jeśli gra to umożliwia; bez natychmiastowego kończenia)  <- NASTĘPNY
+[~] Krok F  National Focus Manager                                          <- W TRAKCIE
+            [x] drzewko wykrywane automatycznie (gra + mody), stan celów z zapisu
+            [x] plan kolejki w aplikacji (sprawdzanie wymagań i wykluczeń, zapis trwały)
+            [ ] automatyczne rozpoczynanie kolejnego celu - gra nie ma na to komendy;
+                CZEKA NA DECYZJĘ: powiadomienie / klikanie za gracza (patrz rozmowa)
 [ ] Krok G  Intelligence Lab (poziomy wywiadu) i Game Tools (narzędzia lokalne)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)
             -> wymaga drugiego komputera/konta
