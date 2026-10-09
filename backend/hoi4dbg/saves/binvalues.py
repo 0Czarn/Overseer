@@ -68,11 +68,17 @@ def _scalar(v):
 def country_block(data: bytes, tag: str, float_width: int, version: str | None) -> list | None:
     if not re.fullmatch(r"[A-Z][A-Z0-9]{2}", tag or ""):
         raise ValueError(f"Invalid country tag: {tag!r}")
+    return country_blocks(data, {tag}, float_width, version).get(tag)
+
+
+def country_blocks(data: bytes, tags: set[str], float_width: int, version: str | None) -> dict[str, list]:
+    """Named blocks of the wanted countries, in one pass over the save."""
     if not VERIFIED_VERSION.search(version or ""):
         raise binary.SaveFormatError("binary_values_unmapped", f"Binary country values are only mapped for 1.19.3 "
                                      f"(this save: {version or 'unknown'}). Use a text save (-force_text_save).")
     if float_width != 8:
         raise binary.SaveFormatError("binary_values_unmapped", "Unexpected value width in this binary save")
+    out: dict[str, list] = {}
     p = binary.Parser(data, float_width)
     while p.peek() is not None:
         key = p._u16()
@@ -83,16 +89,17 @@ def country_block(data: bytes, tag: str, float_width: int, version: str | None) 
             continue
         if p._u16() != binary.OPEN:
             raise binary.SaveFormatError("corrupt", "'countries' is not a block", p.pos - 2)
-        while p.peek() not in (None, binary.CLOSE):
+        while p.peek() not in (None, binary.CLOSE) and len(out) < len(tags):
             name = p.scalar(p._u16())
             if p._u16() != binary.EQUALS:
                 raise binary.SaveFormatError("corrupt", "Expected '=' after a country tag", p.pos - 2)
-            if name == tag:
+            if name in tags:
                 if p._u16() != binary.OPEN:
-                    raise binary.SaveFormatError("corrupt", f"Country {tag} is not a block", p.pos - 2)
-                return _named(p.block([50_000_000]))
-            p.skip_value()
-        return None
+                    raise binary.SaveFormatError("corrupt", f"Country {name} is not a block", p.pos - 2)
+                out[name] = _named(p.block([50_000_000]))
+            else:
+                p.skip_value()
+        return out
     raise binary.SaveFormatError("unsupported", "No 'countries' block in this binary save")
 
 

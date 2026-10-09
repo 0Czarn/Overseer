@@ -387,3 +387,21 @@ gubione przy restarcie) i szybka kalibracja z zapamiętanego układu (`python -m
 - Ograniczenia: istnienie i partia według najnowszego zapisu (migawka); kolejność tagów z plików gry bez modów
   (mody dodające tagi: niesprawdzone – dotyczy też tablicy państw w pamięci).
 - Testy: backend 139 OK, JS 24 OK, smoke 18/18 (Countries & Players i Country Editor: 0 oznaczeń DEMO).
+
+---
+
+## Krok B: automatyczne mapowanie pól zapisu na pamięć (2026-10-09) ✅ (manpower/konwoje → kroki D/E)
+
+- `python -m hoi4dbg.live map [pola|all]` (`live/mapper.py`): najnowszy zapis (gra na pauzie) vs obiekty wszystkich
+  istniejących państw z tablicy państw. Lokalizacja = odstęp w obiekcie albo za jednym wskaźnikiem, w jednym z 7
+  kodowań; uznana tylko, gdy pasuje dla ≥90% państw (min. 5) i wartości są różne (min. 3) – bez komend w grze.
+- **Kontrola mapy i kolejności tagów** (zapis `mapa.hoi4`, 99 państw): wszystkie 8 pól zgodne dla 100% państw,
+  które mają wartość (PP 99/99, stabilność 98/98, poparcie wojny 95/95, CP 99/99, paliwo 99/99, XP 43/18/21).
+- Naprawa: obiekty państw przy końcu regionu pamięci (ETH, GUA, PAL) – odczyt stronami zamiast 12 KB naraz.
+- Pełne mapowanie wszystkich pól liczbowych bloku państwa: ~30 s; znalezione m.in. 2 dodatkowe pola paliwa,
+  pola polityki i doświadczenia (część ma tylko numer tokenu – nazwy do ustalenia przy potrzebie).
+- **Manpower:** pula z interfejsu gry nie jest polem bloku państwa (blok ma tylko `ratio`, w pamięci +0x338;
+  `current` tylko u 2 państw – nadwyżka z komend). Pula liczona jest ze stanów (`manpower_pool`) → krok D.
+- **Konwoje:** suma sprzętu w magazynie; w zapisie binarnym wymaga tabeli nazw sprzętu → krok E.
+- Testy: backend 143 OK (mapper: znalezienie bezpośrednie i za wskaźnikiem, odrzucenie stałych wartości i
+  zbyt małej próby, regresja końca regionu).

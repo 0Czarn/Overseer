@@ -29,7 +29,7 @@ Każdy krok ma kryterium „zrobione”.
 | # | Krok | Twoja rola w grze | Kryterium „zrobione” |
 |---|---|---|---|
 | A ✅ | **Countries & Players** (zrobione 2026-10-09): lista istniejących państw, tagi, nazwy (lokalizacja gry), gracz z zapisu. Usuwa DEMO z 2 zakładek | brak (gra uruchomiona) | lista = państwa z zapisu; zero DEMO |
-| B | **Automatyczny „mapper” pól**: porównanie zapisu z pamięcią dla 440 państw naraz → odstępy dla manpower, konwojów i kolejnych pól bez komend | 1 zapis | manpower i konwoje LIVE, zgodne z zapisem dla wszystkich państw |
+| B ✅ | **Automatyczny „mapper” pól** (zrobione; manpower → D, konwoje → E): porównanie zapisu z pamięcią dla 440 państw naraz → odstępy dla manpower, konwojów i kolejnych pól bez komend | 1 zapis | manpower i konwoje LIVE, zgodne z zapisem dla wszystkich państw |
 | C | **Gracz na żywo** (bez zapisu): szukanie w obiektach gry, nie w pamięci statycznej | 2× wczytanie zapisu innym państwem | po wczytaniu innego państwa aplikacja sama przełącza gracza |
 | D | **State Editor (odczyt)**: stany z zapisu (właściciel, kontroler, budynki, zasoby, rdzenie/roszczenia) + nazwy z plików gry/modów; potem tablica stanów jak państw | 1 zapis | zakładka bez DEMO, zgodna z zapisem |
 | E | **Equipment Manager**: zapasy i warianty z zapisu → zmiana przez `add_equipment` z weryfikacją | 1 runda komend | zmiana potwierdzona w grze |

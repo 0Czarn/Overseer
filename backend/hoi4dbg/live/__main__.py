@@ -9,6 +9,7 @@ python -m hoi4dbg.live reset political_power
 python -m hoi4dbg.live auto all|field[,field...] [seconds] [--use-newest]
 python -m hoi4dbg.live check political_power [seconds]
 python -m hoi4dbg.live layout [field,field...]      (calibrate from the layout of an earlier game process)
+python -m hoi4dbg.live map [field,field...|all]     (map save fields to the country object, all countries at once)
 """
 
 from __future__ import annotations
@@ -31,7 +32,9 @@ def build() -> LiveService:
     logger, ring = applog.setup(data_dir / "logs")
     saves = SaveAnalyzer(SaveSnapshotter(data_dir / "save-cache"), logger)
     svc = DebuggerService(Hoi4Integration(), ReportStore(data_dir / "reports"), ring, logger, str(data_dir), saves=saves)
-    return LiveService(svc.detect, svc.player_save_values, data_dir / "live", logger)
+    live = LiveService(svc.detect, svc.player_save_values, data_dir / "live", logger)
+    live.debugger = svc
+    return live
 
 
 def show(obj) -> None:
@@ -119,6 +122,74 @@ def auto(live: LiveService, fields: list[str], duration: float, use_newest: bool
         time.sleep(1)
 
 
+def map_fields(live: LiveService, wanted: list[str] | None) -> None:
+    """Read-only: newest save of the running (paused) game vs. the country objects of all existing countries."""
+    from pathlib import Path
+
+    from ..integration.memory import ProcessMemory
+    from ..saves import binvalues, text
+    from . import mapper, pointers
+    from .calibration import tolerance_for
+
+    svc = live.debugger
+    process = live._process()
+    path, _ = svc._pick_save(None)
+    listing = svc.saves.country_list(path)
+    analysis = listing["analysis"]
+    if (svc.save_analysis(None)["data"].get("freshness") or {}).get("category") != "current_session":
+        raise LiveError("stale_save", "The newest save is not from the running game - save (paused) first")
+    tags = sorted(listing["owners"])
+    data = Path(analysis["copy"]).read_bytes()
+    t = time.time()
+    if analysis["format"] == "text":
+        blocks = {tag: text.country_block(data, tag) for tag in tags}
+        names = text.equipment_names(data)
+    else:
+        blocks = binvalues.country_blocks(data, set(tags), analysis.get("float_width"),
+                                          (analysis.get("header") or {}).get("version"))
+        names = {}
+    stamp(f"save {path.name}: {len(blocks)} existing countries read in {time.time() - t:.0f}s")
+    fields: dict[str, dict[str, tuple[float, float]]] = {}
+    for tag, block in blocks.items():
+        if block is None:
+            continue
+        for field, entry in text.country_values(block, names).items():
+            if entry.get("status") == "read" and entry.get("value") is not None:
+                fields.setdefault(field, {})[tag] = (float(entry["value"]), tolerance_for(str(entry.get("raw", ""))))
+        if wanted == ["all"]:
+            for leaf, value in mapper.numeric_leaves(block).items():
+                fields.setdefault(".".join(leaf), {})[tag] = (value, 0.001)
+    install = Path(process["install"])
+    order = pointers.tag_order(install)
+    t = time.time()
+    with ProcessMemory(process["pid"]) as mem:
+        base = mem.modules()[pointers.MODULE][0]
+        snaps = {tag: mapper.snapshot(mem, pointers.country_object(mem, base, order, tag)) for tag in blocks}
+    stamp(f"memory: {len(snaps)} country objects read in {time.time() - t:.0f}s")
+    # 1) the known map (and with it the tag order) must hold for every country
+    for field, (offsets, enc) in pointers.FIELDS.items():
+        loc = mapper.Location(offsets[0] if len(offsets) > 1 else None, offsets[-1], enc)
+        values = {k: v for k, v in fields.get(field, {}).items() if v[0] != 0}
+        ok = [tag for tag, (value, tol) in values.items()
+              if (got := mapper._value_at(snaps[tag], loc)) is not None and abs(got - value) <= tol + 1e-9]
+        stamp(f"known {field:16} {loc.describe():28} {len(ok)}/{len(values)} countries"
+              + (f"  MISSED {sorted(set(values) - set(ok))[:8]}" if len(ok) != len(values) else ""))
+    # 2) new fields
+    targets = [f for f in fields if f not in pointers.FIELDS] if wanted in (None, ["all"]) else wanted
+    results = {}
+    for field in targets:
+        t = time.time()
+        found = mapper.map_field(snaps, fields.get(field, {}))
+        results[field] = [{**r, "location": r["location"].describe()} for r in found]
+        if found or wanted != ["all"]:
+            stamp(f"map {field:30} {len(fields.get(field, {}))} countries, {time.time() - t:.1f}s: "
+                  + ("; ".join(f"{r['location'].describe()} {r['matched']}/{r['countries']}" for r in found[:4])
+                     or "no location"))
+    out = paths.data_dir() / "live" / "map.json"
+    out.write_text(json.dumps({"save": path.name, "pid": process["pid"], "results": results}, indent=1), encoding="utf-8")
+    stamp(f"results: {out}")
+
+
 def check(live: LiveService, field: str, duration: float) -> None:
     """Independent check of a confirmed location: for every new save of the running game, compares the
     save value with the memory value read right after the save appeared (game paused). Read-only."""
@@ -179,6 +250,8 @@ def main(argv: list[str]) -> int:
             for f, c in res["calibrations"].items():
                 print(f"{f:16} {c['state']:10} {c['message']}")
             print(f"took {time.time() - t:.1f}s")
+        elif cmd == "map":
+            map_fields(live, args[0].split(",") if args else None)
         elif cmd == "check":
             check(live, args[0], float(args[1]) if len(args) > 1 else 1800)
         elif cmd == "auto":
