@@ -11,7 +11,7 @@ from pathlib import Path
 
 from hoi4dbg.integration import memory
 from hoi4dbg.integration.memory import ENCODINGS, needles_for, scan
-from hoi4dbg.live import console
+from hoi4dbg.live import console, layout, pointers
 from hoi4dbg.live.calibration import CalibrationError, FieldCalibration
 from hoi4dbg.live.service import LiveError, LiveService
 
@@ -353,6 +353,10 @@ class LiveServiceTests(TempDirMixin, unittest.TestCase):
         with self.assertRaises(LiveError) as ctx:
             again.read("political_power")
         self.assertEqual(ctx.exception.code, "process_changed")
+        # Regression: the confirmed address was lost with the discarded calibration; the layout keeps it
+        rec = self.make().layouts.records()[-1]
+        self.assertEqual((rec["pid"], rec["tag"], rec["fields"]["political_power"]),
+                         (7, "GER", {"encoding": "fixed32_1000", "address": self.addr}))
 
     def test_calibration_of_other_process_is_discarded_on_disk(self):
         """Regression: a calibration from an earlier PID stayed stored and was offered as 'candidates'."""
@@ -448,6 +452,177 @@ class LiveServiceTests(TempDirMixin, unittest.TestCase):
         with self.assertRaises(LiveError) as ctx:
             self.svc.refine_calibration("political_power", "command")
         self.assertEqual(ctx.exception.code, "no_command")
+
+
+class LayoutTests(TempDirMixin, unittest.TestCase):
+    """Calibration of a new game process from the layout confirmed in an earlier one."""
+
+    FIELDS = {"political_power": ("fixed64_100000", 0x40, 772.3), "stability": ("fixed64_100000", 0x80, 0.71),
+              "command_power": ("fixed64_100000", 0x1000, 72.682), "fuel": ("fixed64_32768", 0x2000, 305592.8483581543)}
+
+    def setUp(self):
+        super().setUp()
+        self.install = self.tmp / "game"
+        self.install.mkdir()
+        (self.install / console.HISTORY_FILE).write_text("", encoding="utf-8")
+        self.mem = FakeMemory(0x8000)
+        self.process = {"pid": 7, "path": str(self.install / "hoi4.exe"), "started": "a"}
+        self.values = {f: v for f, (_, _, v) in self.FIELDS.items()}
+        self.svc = self.make()
+
+    def make(self):
+        return LiveService(self.detect, self.save_values, self.tmp / "live", logging.getLogger("test"),
+                           open_memory=lambda pid: self.mem)
+
+    def detect(self):
+        return {"process": self.process, "install": {"path": str(self.install), "version": {"display": "v1.19.3"}}}
+
+    def save_values(self):
+        return {"source": "save", "data": {
+            "player_tag": "GER", "file": {"name": "s.hoi4", "mtime": 100.0}, "in_game_date": {"text": "1936.1.30.1"},
+            "freshness": {"category": "current_session"},
+            "values": {f: {"status": "read", "value": v} for f, v in self.values.items()}}}
+
+    def put(self, base, fields=None):
+        for f, (enc, off, value) in (fields or self.FIELDS).items():
+            self.mem.put(base + off, "q", round(value * ENCODINGS[enc].scale))
+
+    def record_earlier_process(self, base=BASE):
+        self.svc.layouts.record({"pid": 3, "started": "x", "version": "v1.19.3"}, "GER",
+                                {f: (enc, base + off) for f, (enc, off, _) in self.FIELDS.items()})
+
+    def test_new_process_is_calibrated_from_recorded_distances(self):
+        self.record_earlier_process(BASE)
+        self.put(BASE + 0x100)                      # new process: same object, other heap address
+        self.mem.put(BASE + 0x3000, "q", 71000)     # stray copies of common values elsewhere
+        self.mem.put(BASE + 0x10_0000 + 0x80, "q", 71000)
+        res = self.svc.calibrate_from_layout()
+        self.assertEqual(res["layout"]["found"], sorted(self.FIELDS))
+        for f, (_, off, value) in self.FIELDS.items():
+            cal = res["calibrations"][f]
+            self.assertEqual((cal["state"], cal["addresses"]), ("confirmed", [hex(BASE + 0x100 + off)]), f)
+            self.assertAlmostEqual(self.svc.read(f)["value"], value, places=5)
+        self.assertEqual(self.svc.status()["calibrations"]["stability"]["confirmed_by"], "process 3")
+        # the new process is recorded too and becomes the reference for the next one
+        self.assertEqual(self.svc.layouts.records()[-1]["pid"], 7)
+
+    def test_field_off_the_recorded_distance_falls_back_to_normal_calibration(self):
+        self.record_earlier_process(BASE)
+        moved = dict(self.FIELDS, fuel=("fixed64_32768", 0x3800, self.FIELDS["fuel"][2]))
+        self.put(BASE + 0x100, moved)
+        res = self.svc.calibrate_from_layout()
+        self.assertEqual(res["layout"]["not_aligned"], ["fuel"])
+        fuel = res["calibrations"]["fuel"]
+        self.assertEqual((fuel["state"], fuel["candidate_count"]), ("candidates", 1))
+        self.assertEqual(res["calibrations"]["command_power"]["state"], "confirmed")
+        with self.assertRaises(LiveError) as ctx:
+            self.svc.read("fuel")
+        self.assertEqual(ctx.exception.code, "unverified")
+
+    def test_two_identical_clusters_are_ambiguous(self):
+        self.record_earlier_process(BASE)
+        self.put(BASE + 0x100)
+        self.put(BASE + 0x10_0000 + 0x100)          # e.g. a copy of the country object
+        res = self.svc.calibrate_from_layout()
+        self.assertEqual(res["layout"]["found"], [])
+        self.assertEqual(res["layout"]["ambiguous"], sorted(self.FIELDS))
+        self.assertTrue(all(c["state"] != "confirmed" for c in res["calibrations"].values()))
+
+    def test_too_few_aligned_fields_is_not_evidence(self):
+        self.record_earlier_process(BASE)
+        self.put(BASE + 0x100, {f: self.FIELDS[f] for f in ("political_power", "stability")})
+        self.put(BASE + 0x500, {f: self.FIELDS[f] for f in ("command_power", "fuel")})
+        res = self.svc.calibrate_from_layout()
+        self.assertEqual(res["layout"]["found"], [])
+
+    def test_layout_of_other_version_country_or_same_process_is_not_used(self):
+        self.svc.layouts.record({"pid": 3, "started": "x", "version": "v1.18"}, "GER",
+                                {f: (enc, BASE + off) for f, (enc, off, _) in self.FIELDS.items()})
+        self.svc.layouts.record({"pid": 4, "started": "x", "version": "v1.19.3"}, "SOV",
+                                {f: (enc, BASE + off) for f, (enc, off, _) in self.FIELDS.items()})
+        self.svc.layouts.record({**self.process, "version": "v1.19.3"}, "GER",
+                                {f: (enc, BASE + off) for f, (enc, off, _) in self.FIELDS.items()})
+        with self.assertRaises(LiveError) as ctx:
+            self.svc.calibrate_from_layout()
+        self.assertEqual(ctx.exception.code, "no_layout")
+
+
+class CountryTableTests(TempDirMixin, unittest.TestCase):
+    """Reads through the game's country table (pointers.py) - no calibration needed."""
+
+    MODULE = BASE + 0x10_0000  # fake hoi4.exe base (second fake region)
+
+    def setUp(self):
+        super().setUp()
+        self.install = self.tmp / "game"
+        (self.install / "common" / "country_tags").mkdir(parents=True)
+        (self.install / "common" / "country_tags" / "00_countries.txt").write_text(
+            'GER\t= "countries/Germany.txt"\n# ITA = commented out\nENG = "countries/United Kingdom.txt"\n'
+            'ITA = "countries/Italy.txt"\n', encoding="utf-8")
+        (self.install / "common" / "country_tags" / "zz_dynamic_countries.txt").write_text('D01 = "x"\n')
+        (self.install / console.HISTORY_FILE).write_text("", encoding="utf-8")
+        self.mem = FakeMemory(0x8000)
+        self.mem.modules = lambda: {"hoi4.exe": (self.MODULE, self.MODULE + 0x8000)}
+        self.version = "Operation Postern v1.19.3.0.c01a (5632)"
+        self.process = {"pid": 7, "path": str(self.install / "hoi4.exe"), "started": "a"}
+        # hoi4.exe+rva -> table object; +0x310 -> array; slot i -> country objects
+        rva, slot = pointers.COUNTRY_TABLE
+        self.mem.regions_data[self.MODULE] = bytearray(max(0x8000, rva + 8))
+        table, array = BASE + 0x100, BASE + 0x200
+        self.mem.put(self.MODULE + rva, "Q", table)
+        self.mem.put(table + slot, "Q", array)
+        self.countries = {"GER": BASE + 0x1000, "ITA": BASE + 0x3000}
+        for i, tag in enumerate(["GER", "ENG", "ITA"], start=1):
+            if tag in self.countries:
+                self.mem.put(array + 8 * i, "Q", self.countries[tag])
+        self.put_country("GER", stability=0.71, pp=772.3)
+        self.put_country("ITA", stability=0.6, pp=31.1972)
+        self.svc = LiveService(self.detect, self.save_values, self.tmp / "live", logging.getLogger("test"),
+                               open_memory=lambda pid: self.mem)
+
+    def put_country(self, tag, stability, pp):
+        c = self.countries[tag]
+        self.mem.put(c + 0x10D0, "q", round(stability * 100000))
+        self.mem.put(c + 0xF90, "Q", c + 0x1800)           # politics object
+        self.mem.put(c + 0x1800 + 0xE0, "q", round(pp * 100000))
+
+    def detect(self):
+        return {"process": self.process, "install": {"path": str(self.install), "version": {"display": self.version}}}
+
+    def save_values(self):
+        return {"source": "save", "data": {"player_tag": "ITA", "file": {"name": "s.hoi4", "mtime": 1.0},
+                                           "freshness": {"category": "current_session"}, "values": {}}}
+
+    def test_tag_order_follows_files_and_lines(self):
+        self.assertEqual(pointers.tag_order(self.install), ["GER", "ENG", "ITA", "D01"])
+
+    def test_player_and_any_country_without_calibration(self):
+        res = self.svc.read("stability")
+        self.assertEqual((res["value"], res["tag"], res["method"]), (0.6, "ITA", "country_table"))
+        self.assertEqual(self.svc.read("political_power", "GER")["value"], 772.3)
+        values = self.svc.values("GER")
+        self.assertEqual(values["stability"]["value"], 0.71)
+        self.assertEqual(values["manpower"]["status"], "unavailable")   # not in the country table map
+
+    def test_missing_country_and_unknown_tag(self):
+        with self.assertRaises(LiveError) as ctx:
+            self.svc.read("stability", "ENG")    # slot empty
+        self.assertEqual(ctx.exception.code, "country_missing")
+        with self.assertRaises(LiveError) as ctx:
+            self.svc.read("stability", "XXX")
+        self.assertEqual(ctx.exception.code, "unknown_tag")
+
+    def test_implausible_layout_is_refused(self):
+        self.mem.put(self.countries["ITA"] + 0x10D0, "q", 12_345_678)
+        with self.assertRaises(LiveError) as ctx:
+            self.svc.read("stability")
+        self.assertEqual(ctx.exception.code, "implausible")
+
+    def test_other_game_version_does_not_use_the_table(self):
+        self.version = "Operation Postern v1.19.4.0.abcd (6000)"
+        with self.assertRaises(LiveError) as ctx:
+            self.svc.read("stability")
+        self.assertEqual(ctx.exception.code, "not_calibrated")
 
 
 if __name__ == "__main__":

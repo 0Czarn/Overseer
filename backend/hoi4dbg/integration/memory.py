@@ -24,6 +24,7 @@ PROCESS_VM_READ = 0x0010
 ACCESS_RIGHTS = PROCESS_QUERY_INFORMATION | PROCESS_VM_READ
 MEM_COMMIT = 0x1000
 MEM_PRIVATE = 0x20000
+MEM_IMAGE = 0x1000000
 PAGE_GUARD = 0x100
 WRITABLE_PROTECT = {0x04, 0x08, 0x40, 0x80}  # READWRITE, WRITECOPY, EXECUTE_READWRITE, EXECUTE_WRITECOPY
 MAX_READ = 64 << 20
@@ -51,6 +52,8 @@ if IS_WINDOWS:
     _k32.ReadProcessMemory.argtypes = [wintypes.HANDLE, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_size_t,
                                        ctypes.POINTER(ctypes.c_size_t)]
     _k32.ReadProcessMemory.restype = wintypes.BOOL
+    _k32.K32GetMappedFileNameW.argtypes = [wintypes.HANDLE, ctypes.c_uint64, wintypes.LPWSTR, wintypes.DWORD]
+    _k32.K32GetMappedFileNameW.restype = wintypes.DWORD
 
 
 class MemoryAccessError(OSError):
@@ -176,13 +179,30 @@ class ProcessMemory:
     def __exit__(self, *exc) -> None:
         self.close()
 
-    def regions(self) -> Iterator[tuple[int, int]]:
-        """(base, size) of committed, writable, private regions."""
+    def regions(self, image: bool = False) -> Iterator[tuple[int, int]]:
+        """(base, size) of committed, writable, private regions (+ writable module data with `image`)."""
+        for base, size, _, _ in self._query(MEM_PRIVATE | (MEM_IMAGE if image else 0)):
+            yield base, size
+
+    def modules(self) -> dict[str, tuple[int, int]]:
+        """Loaded images: lower-case file name -> (allocation base, end of the last region)."""
+        out: dict[str, tuple[int, int]] = {}
+        names: dict[int, str] = {}
+        buf = ctypes.create_unicode_buffer(1024)
+        for base, size, alloc, _ in self._query(MEM_IMAGE, writable_only=False):
+            if alloc not in names:
+                n = _k32.K32GetMappedFileNameW(self._handle, alloc, buf, len(buf))
+                names[alloc] = buf.value[:n].rsplit("\\", 1)[-1].lower() if n else hex(alloc)
+            lo, hi = out.get(names[alloc], (alloc, alloc))
+            out[names[alloc]] = (lo, max(hi, base + size))
+        return out
+
+    def _query(self, types: int, writable_only: bool = True) -> Iterator[tuple[int, int, int, int]]:
         addr, mbi = 0, MEMORY_BASIC_INFORMATION()
         while addr < USER_SPACE_END and _k32.VirtualQueryEx(self._handle, addr, ctypes.byref(mbi), ctypes.sizeof(mbi)):
-            if (mbi.State == MEM_COMMIT and mbi.Type == MEM_PRIVATE and (mbi.Protect & 0xFF) in WRITABLE_PROTECT
-                    and not mbi.Protect & PAGE_GUARD):
-                yield mbi.BaseAddress, mbi.RegionSize
+            if (mbi.State == MEM_COMMIT and mbi.Type & types and not mbi.Protect & PAGE_GUARD
+                    and (not writable_only or (mbi.Protect & 0xFF) in WRITABLE_PROTECT)):
+                yield mbi.BaseAddress, mbi.RegionSize, mbi.AllocationBase, mbi.Type
             next_addr = mbi.BaseAddress + mbi.RegionSize
             if next_addr <= addr:
                 break

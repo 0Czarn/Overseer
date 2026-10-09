@@ -15,9 +15,9 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from ..integration.memory import MemoryAccessError, ProcessMemory
-from . import console
-from .calibration import CalibrationError, FieldCalibration, scan_many, tolerance_for
+from ..integration.memory import ENCODINGS, MemoryAccessError, ProcessMemory, needles_for, scan
+from . import console, layout, pointers
+from .calibration import SCAN_LIMIT, CalibrationError, FieldCalibration, holds, scan_many, tolerance_for
 
 TOLERANCE = 0.0005           # values are fixed point with 3 decimals
 OP_TIMEOUT_S = 600
@@ -45,12 +45,16 @@ class LiveService:
         self._clock = clock
         self.log = logger
         self.store = store_dir / "calibrations.json"
+        self.layouts = layout.LayoutStore(store_dir / "layouts.json")
         self._lock = threading.RLock()
         self._job: dict | None = None
         self._ops: dict[str, dict] = {}
         self._ids = itertools.count(1)
         self.calibrations: dict[str, FieldCalibration] = self._load()
         self.invalidated: dict[str, dict] = {}  # field -> why its calibration was dropped
+        self._module_base: dict[tuple, int] = {}   # (pid, started) -> hoi4.exe base
+        self._tags: dict[str, list[str]] = {}      # install path -> tag order
+        self._player: tuple[float, tuple, str] | None = None  # (read at, process key, tag)
 
     # -- persistence -----------------------------------------------------------------------
     def _load(self) -> dict[str, FieldCalibration]:
@@ -65,6 +69,16 @@ class LiveService:
         tmp = self.store.with_suffix(".tmp")
         tmp.write_text(json.dumps([c.to_store() for c in self.calibrations.values()]), encoding="utf-8")
         tmp.replace(self.store)
+
+    def _record_layout(self, process: dict) -> None:
+        """Keeps the addresses of confirmed single locations beyond this process (see layout.py)."""
+        by_tag: dict[str, dict] = {}
+        for field, cal in self.calibrations.items():
+            addrs = cal.candidates.get(cal.encoding or "", [])
+            if cal.state == "confirmed" and len(addrs) == 1:
+                by_tag.setdefault(cal.tag, {})[field] = (cal.encoding, addrs[0])
+        for tag, fields in by_tag.items():
+            self.layouts.record(process, tag, fields)
 
     # -- environment -----------------------------------------------------------------------
     def _process(self) -> dict:
@@ -196,6 +210,81 @@ class LiveService:
             run()
         return self.status()
 
+    def calibrate_from_layout(self, fields: list[str] | None = None) -> dict:
+        """Locates fields in a new game process from the layout recorded in an earlier one (same version and
+        country): one scan for each field's exact save value in its recorded encoding, then the candidates
+        that line up at the recorded distances (layout.clusters). Fields that do not line up start the normal
+        calibration from these candidates (encoding as recorded), so no second scan is needed."""
+        process = self._process()
+        save = self._fresh_save(process)
+        tag = save.get("player_tag") or save.get("tag")
+        ref = self.layouts.reference(process, tag)
+        if ref is None:
+            raise LiveError("no_layout", f"No layout recorded for {tag} in an earlier game process of this version - "
+                                         "run the full calibration once.")
+        values, skipped = {}, {}
+        for field in fields or list(console.COMMANDS):
+            entry = save["values"].get(field) or {}
+            if field not in ref["fields"]:
+                skipped[field] = "not in the recorded layout"
+            elif entry.get("status") != "read" or not entry.get("value"):
+                skipped[field] = f"no usable value in {save['file']['name']}"
+            else:
+                values[field] = (entry["value"], tolerance_for(entry.get("raw")))
+        needles = {}
+        for field, (value, tol) in values.items():
+            enc = ref["fields"][field]["encoding"]
+            nd = needles_for(value, {enc: ENCODINGS[enc]}, tolerance=tol).get(enc)
+            if nd is None:
+                skipped[field] = f"value {value} not representable in {enc}"
+            else:
+                needles[field] = nd
+        if len(needles) < layout.MIN_CLUSTER:
+            raise LiveError("no_value", "Too few fields to match the layout: "
+                            + "; ".join(f"{k} {v}" for k, v in skipped.items()))
+        source = f"save {save['file']['name']} ({(save.get('in_game_date') or {}).get('text')})"
+        reference = f"process {ref['pid']}"
+        mark = _mark_tuple(self._history(process))
+        with self._lock:
+            if self._job and self._job.get("state") == "running":
+                raise LiveError("busy", "A memory scan is already running")
+            self._job = {"field": ",".join(needles), "fields": list(needles), "skipped": skipped, "method": "layout",
+                         "state": "running", "progress": 0.0, "started": self._clock()}
+        try:
+            with self._open_memory(process["pid"]) as mem:
+                hits = scan(mem, needles, progress=self._progress, limit=SCAN_LIMIT)
+                found, ambiguous = layout.clusters(ref, hits)
+                # re-read: the cluster must still hold the exact save values (game paused)
+                found = {f: a for f, a in found.items()
+                         if holds(ref["fields"][f]["encoding"], mem.read(a, ENCODINGS[ref["fields"][f]["encoding"]].size),
+                                  *values[f])}
+        except (MemoryAccessError, OSError) as exc:
+            with self._lock:
+                self._job.update(state="error", error=str(exc))
+            raise LiveError("memory_error", str(exc)) from exc
+        cals = {}
+        for field in needles:
+            enc = ref["fields"][field]["encoding"]
+            cal = FieldCalibration(field, tag, process["pid"], process.get("started"))
+            cal.save_mtime, cal.history_mark, cal.tolerance = save["file"]["mtime"], mark, values[field][1]
+            if field in found:
+                cal.start_from_layout(enc, found[field], values[field][0], source, reference)
+            else:
+                cal.start_from_hits({enc: hits[field]}, values[field][0], source)
+            cals[field] = cal
+        with self._lock:
+            self.calibrations.update(cals)
+            for field in cals:
+                self.invalidated.pop(field, None)
+            self._save()
+            self._record_layout(process)
+            result = {"found": sorted(found), "ambiguous": ambiguous, "skipped": skipped,
+                      "not_aligned": sorted(set(needles) - set(found)), "reference": reference}
+            self._job.update(state="done", progress=1.0, result=result)
+        self.log.info("Live layout calibration of %s from %s: found %s, not aligned %s", tag, reference,
+                      ", ".join(result["found"]) or "-", ", ".join(result["not_aligned"]) or "-")
+        return {**self.status(), "layout": result}
+
     def _progress(self, done: int, total: int) -> None:
         with self._lock:
             if self._job:
@@ -249,6 +338,8 @@ class LiveService:
                 cal.refine(mem, value, label)
             cal.history_mark = _mark_tuple(self._history(process))
             self._save()
+            if cal.state == "confirmed":
+                self._record_layout(process)
             self.log.info("Live calibration %s refine (%s = %s): %s", field, source, value, cal.message)
             return cal.as_dict()
 
@@ -259,11 +350,55 @@ class LiveService:
         return self.status()
 
     # -- live values -----------------------------------------------------------------------
-    def read(self, field: str) -> dict:
+    def player_tag(self, process: dict) -> str:
+        """Player country of the newest save of the running game (the game keeps no static player index)."""
+        key = (process["pid"], process.get("started"))
+        now = self._clock()
+        if self._player and self._player[1] == key and now - self._player[0] < 5:
+            return self._player[2]
+        save = self._fresh_save(process)
+        tag = save.get("player_tag") or save.get("tag")
+        if not tag:
+            raise LiveError("player_unknown", "The newest save has no player country")
+        self._player = (now, key, tag)
+        return tag
+
+    def _read_pointer(self, process: dict, field: str, tag: str | None) -> dict:
+        tag = tag or self.player_tag(process)
+        key = (process["pid"], process.get("started"))
+        install = process.get("install") or ""
+        if install not in self._tags:
+            self._tags[install] = pointers.tag_order(Path(install))
+        try:
+            with self._open_memory(process["pid"]) as mem:
+                if key not in self._module_base:
+                    module = mem.modules().get(pointers.MODULE)
+                    if not module:
+                        raise LiveError("no_module", f"{pointers.MODULE} is not loaded in the game process")
+                    self._module_base[key] = module[0]
+                country = pointers.country_object(mem, self._module_base[key], self._tags[install], tag)
+                value = pointers.read_field(mem, country, field)
+        except pointers.PointerError as exc:
+            raise LiveError(exc.code, str(exc)) from exc
+        return {"value": value, "encoding": pointers.FIELDS[field][1], "copies": 1, "method": "country_table",
+                "field": field, "tag": tag, "read_at": self._clock()}
+
+    def read(self, field: str, tag: str | None = None) -> dict:
+        """Live value: through the game's country table (verified game version), else a calibrated location."""
         process = self._process()
+        pointer_error = None
+        if field in pointers.FIELDS and pointers.supported(process.get("version")):
+            try:
+                return self._read_pointer(process, field, tag)
+            except (LiveError, MemoryAccessError, OSError) as exc:
+                pointer_error = exc
         with self._lock:
             cal = self._calibration(field, process)
+            if cal is not None and tag and tag != cal.tag:
+                cal = None
             if cal is None:
+                if isinstance(pointer_error, LiveError):
+                    raise pointer_error
                 if field in self.invalidated:
                     raise LiveError("process_changed", self.invalidated[field]["message"])
                 raise LiveError("not_calibrated", f"{field} is not calibrated for this game process")
@@ -274,13 +409,13 @@ class LiveService:
                     out = cal.read(mem)
             except CalibrationError as exc:
                 raise LiveError(exc.code, str(exc)) from exc
-        return {**out, "field": field, "tag": cal.tag, "read_at": self._clock()}
+        return {**out, "method": "calibration", "field": field, "tag": cal.tag, "read_at": self._clock()}
 
-    def values(self) -> dict:
+    def values(self, tag: str | None = None) -> dict:
         out = {}
         for field in sorted(set(self.calibrations) | set(self.invalidated) | set(console.COMMANDS)):
             try:
-                out[field] = {"status": "live", **self.read(field)}
+                out[field] = {"status": "live", **self.read(field, tag)}
             except LiveError as exc:
                 out[field] = {"status": "unavailable", "code": exc.code, "message": str(exc)}
         return out

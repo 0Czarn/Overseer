@@ -6,7 +6,9 @@ No address or offset is guessed. A field is located by:
 2. re-reading the surviving candidates after the value has CHANGED in the game and keeping
    only those that now hold the new exact value;
 3. declaring the location confirmed only after at least MIN_DISTINCT_VALUES different values
-   were matched and the survivors are all in one encoding.
+   were matched and the survivors are all in one encoding;
+or, in a later process of the same game version, by its exact value lining up with other fields at the
+distances recorded in a confirmed layout (see layout.py).
 
 Addresses are only valid for the process instance (pid + start time) they were found in.
 """
@@ -60,6 +62,7 @@ class FieldCalibration:
     unit_evidence: list[dict] = field(default_factory=list)
     truncated: bool = False  # initial scan hit SCAN_LIMIT: the true location may be missing
     tolerance: float = EVIDENCE_TOLERANCE  # precision of the evidence (save digits)
+    confirmed_by: str | None = None  # layout evidence instead of value changes
 
     # -- evidence ------------------------------------------------------------------------
     def start(self, memory, value: float, source: str, progress=None) -> None:
@@ -71,6 +74,13 @@ class FieldCalibration:
         self.candidates = {k: v for k, v in hits.items() if v}
         self.truncated = any(len(v) >= SCAN_LIMIT for v in hits.values())
         self.steps = [Step(value, source, time.time(), {k: len(v) for k, v in self.candidates.items()})]
+        self._update_state()
+
+    def start_from_layout(self, encoding: str, address: int, value: float, source: str, reference: str) -> None:
+        """The exact value sits at the distance recorded in a confirmed layout of an earlier process."""
+        self.candidates = {encoding: [address]}
+        self.steps = [Step(value, source, time.time(), {encoding: 1})]
+        self.confirmed_by = reference
         self._update_state()
 
     def add_unit_evidence(self, command_args: float, observed_change: float, commands: list[str]) -> None:
@@ -123,6 +133,9 @@ class FieldCalibration:
                                                   "have changed in between (unpaused?) - start again."
                                                   + (" The first scan was truncated (value too common)."
                                                      if self.truncated else ""))
+        elif self.confirmed_by and len(eff) == 1 and total == 1:
+            self.state = "confirmed"
+            self.message = f"Confirmed: exact value at the recorded layout distance ({self.confirmed_by})."
         elif distinct >= MIN_DISTINCT_VALUES and len(eff) == 1 and total <= MAX_CONFIRMED:
             self.state = "confirmed"
             self.message = (f"Confirmed: {total} location(s), encoding {self.encoding}, matched "
@@ -163,6 +176,7 @@ class FieldCalibration:
             "field": self.field, "tag": self.tag, "pid": self.pid, "process_started": self.process_started,
             "state": self.state, "message": self.message, "encoding": self.encoding,
             "candidate_count": total, "width_note": self.width_note, "unit_evidence": self.unit_evidence,
+            "confirmed_by": self.confirmed_by,
             "addresses": [hex(a) for a in self.candidates.get(self.encoding or "", [])][:MAX_CONFIRMED]
             if self.state == "confirmed" else [],
             "steps": [s.as_dict() for s in self.steps],
@@ -181,9 +195,20 @@ class FieldCalibration:
                   save_mtime=data.get("save_mtime", 0.0),
                   history_mark=tuple(data["history_mark"]) if data.get("history_mark") else None,
                   unit_evidence=list(data.get("unit_evidence") or []),
-                  tolerance=data.get("tolerance", EVIDENCE_TOLERANCE))
+                  tolerance=data.get("tolerance", EVIDENCE_TOLERANCE), confirmed_by=data.get("confirmed_by"))
         cal._update_state()
         return cal
+
+
+def holds(encoding: str, data: bytes | None, value: float, tolerance: float) -> bool:
+    """`data` holds `value` in `encoding` (within the evidence precision or the encoding's own step)."""
+    if data is None:
+        return False
+    enc = ENCODINGS[encoding]
+    packed = enc.pack(value)
+    if packed is None:
+        return False
+    return abs(enc.unpack(data) - value) <= max(tolerance, abs(enc.unpack(packed) - value)) + 1e-9
 
 
 def total_ok(candidates: dict[str, list[int]], limit: int = 20000) -> bool:

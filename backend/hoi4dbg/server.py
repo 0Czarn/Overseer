@@ -75,7 +75,7 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("GET", "/api/saves/analysis", lambda q, b: svc.save_analysis(_str(q, "name") or None)),
         r("GET", "/api/saves/fields", lambda q, b: svc.save_fields()),
         r("GET", "/api/live", lambda q, b: live().status()),
-        r("GET", "/api/live/values", lambda q, b: {"data": live().values()}),
+        r("GET", "/api/live/values", lambda q, b: {"data": live().values(_str(q, "tag").upper() or None)}),
         r("POST", "/api/live/calibration", lambda q, b: calibration(b)),
         r("POST", "/api/live/operations", lambda q, b: live().create_operation(
             str(b.get("field", "")), str(b.get("mode", "")), _number(b.get("amount")))),

@@ -127,8 +127,9 @@ function otherFields(last) {
   return tiles.length ? h('div', { class: 'tile-grid live-grid' }, tiles) : null;
 }
 
-/** Returns { el, stop }. `withCalibration` adds the calibration controls, `withChange` the verified change. */
-export function liveCard(ctx, { withCalibration = true, withChange = false, cls } = {}) {
+/** Returns { el, stop }. `withCalibration` adds the calibration controls, `withChange` the verified change;
+ *  `tag` reads that country (game country table) instead of the player country. */
+export function liveCard(ctx, { withCalibration = true, withChange = false, cls, tag } = {}) {
   const badgeHost = h('span');
   const body = h('div', { class: 'card-body-inner' }, h('p', { class: 'muted' }, 'Connecting to live reader…'));
   let stopped = false;
@@ -169,7 +170,7 @@ export function liveCard(ctx, { withCalibration = true, withChange = false, cls 
     if (stopped) return;
     clearTimeout(timer);
     try {
-      const [status, values] = await Promise.all([ctx.api.get('/api/live'), ctx.api.get('/api/live/values')]);
+      const [status, values] = await Promise.all([ctx.api.get('/api/live'), ctx.api.get(`/api/live/values${tag ? `?tag=${encodeURIComponent(tag)}` : ''}`)]);
       const value = values.data?.[FIELD] ?? null;
       last = { status, value, all: values.data ?? {}, fetchedAt: value?.status === 'live' ? Date.now() / 1000 : last.fetchedAt };
       if (!stopped) render(null);

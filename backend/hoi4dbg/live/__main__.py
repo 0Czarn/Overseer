@@ -8,6 +8,7 @@ python -m hoi4dbg.live change political_power delta|target N
 python -m hoi4dbg.live reset political_power
 python -m hoi4dbg.live auto all|field[,field...] [seconds] [--use-newest]
 python -m hoi4dbg.live check political_power [seconds]
+python -m hoi4dbg.live layout [field,field...]      (calibrate from the layout of an earlier game process)
 """
 
 from __future__ import annotations
@@ -54,6 +55,7 @@ def auto(live: LiveService, fields: list[str], duration: float, use_newest: bool
     scanned_save = 0.0 if use_newest else time.time()
     last_live: dict[str, float] = {}
     last_error = None
+    try_layout = True
     while time.time() < end:
         try:
             cals = live.status()["calibrations"]
@@ -80,6 +82,20 @@ def auto(live: LiveService, fields: list[str], duration: float, use_newest: bool
             pending = [f for f in fields if f not in cals or cals[f]["state"] == "failed"]
             if pending:
                 save = live._fresh_save(live._process())
+                if save["file"]["mtime"] > scanned_save and try_layout:
+                    try_layout = False
+                    stamp(f"fresh save {save['file']['name']} -> layout of an earlier process for {', '.join(pending)}")
+                    t = time.time()
+                    try:
+                        res = live.calibrate_from_layout(pending)["layout"]
+                    except LiveError as exc:
+                        stamp(f"layout skipped: {exc.code}: {exc}")
+                    else:
+                        stamp(f"layout done in {time.time() - t:.0f}s ({res['reference']}): found {res['found']}, "
+                              f"not aligned {res['not_aligned']}, skipped {res['skipped']}")
+                        scanned_save = save["file"]["mtime"]
+                        print("SCAN_DONE", flush=True)
+                        continue
                 if save["file"]["mtime"] > scanned_save:
                     scanned_save = save["file"]["mtime"]
                     stamp(f"fresh save {save['file']['name']} -> scanning memory for {', '.join(pending)}")
@@ -156,6 +172,13 @@ def main(argv: list[str]) -> int:
                 time.sleep(0.5)
                 op = live.poll_operation(op["id"])
             show(op)
+        elif cmd == "layout":
+            t = time.time()
+            res = live.calibrate_from_layout(args[0].split(",") if args else None)
+            show(res["layout"])
+            for f, c in res["calibrations"].items():
+                print(f"{f:16} {c['state']:10} {c['message']}")
+            print(f"took {time.time() - t:.1f}s")
         elif cmd == "check":
             check(live, args[0], float(args[1]) if len(args) > 1 else 1800)
         elif cmd == "auto":

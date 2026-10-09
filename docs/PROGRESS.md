@@ -21,7 +21,7 @@ Aktualny raport i plan: `STATUS-AND-PLAN.md`.
 |---|---|---|
 | 1 | Aplikacja desktopowa, UI (9 zakładek), logi, testy, dokumentacja | ✅ |
 | 2 | Wykrywanie procesu HOI4 i wersji gry | ✅ |
-| 3 | Wiarygodny odczyt danych z aktywnej rozgrywki | 🟡 zapisy (tekst, binarny 1.19.3) ✅; pamięć: 9 pól kraju gracza ✅; państwa/stany/sprzęt/cele ⏳ |
+| 3 | Wiarygodny odczyt danych z aktywnej rozgrywki | 🟡 zapisy (tekst, binarny 1.19.3) ✅; pamięć: 8 pól dowolnego państwa bez kalibracji (tablica państw) ✅; manpower przez kalibrację; stany/sprzęt/cele ⏳ |
 | 4 | Prototyp modyfikacji pojedynczej wartości (SP) + weryfikacja | ✅ PP, stabilność, poparcie wojny, CP, paliwo – sprawdzone w grze; MP nietestowane |
 | 5 | Edytory państw, stanów, sprzętu | 🟡 Country Editor (kraj gracza); stany i sprzęt DEMO |
 | 6 | Cele narodowe, narzędzia debugowania | ⏳ |
@@ -330,3 +330,42 @@ paliwo i doświadczenie armii/floty/lotnictwa – `fixed64_32768`.
   potem dokładnie stan zapisu. Kontrola niezależna (zapis `kontrola.hoi4` vs pamięć): 9/9 PASS, różnica 0.
 
 **Testy (2026-10-09):** backend 122 OK, JS 24 OK.
+
+---
+
+## Etap 5 (część 3): odczyt bez kalibracji przez tablicę państw gry (2026-10-09) ✅
+
+**Problem:** po każdym uruchomieniu gry kalibracja (skan + zapis + 2–3 rundy komend, ~10 min) – adresy na stercie się losują.
+
+**Rozwiązanie (tylko odczyt):** ścieżka wskaźników od stałego miejsca w `hoi4.exe` do tablicy wszystkich państw gry
+(`live/pointers.py`): `hoi4.exe+0x332f260 → +0x310 → tablica[indeks] → obiekt państwa`. Indeks = pozycja tagu w
+`common/country_tags/*.txt` (pliki wg nazwy, wiersze w kolejności; 440 miejsc dla 439 tagów).
+Pola w obiekcie państwa: stabilność +0x10d0, poparcie wojny +0x10d8, CP +0x1f0, PP [+0xf90]+0xe0,
+paliwo [+0x1588−8 → +0x1580]+0x8, doświadczenie [+0x1588] +0x10 armia / +0x28 flota / +0x40 lotnictwo.
+
+**Jak znalezione:** od skalibrowanych adresów wstecz (kto wskazuje na obiekt państwa) aż do `hoi4.exe`;
+107 kandydatów odsianych testami. Pierwsze 2 znalezione wejścia okazały się przypadkowe (nie przetrwały wczytania
+zapisu / restartu) – dlatego każde wejście jest uznawane dopiero po teście na nowym procesie.
+
+**Weryfikacja (4 procesy gry, PID 24536 → 29288 → 27336 → 25320):**
+- odstępy wewnątrz obiektu państwa: identyczne w każdym procesie, także po wczytaniu innego zapisu;
+- tablica państw po restarcie gry: **80/80 państw** zgodnych z zapisem `wlochy.hoi4` co do ostatniej cyfry
+  (m.in. GER, ENG, SOV, FRA, ITA, USA, JAP, POL, CHI, HUN);
+- Country Editor (smoke test, nowy proces, zero kalibracji): GER jako LIVE (PP 772.3, stab. 0.71, WS 0.34, CP 72.682).
+- odczyt 9 pól jednego państwa ~50 ms.
+
+**Zasady bezpieczeństwa:** tylko gra `v1.19.3.0.c01a` (inne wersje → zwykła kalibracja); stabilność/poparcie wojny
+poza 0..1 → odczyt odrzucony (`implausible`); brak obiektu → `country_missing`. Zapis do pamięci nadal nie istnieje.
+
+**Ograniczenia**
+- Państwo gracza: gra nie trzyma jego indeksu w pamięci statycznej (363 kandydatów, 0 po zmianie GER↔ITA).
+  Na razie z najnowszego zapisu bieżącej sesji; Country Editor czyta państwo wybrane na liście (dowolne).
+- Manpower i konwoje: jeszcze bez odstępu w obiekcie państwa (manpower nadal z kalibracji).
+- Mody dodające tagi zmieniają indeksy – kolejność czytana z plików gry, ale **z modami nietestowane**.
+- Po aktualizacji gry ścieżkę trzeba znaleźć od nowa (narzędzie: kalibracja + wyszukiwanie wsteczne, ~20 min).
+
+**Dodatkowo w tej części:** zapamiętywanie potwierdzonych adresów między procesami (`live/layout.py`, wcześniej
+gubione przy restarcie) i szybka kalibracja z zapamiętanego układu (`python -m hoi4dbg.live layout`) jako zapas;
+`ProcessMemory.modules()` (lista modułów procesu).
+
+**Testy (2026-10-09):** backend 132 OK, JS 24 OK, smoke 18/18.
