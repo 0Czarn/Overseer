@@ -69,6 +69,7 @@ def build_routes(svc: DebuggerService) -> list[Route]:
           lambda q, b, tag: svc.country_save_values(tag, _str(q, "name") or None)),
         r("GET", "/api/states", lambda q, b: svc.states(_str(q, "owner") or None)),
         r("GET", f"/api/focus/{tag}", lambda q, b, tag: svc.focus(tag)),
+        r("POST", f"/api/focus/{tag}/queue", lambda q, b, tag: svc.set_focus_queue(tag, b.get("queue"))),
         r("GET", f"/api/equipment/{tag}", lambda q, b, tag: svc.equipment(tag)),
         r("POST", f"/api/equipment/{tag}/changes", lambda q, b, tag: changes.create(
             tag, str(b.get("archetype", "")), b.get("amount"), str(b.get("variant", "")))),

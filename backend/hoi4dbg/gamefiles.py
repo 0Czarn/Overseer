@@ -87,3 +87,22 @@ def _equipment_names(install: str, lang: str) -> tuple:
     if not path.is_file():
         return ()
     return tuple(EQUIPMENT_NAME_LINE.findall(path.read_text(encoding="utf-8-sig", errors="replace")))
+
+
+def enabled_mods(userdata: Path) -> list[Path]:
+    """Folders of the enabled mods in load order (dlc_load.json -> *.mod descriptors -> path=...)."""
+    import json
+    try:
+        enabled = json.loads((Path(userdata) / "dlc_load.json").read_text(encoding="utf-8")).get("enabled_mods") or []
+    except (OSError, ValueError):
+        return []
+    out = []
+    for rel in enabled:
+        try:
+            descriptor = (Path(userdata) / rel).read_text(encoding="utf-8-sig", errors="replace")
+        except OSError:
+            continue
+        m = re.search(r'^\s*path\s*=\s*"([^"]+)"', descriptor, re.M)
+        if m and Path(m.group(1)).is_dir():
+            out.append(Path(m.group(1)))
+    return out

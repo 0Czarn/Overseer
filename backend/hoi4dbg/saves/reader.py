@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from .. import focus
 from . import binary, binvalues, countries, equipment, fields, states, text
 
 SAVE_SUFFIX = ".hoi4"
@@ -218,6 +219,21 @@ class SaveAnalyzer:
                 self._equipment = {k: v for k, v in self._equipment.items() if k[0] == result["copy"]}
                 self._equipment[key] = cached
         return {"analysis": result, **cached}
+
+    def focus_state(self, path: Path, tag: str) -> dict:
+        """Focus tree id, completed focuses, current focus and its progress for one country."""
+        result = self.analyse(path)
+        if result["error"]:
+            raise binary.SaveFormatError(result["error"]["code"], result["error"]["message"])
+        data = Path(result["copy"]).read_bytes()
+        if result["format"] == "text":
+            block = text.country_block(data, tag)
+        else:
+            block = binvalues.country_blocks(data, {tag}, result.get("float_width"),
+                                             (result.get("header") or {}).get("version")).get(tag)
+        if block is None:
+            raise binary.SaveFormatError("country_missing", f"Country {tag} does not exist in this save")
+        return {"analysis": result, **focus.save_state(block)}
 
     def country_values(self, path: Path, tag: str) -> dict:
         """Country Editor values for `tag` from the cached copy of a save (text, or binary 1.19.3)."""

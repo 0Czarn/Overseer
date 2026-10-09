@@ -4,6 +4,7 @@ into the payloads served by the API. Contains no HTTP and no UI code."""
 from __future__ import annotations
 
 import datetime as dt
+import json
 from pathlib import Path
 import logging
 import platform
@@ -11,9 +12,10 @@ import sys
 import time
 
 from . import __version__, demo, equipment_changes, gamefiles
+from . import focus as focus_mod
 from .applog import RingBufferHandler
 from .integration import GameIntegration, NullIntegration
-from .reports import ReportStore
+from .reports import ReportError, ReportStore
 from .saves import equipment as save_equipment
 from .saves import fields as save_fields
 from .saves import states as save_states
@@ -225,9 +227,72 @@ class DebuggerService:
             items = [s for s in items if owner in (s["owner"], s["controller"])]
         return envelope(source, items, note)
 
+    def _focus_context(self, tag: str):
+        """(state from the newest save, focuses of its tree with statuses) or None."""
+        install = self._install_path()
+        picked = self._pick_save(None)
+        if install is None or picked is None:
+            return None
+        state = self.saves.focus_state(picked[0], tag)
+        userdata = (self.detect().get("userdata") or {}).get("path")
+        folders = focus_mod.focus_folders(install, gamefiles.enabled_mods(Path(userdata)) if userdata else [])
+        focuses = focus_mod.statuses(focus_mod.tree(folders, state["tree"]), state) if state["tree"] else []
+        names = focus_mod.loc_names(install, {f["id"] for f in focuses})
+        for f in focuses:
+            name = names.get(f["id"])
+            # scripted names ([GetSomething]) are resolved by the game at runtime - show a readable id instead
+            f["name"] = name if name and "[" not in name else f["id"].split("_", 1)[-1].replace("_", " ").capitalize()
+        return state, focuses
+
     def focus(self, tag: str) -> dict:
-        return envelope(DEMO, {"tag": tag.upper(), "focuses": demo.focuses(tag), "queue_supported": False},
-                        DEMO_NOTE)
+        """Focus tree of `tag` (game/mod files) with statuses from the newest save; the queue is a plan."""
+        tag = tag.upper()
+        try:
+            ctx = self._focus_context(tag)
+        except SaveFormatError as exc:
+            ctx, note = None, f"Focus state not read: {exc}"
+        else:
+            note = None
+        if ctx is None:
+            return envelope(DEMO, {"tag": tag, "focuses": demo.focuses(tag), "queue_supported": False},
+                            f"{note} {DEMO_NOTE}" if note else DEMO_NOTE)
+        state, focuses = ctx
+        analysis = state["analysis"]
+        header = analysis.get("header") or {}
+        queue = self._focus_queues().get(f"{tag}:{state['tree']}", [])
+        return envelope(SAVE, {
+            "tag": tag, "tree": state["tree"], "current": state["current"], "progress_days": state["progress"],
+            "paused": state["paused"], "completed": len(state["completed"]), "focuses": focuses,
+            "queue": focus_mod.validate_queue(focuses, state, queue), "queue_supported": False,
+            "file": analysis["file"], "in_game_date": header.get("date"),
+            "freshness": save_freshness(analysis["file"]["mtime"], self.detect()),
+        }, f"Focus tree {state['tree']} from the game files; state of {tag} from {analysis['file']['name']} "
+           f"({(header.get('date') or {}).get('text') or '?'}). Snapshot - not live.")
+
+    def _focus_queue_file(self) -> Path:
+        return Path(self.data_dir) / "focus-queues.json"
+
+    def _focus_queues(self) -> dict:
+        try:
+            data = json.loads(self._focus_queue_file().read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def set_focus_queue(self, tag: str, queue: list) -> dict:
+        """Stores the planned order of focuses for `tag` (its current tree) and returns it validated."""
+        tag = tag.upper()
+        if not isinstance(queue, list) or len(queue) > 200 or not all(isinstance(q, str) and len(q) < 200 for q in queue):
+            raise ReportError("queue must be a list of up to 200 focus ids")
+        ctx = self._focus_context(tag)
+        if ctx is None:
+            raise NotFound("No game installation or save to read the focus tree from")
+        state, focuses = ctx
+        queues = self._focus_queues()
+        queues[f"{tag}:{state['tree']}"] = queue
+        self._focus_queue_file().write_text(json.dumps(queues, indent=1), encoding="utf-8")
+        self.log.info("Focus queue %s (%s): %s", tag, state["tree"], ", ".join(queue) or "empty")
+        return {"data": focus_mod.validate_queue(focuses, state, queue)}
 
     def equipment(self, tag: str) -> dict:
         """Stockpile and convoys of `tag` from the newest save, names from the game files; DEMO without them."""

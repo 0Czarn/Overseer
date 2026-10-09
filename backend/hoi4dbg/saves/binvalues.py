@@ -26,6 +26,8 @@ TOKENS = {
     "war_support": 0x37FD, "command_power": 0x3883, "fuel_status": 0x3B10, "fuel": 0x2EE3,
     "experience_status": 0x418D, "army_experience": 0x3392, "air_experience": 0x3394,
     "navy_experience": 0x3393, "manpower": 0x283C, "current": 0x2B75,
+    # national focus (aligned with the text save 11.hoi4): focus_tree id, focus = { completed progress current paused }
+    "focus_tree": 0x33B8, "focus": 0x33B7, "completed": 0x3127, "progress": 0x2B05, "paused": 0x3691,
 }
 NAMES = {v: k for k, v in TOKENS.items()}
 

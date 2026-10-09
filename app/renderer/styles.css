@@ -309,3 +309,19 @@ textarea.input { resize: vertical; width: 100%; }
 .live-change input.input { width: 120px; }
 .live-grid { margin-bottom: 12px; }
 .live-mini .stat-value { font-size: 1.2em; }
+
+/* --- focus tree ---------------------------------------------------------- */
+.focus-tree-scroll { overflow: auto; max-height: 70vh; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev-1, var(--bg)); }
+.focus-tree { position: relative; }
+.focus-lines { position: absolute; inset: 0; pointer-events: none; }
+.focus-lines line { stroke: var(--border-strong, var(--text-muted)); stroke-width: 1.5; opacity: 0.6; }
+.focus-node { position: absolute; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 4px 6px; border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: 6px; background: var(--bg-elev-2); color: var(--text); font: inherit; font-size: 11px; line-height: 1.2; text-align: left; cursor: pointer; overflow: hidden; }
+.focus-node:hover { border-color: var(--accent); }
+.focus-node-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.focus-node.focus-excluded { border-left-color: var(--text-muted); opacity: 0.45; }
+.focus-queued { box-shadow: 0 0 0 2px var(--accent); }
+.focus-queued-bad { box-shadow: 0 0 0 2px var(--bad); }
+.focus-qn { position: absolute; top: 2px; right: 4px; font-weight: 700; color: var(--accent); }
+.focus-queue { margin: 0 0 10px; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
+.focus-queue li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.focus-queue-name { font-weight: 600; }

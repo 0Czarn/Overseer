@@ -478,3 +478,23 @@ gubione przy restarcie) i szybka kalibracja z zapamiętanego układu (`python -m
   wariantów o tej nazwie. Nazwy z cudzysłowem, #, = lub nawiasami są odrzucane (nie da się ich wpisać w konsoli).
 - Sprawdzone tylko dla czołgów; samoloty/okręty – ta sama komenda, ale w grze nietestowane.
 - Testy: backend 158 OK, JS 24 OK, smoke 18/18.
+
+---
+
+## Krok F (część 1): National Focus Manager – drzewko, stan, plan kolejki (2026-10-09) ✅
+
+- `hoi4dbg/focus.py`: drzewka z `common/national_focus/*.txt` (67 drzewek, 10 288 celów, 335 współdzielonych; 0,6 s)
+  + drzewka z **włączonych modów** (`dlc_load.json` → deskryptory `*.mod`); pozycje jak w grze (x/y względem
+  `relative_position_id`), wymagania (AND między blokami, OR w bloku), wykluczenia, czas (koszt × 7 dni).
+- Stan z zapisu: `focus_tree` (drzewko wykrywane automatycznie), ukończone, bieżący cel, postęp w dniach, pauza.
+  Tokeny binarne 1.19.3: focus_tree 0x33b8, focus 0x33b7, completed 0x3127, progress 0x2b05, paused 0x3691.
+- Statusy: ukończony / w trakcie / dostępny (wymagania spełnione) / zablokowany / wykluczony. Warunki `available`
+  gry nie są oceniane – oznaczane „game conditions not checked”.
+- **Kolejka (plan):** klikanie celów w drzewku, kolejność ↑↓, sprawdzanie: wymagania spełnione przez wcześniejsze
+  pozycje, wykluczenia, cele spoza drzewka; zapis trwały per państwo i drzewko (`focus-queues.json`).
+- Nazwy z lokalizacji gry; nazwy skryptowe (`[GetSomething]`) zastępowane czytelnym identyfikatorem.
+- **Automatyczne rozpoczynanie celów: brak udokumentowanej metody.** Dokumentacja gry nie ma komendy ani efektu
+  rozpoczynającego cel (są tylko natychmiast kończące: `complete_national_focus`, `Focus.AutoComplete` – zakazane
+  przez specyfikację). Opcje → decyzja użytkownika (STATUS-AND-PLAN.md).
+- Sprawdzone na prawdziwych danych: SOV (311 celów, w trakcie SOV_heavy_industry 30/35 dni), GER (438, 11 ukończonych,
+  5 wykluczonych). Testy: backend 161 OK, JS 24 OK, smoke 18/18 (zakładka bez DEMO).

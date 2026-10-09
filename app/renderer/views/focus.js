@@ -1,18 +1,84 @@
-import { h, card, demoBanner, meter, notice, sourceBadge, viewHeader } from '../lib/dom.js';
-import { FOCUS_COLUMNS, groupFocuses } from '../lib/format.js';
+import { h, card, demoBanner, meter, notice, sourceBadge, toast, viewHeader } from '../lib/dom.js';
+import { FOCUS_COLUMNS, formatAge, freshnessInfo, groupFocuses } from '../lib/format.js';
 import { countryPicker } from './shared.js';
 
-function focusCard(focus, queueSupported) {
+const CELL_W = 118;
+const CELL_H = 74;
+const STATUS_LABEL = { completed: 'Completed', in_progress: 'In progress', available: 'Available', blocked: 'Blocked',
+  excluded: 'Excluded' };
+
+function demoCard(focus) {
   return h('div', { class: `focus focus-${focus.status}` },
     h('div', { class: 'focus-name' }, focus.name),
     h('code', { class: 'focus-id' }, focus.id),
-    h('div', { class: 'focus-meta' }, `${focus.days} days`,
-      focus.blocked_by ? h('span', { class: 'warn-text' }, ` - needs ${focus.blocked_by}`) : null),
-    focus.status === 'in_progress' ? meter(focus.progress ?? 0) : null,
-    focus.status === 'available'
-      ? h('button', { class: 'btn btn-small', disabled: !queueSupported, title: 'Queueing not available yet' },
-        'Queue next')
-      : null);
+    h('div', { class: 'focus-meta' }, `${focus.days} days`),
+    focus.status === 'in_progress' ? meter(focus.progress ?? 0) : null);
+}
+
+function demoView(res) {
+  const groups = groupFocuses(res.data.focuses);
+  return h('div', { class: 'kanban' }, FOCUS_COLUMNS.map((col) => card(`${col.label} (${groups[col.status].length})`,
+    groups[col.status].length ? groups[col.status].map(demoCard) : h('p', { class: 'muted' }, 'None'))));
+}
+
+/** The tree laid out like in game (x/y from the focus files); click a focus to add it to / remove it from the queue. */
+function treeView(focuses, queue, onToggle) {
+  const minX = Math.min(...focuses.map((f) => f.x));
+  const maxX = Math.max(...focuses.map((f) => f.x));
+  const maxY = Math.max(...focuses.map((f) => f.y));
+  const pos = new Map(focuses.map((f) => [f.id, { left: (f.x - minX) * CELL_W, top: f.y * CELL_H }]));
+  const queued = new Map(queue.map((q, i) => [q.id, { ...q, n: i + 1 }]));
+  const width = (maxX - minX + 1) * CELL_W;
+  const height = (maxY + 1) * CELL_H;
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('class', 'focus-lines');
+  svg.setAttribute('width', String(width));
+  svg.setAttribute('height', String(height));
+  for (const f of focuses) {
+    for (const group of f.prerequisites) {
+      for (const p of group) {
+        const a = pos.get(p);
+        const b = pos.get(f.id);
+        if (!a || !b) continue;
+        const line = document.createElementNS(svgNS, 'line');
+        line.setAttribute('x1', String(a.left + CELL_W / 2));
+        line.setAttribute('y1', String(a.top + CELL_H - 14));
+        line.setAttribute('x2', String(b.left + CELL_W / 2));
+        line.setAttribute('y2', String(b.top + 6));
+        if (group.length > 1) line.setAttribute('stroke-dasharray', '4 3'); // one of several
+        svg.append(line);
+      }
+    }
+  }
+  const nodes = focuses.map((f) => {
+    const q = queued.get(f.id);
+    const p = pos.get(f.id);
+    return h('button', {
+      class: `focus-node focus-${f.status}${q ? (q.ok ? ' focus-queued' : ' focus-queued-bad') : ''}`,
+      style: { left: `${p.left + 4}px`, top: `${p.top + 4}px`, width: `${CELL_W - 8}px`, height: `${CELL_H - 18}px` },
+      title: `${f.name}\n${f.id}\n${STATUS_LABEL[f.status] ?? f.status} · ${f.days} days`
+        + (f.missing?.length ? `\nneeds ${f.missing.map((g) => g.join(' or ')).join(' and ')}` : '')
+        + (f.exclusive?.length ? `\nexcludes ${f.exclusive.join(', ')}` : '')
+        + (f.has_conditions ? '\nhas game conditions the app cannot check' : '')
+        + (q ? `\nqueue #${q.n}${q.ok ? '' : ` - ${q.reason}`}` : ''),
+      onClick: () => onToggle(f),
+    }, q ? h('span', { class: 'focus-qn' }, String(q.n)) : null, h('span', { class: 'focus-node-name' }, f.name),
+    f.status === 'in_progress' ? meter(f.progress ?? 0) : null);
+  });
+  return h('div', { class: 'focus-tree-scroll' },
+    h('div', { class: 'focus-tree', style: { width: `${width}px`, height: `${height}px` } }, svg, ...nodes));
+}
+
+function queueList(byId, queue, save, move, remove) {
+  if (!queue.length) return notice('muted', 'Queue is empty - click focuses in the tree to plan the order.');
+  return h('ol', { class: 'focus-queue' }, queue.map((q, i) => h('li', { class: q.ok ? '' : 'bad-text' },
+    h('span', { class: 'focus-queue-name' }, byId.get(q.id)?.name ?? q.id),
+    h('span', { class: 'muted' }, q.ok ? ` · ${byId.get(q.id)?.days ?? '?'} days${q.conditions ? ' · game conditions not checked' : ''}` : ` · ${q.reason}`),
+    h('span', { class: 'btn-row' },
+      h('button', { class: 'btn btn-small btn-ghost', disabled: i === 0, onClick: () => move(i, -1), 'aria-label': 'Up' }, '↑'),
+      h('button', { class: 'btn btn-small btn-ghost', disabled: i === queue.length - 1, onClick: () => move(i, 1), 'aria-label': 'Down' }, '↓'),
+      h('button', { class: 'btn btn-small btn-ghost', onClick: () => remove(i), 'aria-label': 'Remove' }, '✕')))));
 }
 
 export default {
@@ -22,20 +88,62 @@ export default {
   async render(root, ctx) {
     const tag = ctx.state.selectedCountry;
     const [res, picker] = await Promise.all([ctx.api.get(`/api/focus/${encodeURIComponent(tag)}`), countryPicker(ctx)]);
-    const groups = groupFocuses(res.data.focuses);
+    const header = viewHeader('National Focus Manager', 'Focus tree of the selected country, its state and your planned order.',
+      picker, sourceBadge(res.source, res.note));
+    if (res.source !== 'save') {
+      root.append(...[header, demoBanner(res.note), res.data.focuses.length ? demoView(res) : notice('muted', `No focus data for ${tag}.`)]);
+      return undefined;
+    }
+    const d = res.data;
+    const byId = new Map(d.focuses.map((f) => [f.id, f]));
+    let queue = d.queue;
+    const treeHost = h('div');
+    const queueHost = h('div');
+    const current = byId.get(d.current);
+    const fresh = freshnessInfo(d.freshness?.category);
+
+    const save = async (ids) => {
+      try {
+        queue = (await ctx.api.post(`/api/focus/${encodeURIComponent(tag)}/queue`, { queue: ids })).data;
+        render();
+      } catch (err) { toast(err.message, 'error'); }
+    };
+    const ids = () => queue.map((q) => q.id);
+    const toggle = (f) => {
+      if (['completed', 'in_progress'].includes(f.status)) { toast(`${f.name} is already ${STATUS_LABEL[f.status].toLowerCase()}`); return; }
+      save(ids().includes(f.id) ? ids().filter((x) => x !== f.id) : [...ids(), f.id]);
+    };
+    const move = (i, step) => { const next = ids(); [next[i], next[i + step]] = [next[i + step], next[i]]; save(next); };
+    const remove = (i) => save(ids().filter((_, j) => j !== i));
+    function render() {
+      treeHost.replaceChildren(treeView(d.focuses, queue, toggle));
+      queueHost.replaceChildren(queueList(byId, queue, save, move, remove));
+    }
+    render();
+    const counts = groupFocuses(d.focuses);
 
     root.append(
-      viewHeader('National Focus Manager', 'Current, completed, available and blocked focuses.',
-        picker, sourceBadge(res.source, res.note)),
-      res.source === 'demo' ? demoBanner(res.note) : null,
-      notice('info', 'Focuses are never completed instantly by this tool. Queueing the next focus will only be '
-        + 'offered if the game provides a way to do it that works for all players.'),
-      res.data.focuses.length
-        ? h('div', { class: 'kanban' }, FOCUS_COLUMNS.map((col) => card(`${col.label} (${groups[col.status].length})`,
-          groups[col.status].length
-            ? groups[col.status].map((f) => focusCard(f, res.data.queue_supported))
-            : h('p', { class: 'muted' }, 'None'))))
-        : notice('muted', `No focus data for ${tag}.`),
+      header,
+      h('div', { class: `save-banner ${fresh.cls}`, role: 'note' },
+        h('div', { class: 'save-banner-line' }, sourceBadge('save'), h('strong', null, d.file.name),
+          d.in_game_date ? h('span', null, 'In-game date ', h('b', null, d.in_game_date.text)) : null,
+          h('span', { class: 'muted' }, `file written ${new Date(d.file.modified).toLocaleString()} (${formatAge(d.freshness?.age_s)})`)),
+        h('div', { class: 'fresh' }, `SNAPSHOT - ${d.freshness?.label ?? fresh.short}`)),
+      h('div', { class: 'split' },
+        card('Current focus', current
+          ? [h('div', { class: 'focus-name' }, current.name), h('code', { class: 'focus-id' }, current.id),
+            meter(current.progress ?? 0), h('div', { class: 'focus-meta' },
+              `${Math.round(d.progress_days)} of ${current.days} days${d.paused ? ' · paused' : ''}`)]
+          : notice('warn', 'No focus in progress.')),
+        card(`Planned order (${queue.length})`, [queueHost,
+          notice('info', 'This is a plan checked against prerequisites and exclusions. The game has no documented command '
+            + 'that STARTS a focus, so the app does not start them by itself; focuses are never completed instantly.')])),
+      card(`Tree ${d.tree} - ${d.focuses.length} focuses (${counts.completed?.length ?? 0} completed, `
+        + `${counts.available?.length ?? 0} available)`, [
+        h('p', { class: 'hint' }, 'Click a focus to add it to the plan or remove it. Dashed lines: one of several prerequisites. '
+          + '"Available" means the prerequisites are met - the game may still require other conditions.'),
+        treeHost]),
     );
+    return undefined;
   },
 };
