@@ -13,9 +13,10 @@ sprawdzono, jest oznaczone jako *do weryfikacji*.
 | Wykrywanie procesu i wersji | ✅ na żywo, bez dostępu do pamięci |
 | Zapisy: format binarny | ✅ w pełni rozpoznany i walidowany (1.16.10–1.19.3) |
 | Zapisy: nagłówek, gracze → państwa, mody | ✅ odczyt z kopii, z oznaczeniem aktualności |
-| Zapisy: wartości państw, stany, cele, sprzęt | ❌ brak mapy nazw pól (patrz 2.2) |
+| Zapisy: wartości Country Editor | ✅ z zapisów tekstowych (`-force_text_save`); manpower/convoys nieustalone |
+| Zapisy: stany, cele, sprzęt | ❌ jeszcze nie mapowane |
 | Odczyt na żywo | ❌ |
-| Modyfikacja | ❌ (celowo, zgodnie z decyzją) |
+| Modyfikacja | 🟡 PP: komenda diagnostyczna + niezależna weryfikacja przez zapis; test w grze niewykonany |
 
 ## 2. Etap pośredni: zapis jako źródło „prawie na żywo”
 

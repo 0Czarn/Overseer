@@ -97,7 +97,7 @@ class FormatTests(unittest.TestCase):
         cases = {
             b"": "empty",
             b"PK\x03\x04rest": "compressed",
-            b"HOI4txt\nplayer=\"GER\"\n": "text_unsupported",
+            b"HOI4txt\nplayer=\"GER\"\n": "unsupported",  # text header without its expected end
             b"\x00\x01garbage": "unknown_format",
             full[:40]: "truncated",  # cut inside the header
             Builder().key(0x1111).i32(1).bytes(): "unsupported",  # binary, but no version string
@@ -307,7 +307,8 @@ class RealSaveTests(TempDirMixin, unittest.TestCase):
         result = analyzer.analyse(staged)
 
         self.assertIsNone(result["error"], result["error"])
-        self.assertEqual(result["validation"]["status"], "complete", result["validation"])
+        expected = "complete" if result["format"] == "binary" else "not_applicable"
+        self.assertEqual(result["validation"]["status"], expected, result["validation"])
         header = result["header"]
         self.assertRegex(header["player_tag"], r"^[A-Z][A-Z0-9]{2}$")
         self.assertIn(header["player_tag"], [p["tag"] for p in header["players"]])

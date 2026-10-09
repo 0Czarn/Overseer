@@ -9,7 +9,7 @@ modyfikowane: do analizy kopiowano je do katalogu tymczasowego, a aplikacja kopi
 | Początek pliku | Znaczenie | Obsługa |
 |---|---|---|
 | `HOI4bin` | zapis binarny (domyślny; `settings.txt`: `save_as_binary=yes`) | ✅ odczyt |
-| `HOI4txt` | zapis tekstowy | rozpoznawany, **niezaimplementowany** (brak prawdziwego pliku do weryfikacji nazw pól) |
+| `HOI4txt` | zapis tekstowy (gra uruchomiona z `-force_text_save`) | ✅ nagłówek + wartości Country Editor (sekcja 8) |
 | `PK\x03\x04` | archiwum zip | rozpoznawany, nieobsługiwany |
 | pusty / inny | – | błąd `empty` / `unknown_format` |
 
@@ -97,3 +97,36 @@ czas zapisania pliku z wiekiem oraz kategorię:
 
 Dodatkowo UI sprawdza zgodność wersji zapisu z uruchomioną grą (porównanie bez sufiksu w nawiasie,
 który różni się między zapisami tego samego buildu) i oznacza zapis, który nie jest najnowszy.
+
+## 8. Zapisy tekstowe (`-force_text_save`), potwierdzone 2026-10-09
+
+**Jak uzyskane.** W `hoi4.exe` ciąg `force_text_save` leży na liście parametrów linii poleceń (obok `debug`, `nofilewatcher`,
+`start_save`). Użytkownik uruchomił grę z `-force_text_save` i wykonał `savegame`. Powstał `PROJEKT-OVERSEER.hoi4`
+(62,6 MB, zaczyna się od `HOI4txt`). `settings.txt` nie był zmieniany. Gra zapisuje ten plik przy starcie i wyjściu,
+więc jego edycja przy działającej grze byłaby zawodna.
+
+**Nagłówek w formie tekstowej** potwierdza znaczenia ustalone wcześniej dla tokenów binarnych:
+`player` (0x2a35), `ideology` (0x2e3e), `date` (0x284a), `difficulty` (0x299f), `version` (0x00ee),
+`player_countries` (0x3567) → `user` (0x00e2), `country_leader` (#3035), `id` (#000b), `mods` (0x3769).
+
+**Pola Country Editor** (blok `countries={ TAG={ ... } }`, odczytane z prawdziwego pliku):
+
+| Pole | Ścieżka w bloku państwa | GER w PROJEKT-OVERSEER |
+|---|---|---|
+| Political Power | `politics.political_power` | 2.324 |
+| Stability | `stability` (0–1) | 0.7 |
+| War Support | `war_support` (0–1) | 0.3 |
+| Command Power | `command_power` | 0.286 |
+| Fuel | `fuel_status.fuel` | 297201.86508 |
+| Army Experience | `experience_status.army_experience` | 30.0 |
+| Air / Navy Experience | `experience_status.air_experience` / `navy_experience` | brak w pliku (gra pomija wartości, prawdopodobnie zerowe) |
+| Manpower | **nie zlokalizowano**. W bloku jest tylko `manpower.ratio`. | – |
+| Convoys | **niepotwierdzone**. `convoys.equipment` zawiera ilości dla ID sprzętu. | – |
+
+Kontrola: SOV PP 1.5856, ENG PP 2.3182. Wartości różnią się między państwami, a bloki są poprawnie rozgraniczone.
+
+**Parser** (`saves/text.py`) wycina tylko potrzebne fragmenty (nagłówek, jeden blok państwa). Czas: nagłówek ~1 ms,
+blok państwa ~0,05 s.
+
+**Zapisy binarne.** Te same wartości są w nich zakodowane, ale identyfikatorów tokenów dla `politics`, `political_power`
+itd. nie ustalono, a skala wartości liczbowych jest niezweryfikowana. Odczyt wartości państw działa więc tylko dla zapisów tekstowych.

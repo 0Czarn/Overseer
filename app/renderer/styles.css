@@ -291,3 +291,9 @@ textarea.input { resize: vertical; width: 100%; }
   .table td.empty { display: block; text-align: center; }
   .table td.empty::before { content: none; }
 }
+
+/* --- country editor (save values, change test) ------------------------- */
+.stat-missing { opacity: 0.6; }
+.stat-source { font-size: 11.5px; overflow-wrap: anywhere; }
+.cmd { background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; color: var(--accent); }
+.steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }

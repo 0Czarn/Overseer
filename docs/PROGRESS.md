@@ -19,8 +19,8 @@ Legenda: ✅ zrobione · 🟡 w toku / częściowo · ⏳ zaplanowane · ⛔ wym
 |---|---|---|
 | 1 | Aplikacja desktopowa, UI (9 zakładek), logi, testy, dokumentacja | ✅ |
 | 2 | Wykrywanie procesu HOI4 i wersji gry | ✅ |
-| 3 | Wiarygodny odczyt danych z aktywnej rozgrywki | 🟡 metoda A (zapisy): nagłówek, gracze, mody ✅; wartości państw/stanów ⛔ wymaga kalibracji nazw pól |
-| 4 | Prototyp modyfikacji pojedynczej wartości (SP) + weryfikacja | ⏳ |
+| 3 | Wiarygodny odczyt danych z aktywnej rozgrywki | 🟡 zapisy: nagłówek, gracze, mody ✅; wartości Country Editor z zapisów tekstowych ✅; odczyt procesu ❌ |
+| 4 | Prototyp modyfikacji pojedynczej wartości (SP) + weryfikacja | 🟡 PP: metoda diagnostyczna + niezależna weryfikacja gotowe; test w grze niewykonany |
 | 5 | Edytory państw, stanów, sprzętu | ⏳ |
 | 6 | Cele narodowe, narzędzia debugowania | ⏳ |
 | 7 | Testy synchronizacji MP (w tym inicjowanie przez nie-hosta) | ⏳ |
@@ -144,6 +144,45 @@ i bez modyfikacji save'ów.
 - Pola `#3035` i `#000b` w bloku gracza mają nieznane znaczenie.
 - Zapis jest migawką. Odczyt aktywnej rozgrywki nie istnieje.
 
+---
+
+## Etap 3 (część 2) + etap 4 (przygotowanie): Political Power z prawdziwego zapisu 🟡
+
+Instrukcje: `prompt4.md` (2026-10-09).
+
+**Zrobione i sprawdzone na prawdziwych danych**
+- Zapis tekstowy uzyskany przez parametr startowy `-force_text_save` (bez zmiany `settings.txt`). Gracz wykonał
+  `savegame` → `PROJEKT-OVERSEER.hoi4`.
+- `saves/text.py`: parser Clausewitz-text (nagłówek i pojedyncze bloki państw), wartości Country Editor z pochodzeniem
+  każdego pola (`read` / `absent` / `unmapped`). Ścieżki pól ustalone na prawdziwym pliku (SAVE-FORMAT §8).
+- API `GET /api/countries/<TAG>/save-values` zwraca wartości, plik, datę w grze, czas odczytu, aktualność (`is_live: false`)
+  i tag gracza z zapisu.
+- Country Editor pokazuje prawdziwe wartości z zapisu: plakietka SAVE, data w grze, czas zapisu pliku, czas odczytu i
+  „SNAPSHOT – …”. Pola niezmapowane są puste z opisem, a nie wartościami DEMO. Gdy zapis jest binarny lub niedostępny,
+  widok wraca do DEMO z wyjaśnieniem.
+- Diagnostyczny test zmiany PP: debugger przygotowuje udokumentowaną komendę `pp <n>`, zapisuje wartość bazową z zapisu,
+  a po `savegame` niezależnie czyta nowszy zapis i porównuje (pass / fail / inconclusive przy zmianie daty w grze / waiting).
+  Wynik trafia do logu aplikacji.
+
+**Wartości odczytane z prawdziwego zapisu (GER, 1936.1.1.12):** PP 2.324, stabilność 0.7, poparcie wojny 0.3,
+CP 0.286, paliwo 297201.87, doświadczenie armii 30.
+
+**Czego brakuje (uczciwie)**
+- **Modyfikacja PP nie została jeszcze wykonana ani zweryfikowana w grze.** Metoda i weryfikacja są gotowe, ale wymagają
+  wpisania `pp 10` i `savegame` w grze uruchomionej z `-force_text_save`. Gra była zamknięta w chwili implementacji.
+- **Odczyt aktywnego procesu nie istnieje.** Statyczna analiza `hoi4.exe` (mapa tokenów) została zablokowana przez
+  system uprawnień Claude Code, a analiza pamięci procesu nie była prowadzona. Wymaga wyraźnego dopuszczenia przez użytkownika.
+- Manpower i Convoys: lokalizacja w zapisie nieustalona.
+- Zapisy binarne: brak mapy tokenów dla pól państwa.
+- MP: komendy konsoli działają na kraj gracza wydającego komendę („to player”). Działanie dla klienta niebędącego hostem
+  oraz synchronizacja **nie były testowane** (wymaga dwóch klientów).
+
+**Testy (2026-10-09)**
+- `npm run test:py`: 85 OK. Nowe: 11 testów zapisów tekstowych (parser, bloki państw, uszkodzone pliki, usługa,
+  zapis binarny jako „unmapped”) plus test na kopii prawdziwego `PROJEKT-OVERSEER.hoi4` z kontrolą SHA-1 oryginału.
+- `npm run test:js`: 20 OK (nowe: komenda `pp`, logika weryfikacji).
+- `npm run smoke`: 18/18 widoków.
+
 ## Decyzje i założenia
 - **Electron + Python zamiast jednego języka:** UI w Electronie jest nowoczesne i przenośne, a Python z `ctypes`
   pozwala w przyszłości dostać się do WinAPI bez kompilowania natywnych modułów Node.
@@ -152,6 +191,7 @@ i bez modyfikacji save'ów.
 
 ## Otwarte kwestie / do decyzji
 - ✅ Metoda etapu 3: A (zapisy) – zatwierdzona 2026-10-09.
-- ⛔ Zgoda na tymczasowe `save_as_binary=no` (kalibracja nazw pól) – [REPORT-LIVE-AND-WRITE.md](REPORT-LIVE-AND-WRITE.md) §5.
-- ⛔ Metoda modyfikacji dla etapu 4 (proponowany generator komend konsoli) – j.w.
+- ✅ Zapis tekstowy: uzyskany przez `-force_text_save` (bez zmiany `settings.txt`).
+- ⛔ Analiza `hoi4.exe` / pamięci procesu: zablokowana przez uprawnienia Claude Code; wymaga wyraźnej zgody użytkownika.
+- Generator komend: tylko narzędzie diagnostyczne (decyzja z prompt4.md), nie docelowa implementacja edytorów.
 - `zalozenia.md` jest pusty – jeśli miał zawierać dodatkowe wymagania, trzeba go uzupełnić.

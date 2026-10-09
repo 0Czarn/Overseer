@@ -4,6 +4,7 @@ into the payloads served by the API. Contains no HTTP and no UI code."""
 from __future__ import annotations
 
 import datetime as dt
+from pathlib import Path
 import logging
 import platform
 import sys
@@ -14,6 +15,7 @@ from .applog import RingBufferHandler
 from .integration import GameIntegration, NullIntegration
 from .reports import ReportStore
 from .saves import fields as save_fields
+from .saves.binary import SaveFormatError
 from .saves.reader import SaveAnalyzer, list_saves
 
 LIVE, DEMO, UNAVAILABLE, SAVE = "live", "demo", "unavailable", "save"
@@ -31,7 +33,9 @@ CAPABILITIES: dict[str, dict] = {
     "players": {"source": SAVE, "write": False, "note": "Player -> country assignment from the newest save. " + SAVE_NOTE},
     "save_header": {"source": SAVE, "write": False,
                     "note": "Save header: country, in-game date, version, difficulty, ideology, mods."},
-    "country_values": {"source": DEMO, "write": False, "note": WRITE_NOTE},
+    "country_values": {"source": SAVE, "write": False,
+                       "note": "From text saves (-force_text_save): political power, stability, war support, "
+                               "command power, fuel, army XP. Manpower/convoys not mapped. No write method."},
     "states": {"source": DEMO, "write": False, "note": WRITE_NOTE},
     "focus": {"source": DEMO, "write": False, "note": "Read-only preview. Queueing is not implemented."},
     "equipment": {"source": DEMO, "write": False, "note": WRITE_NOTE},
@@ -211,6 +215,50 @@ class DebuggerService:
             "match": None if not (running and saved) else version_core(running) == version_core(saved),
         }
         return envelope(SAVE, result, SAVE_NOTE)
+
+    def _pick_save(self, name: str | None) -> tuple[Path, dict] | None:
+        directory = self.integration.saves_dir()
+        if directory is None or self.saves is None:
+            return None
+        items = list_saves(directory)
+        if not items:
+            return None
+        if name:
+            match = next((i for i in items if i["name"] == name), None)
+            if match is None:
+                raise NotFound(f"Unknown save: {name}")
+        else:
+            match = items[0]
+        return directory / match["name"], {"is_latest": match["name"] == items[0]["name"]}
+
+    def country_save_values(self, tag: str, name: str | None) -> dict:
+        """Real Country Editor values read from a save (snapshot). Never presented as live."""
+        tag = tag.upper()
+        picked = self._pick_save(name)
+        if picked is None:
+            return envelope(UNAVAILABLE, None, "No save file available")
+        path, extra = picked
+        read_at = dt.datetime.now().isoformat(timespec="seconds")
+        try:
+            out = self.saves.country_values(path, tag)
+        except SaveFormatError as exc:
+            return envelope(UNAVAILABLE, {"file": path.name, "error": {"code": exc.code, "message": str(exc)}},
+                            str(exc))
+        except ValueError as exc:
+            raise NotFound(str(exc)) from exc
+        analysis = out["analysis"]
+        game = self.detect()
+        return envelope(SAVE, {
+            "tag": tag,
+            "values": out["values"],
+            "file": analysis["file"],
+            "in_game_date": (analysis.get("header") or {}).get("date"),
+            "save_version": (analysis.get("header") or {}).get("version"),
+            "player_tag": (analysis.get("header") or {}).get("player_tag"),
+            "freshness": save_freshness(analysis["file"]["mtime"], game),
+            "read_at": read_at,
+            **extra,
+        }, SAVE_NOTE)
 
     def save_fields(self) -> dict:
         return envelope(LIVE, save_fields.field_catalog())

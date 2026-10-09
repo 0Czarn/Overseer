@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from . import binary, fields
+from . import binary, fields, text
 
 SAVE_SUFFIX = ".hoi4"
 SNIFF_BYTES = 16
@@ -45,9 +45,7 @@ def analyse_bytes(data: bytes) -> dict:
     if kind == "compressed":
         raise binary.SaveFormatError("compressed", "Compressed (zip) saves are not supported yet")
     if kind == "text":
-        raise binary.SaveFormatError(
-            "text_unsupported", "Text saves (HOI4txt) are recognised but not parsed yet: their field names "
-            "have not been verified against a real text save")
+        return text.analyse_header(data)
     if kind != "binary":
         raise binary.SaveFormatError("unknown_format", f"Not a HOI4 save (starts with {data[:8]!r})")
 
@@ -128,8 +126,12 @@ class SaveAnalyzer:
             result["copy"] = str(snapshot)
             data = snapshot.read_bytes()
             result.update(analyse_bytes(data))
-            result["validation"] = {"status": "pending", "message": "Checking the whole file…"}
-            threading.Thread(target=self._validate, args=(key, data, result), daemon=True).start()
+            if result["format"] == "binary":
+                result["validation"] = {"status": "pending", "message": "Checking the whole file…"}
+                threading.Thread(target=self._validate, args=(key, data, result), daemon=True).start()
+            else:
+                result["validation"] = {"status": "not_applicable",
+                                        "message": "Text save: header and requested country blocks are parsed on demand"}
         except binary.SaveFormatError as exc:
             result["error"] = {"code": exc.code, "message": str(exc), "offset": exc.offset}
             self.log.warning("Save %s not readable: %s (%s)", path.name, exc, exc.code)
@@ -165,6 +167,21 @@ class SaveAnalyzer:
             result.update(changes)
             result["validation"] = update
         self.log.info("Save %s validated: %s (%s)", key[0], update["status"], update.get("message"))
+
+    def country_values(self, path: Path, tag: str) -> dict:
+        """Country Editor values for `tag` from the cached copy of a text save."""
+        result = self.analyse(path)
+        if result["error"]:
+            raise binary.SaveFormatError(result["error"]["code"], result["error"]["message"])
+        if result["format"] != "text":
+            raise binary.SaveFormatError(
+                "binary_values_unmapped", "This save is binary. Country values are only mapped for text saves - "
+                "start the game with -force_text_save and save again.")
+        data = Path(result["copy"]).read_bytes()
+        block = text.country_block(data, tag)
+        if block is None:
+            raise binary.SaveFormatError("country_missing", f"Country {tag} does not exist in this save")
+        return {"analysis": result, "values": text.country_values(block)}
 
     def wait_idle(self, timeout: float = 60.0) -> None:
         """Test helper: wait until no validation is pending."""
