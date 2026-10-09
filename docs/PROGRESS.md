@@ -15,13 +15,15 @@ Legenda: ✅ zrobione · 🟡 w toku / częściowo · ⏳ zaplanowane · ⛔ wym
 
 ## Etapy
 
+Aktualny raport i plan: `STATUS-AND-PLAN.md`.
+
 | Etap | Zakres | Status |
 |---|---|---|
 | 1 | Aplikacja desktopowa, UI (9 zakładek), logi, testy, dokumentacja | ✅ |
 | 2 | Wykrywanie procesu HOI4 i wersji gry | ✅ |
-| 3 | Wiarygodny odczyt danych z aktywnej rozgrywki | 🟡 zapisy ✅; z pamięci (po kalibracji): PP, stabilność, poparcie wojny, CP ✅; manpower, paliwo, doświadczenie ❌ |
-| 4 | Prototyp modyfikacji pojedynczej wartości (SP) + weryfikacja | ✅ PP: zmiana z aplikacji (komenda `pp` + weryfikacja w pamięci), sprawdzone w grze; MP nietestowane |
-| 5 | Edytory państw, stanów, sprzętu | ⏳ |
+| 3 | Wiarygodny odczyt danych z aktywnej rozgrywki | 🟡 zapisy (tekst, binarny 1.19.3) ✅; pamięć: 9 pól kraju gracza ✅; państwa/stany/sprzęt/cele ⏳ |
+| 4 | Prototyp modyfikacji pojedynczej wartości (SP) + weryfikacja | ✅ PP, stabilność, poparcie wojny, CP, paliwo – sprawdzone w grze; MP nietestowane |
+| 5 | Edytory państw, stanów, sprzętu | 🟡 Country Editor (kraj gracza); stany i sprzęt DEMO |
 | 6 | Cele narodowe, narzędzia debugowania | ⏳ |
 | 7 | Testy synchronizacji MP (w tym inicjowanie przez nie-hosta) | ⏳ |
 | 8 | Poprawki, raport kompatybilności, instrukcja użytkownika | ⏳ |
