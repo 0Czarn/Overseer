@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 
-from . import __version__, demo, equipment_changes, gamefiles
+from . import __version__, deficit, demo, equipment_changes, gamefiles
 from . import focus as focus_mod
 from .applog import RingBufferHandler
 from .integration import GameIntegration, NullIntegration
@@ -376,8 +376,30 @@ class DebuggerService:
             else:
                 analysis = data["analysis"]
                 header = analysis.get("header") or {}
+                userdata = (self.detect().get("userdata") or {}).get("path")
+                mods = gamefiles.enabled_mods(Path(userdata)) if userdata else []
+                needs, archetypes = deficit.tables(install, mods)
+                names = gamefiles.equipment_names(install)
+                items = save_equipment.rows(data, names)
+                balance = deficit.compute(data, needs, archetypes)
+                groups: dict[str, dict] = {}
+                for item in items:
+                    if item["pool"] != "stockpile":
+                        continue
+                    a = deficit.archetype_of(item["archetype"], archetypes)
+                    g = groups.setdefault(a, {"archetype": a, "name": names.get(a, a.replace("_", " ").capitalize()),
+                                              "variants": []})
+                    g["variants"].append(item)
+                for a, b in balance.items():
+                    if b["need"] or b["stockpile"]:
+                        groups.setdefault(a, {"archetype": a, "name": names.get(a, a.replace("_", " ").capitalize()),
+                                              "variants": []})
+                for a, g in groups.items():
+                    g.update({k: balance.get(a, {}).get(k, 0.0) for k in ("need", "held", "missing", "shortfall")})
+                    g["stockpile"] = sum(v["amount"] for v in g["variants"])
+                ordered = sorted(groups.values(), key=lambda g: (-g["shortfall"], g["name"]))
                 return envelope(SAVE, {
-                    "tag": tag, "items": save_equipment.rows(data, gamefiles.equipment_names(install)),
+                    "tag": tag, "items": items, "groups": ordered,
                     "designs": equipment_changes.designs(data, tag),
                     "editable": False, "file": analysis["file"], "in_game_date": header.get("date"),
                     "player_tag": header.get("player_tag"),

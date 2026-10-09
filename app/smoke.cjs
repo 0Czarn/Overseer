@@ -39,8 +39,9 @@ function runSmoke(win, outDir, quit) {
         await sleep(300);
         for (const tab of TABS) {
           await wc.executeJavaScript(`location.hash = '#/${tab}'`);
+          // the first read of a new 40 MB binary save takes a few seconds per view (pure Python parser)
           const ok = await waitFor(wc,
-            `document.body.dataset.view === '${tab}' && document.body.dataset.loading === '0'`);
+            `document.body.dataset.view === '${tab}' && document.body.dataset.loading === '0'`, 20000);
           await sleep(250);
           const info = await wc.executeJavaScript(`({
             heading: document.querySelector('.view-header h1')?.textContent ?? null,

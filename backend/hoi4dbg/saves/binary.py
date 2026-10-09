@@ -176,12 +176,27 @@ class Raw:
     data: bytes
 
 
+_SIZE_TABLES: dict[int, list[int]] = {}
+
+
+def _size_table(float_width: int) -> list[int]:
+    """Payload size per token id (0 = none) - a list index is much faster than dict.get() in the skip loop."""
+    table = _SIZE_TABLES.get(float_width)
+    if table is None:
+        table = [0] * 65536
+        for tok, size in {**FIXED_SIZES, F32: float_width}.items():
+            table[tok] = size
+        _SIZE_TABLES[float_width] = table
+    return table
+
+
 class Parser:
     def __init__(self, data: bytes | memoryview, float_width: int, start: int = len(MAGIC_BINARY)) -> None:
         self.data = data
         self.pos = start
         self.sizes = dict(FIXED_SIZES)
         self.sizes[F32] = float_width
+        self.size_table = _size_table(float_width)
 
     def _need(self, count: int) -> None:
         if self.pos + count > len(self.data):
@@ -255,7 +270,7 @@ class Parser:
         if tok != OPEN:
             self.scalar(tok)
             return
-        data, pos, end, sizes = self.data, self.pos, len(self.data), self.sizes
+        data, pos, end, sizes = self.data, self.pos, len(self.data), self.size_table
         depth = 1
         while depth:
             if pos + 2 > end:
@@ -272,9 +287,7 @@ class Parser:
                     raise SaveFormatError("truncated", "File ends in the middle of a value", pos)
                 pos += 2 + (data[pos] | (data[pos + 1] << 8))
             else:
-                size = sizes.get(tok)
-                if size:
-                    pos += size
+                pos += sizes[tok]
             if pos > end:
                 raise SaveFormatError("truncated", "File ends in the middle of a value", end)
         self.pos = pos

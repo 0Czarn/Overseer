@@ -13,21 +13,51 @@ function saveLine(data) {
     h('div', { class: 'fresh' }, `SNAPSHOT - ${data.freshness?.label ?? fresh.short}`));
 }
 
-function saveTable(items, tag) {
+const fmtInt = (v) => formatValue(Math.round(v ?? 0), 'integer');
+
+/** One row per equipment archetype (need / held / stockpile / shortfall) - click to show or hide its variants. */
+function groupTable(groups, tag, ctx) {
   let filter = '';
+  const open = new Set(JSON.parse(sessionStorage.getItem('hoi4dbg.eqOpen') ?? '[]'));
   const host = h('div');
-  const render = () => {
-    const rows = filterByText(items, filter, ['archetype', 'archetype_name', 'variant', 'creator']);
-    host.replaceChildren(table([
-      { key: 'archetype_name', label: 'Equipment', render: (r) => h('span', { title: r.archetype }, r.archetype_name) },
-      { key: 'variant', label: 'Variant', render: (r) => r.variant ?? h('span', { class: 'muted' }, 'base') },
-      { key: 'creator', label: 'Designer', render: (r) => r.creator ?? '—' },
-      { key: 'pool', label: 'Pool', render: (r) => (r.pool === 'convoys' ? 'Convoys' : 'Stockpile') },
-      { key: 'amount', label: 'Amount', cls: 'num', render: (r) => formatValue(r.amount, 'integer') },
-    ], rows, { keyField: 'id', empty: `No equipment in the stockpile of ${tag}` }));
+  const toggle = (a) => {
+    if (open.has(a)) open.delete(a); else open.add(a);
+    try { sessionStorage.setItem('hoi4dbg.eqOpen', JSON.stringify([...open])); } catch { /* convenience only */ }
+    render();
   };
+  const head = h('thead', null, h('tr', null, ['Equipment', 'Needed', 'In divisions', 'Stockpile', 'Deficit'].map(
+    (t, i) => h('th', { class: i ? 'num' : '' }, t))));
+  function render() {
+    const f = filter.toLowerCase();
+    const rows = [];
+    for (const g of groups) {
+      const variants = g.variants.filter((v) => !f || `${v.archetype} ${v.archetype_name} ${v.variant ?? ''}`.toLowerCase().includes(f));
+      if (f && !variants.length && !`${g.name} ${g.archetype}`.toLowerCase().includes(f)) continue;
+      const isOpen = open.has(g.archetype);
+      const canOpen = g.variants.length > 0;
+      rows.push(h('tr', { class: `eq-group${g.shortfall > 0 ? ' eq-deficit' : ''}`, onClick: canOpen ? () => toggle(g.archetype) : null },
+        h('td', null, h('span', { class: 'eq-caret' }, canOpen ? (isOpen ? '▼' : '▶') : ''), h('b', { title: g.archetype }, g.name),
+          canOpen ? h('span', { class: 'muted' }, ` (${g.variants.length})`) : null),
+        h('td', { class: 'num' }, g.need ? fmtInt(g.need) : '—'),
+        h('td', { class: 'num' }, g.need ? fmtInt(g.held) : '—'),
+        h('td', { class: 'num' }, fmtInt(g.stockpile)),
+        h('td', { class: `num ${g.shortfall > 0 ? 'bad-text' : 'good-text'}` }, g.shortfall > 0 ? `−${fmtInt(g.shortfall)}` : (g.need ? 'OK' : ''))));
+      if (isOpen) {
+        for (const v of (f ? variants : g.variants)) {
+          rows.push(h('tr', { class: 'eq-variant' },
+            h('td', null, h('span', { class: 'eq-indent' }), v.variant ?? h('span', { class: 'muted' }, `${v.archetype_name} (base)`),
+              h('span', { class: 'muted' }, ` · ${v.archetype}${v.creator ? ` · ${v.creator}` : ''}${v.obsolete ? ' · obsolete' : ''}`)),
+            h('td', null), h('td', null), h('td', { class: 'num' }, fmtInt(v.amount)), h('td', null)));
+        }
+      }
+    }
+    host.replaceChildren(h('div', { class: 'table-wrap' }, h('table', { class: 'table eq-table' }, head,
+      h('tbody', null, rows.length ? rows : h('tr', null, h('td', { colspan: '5', class: 'muted' }, `No equipment for ${tag}`))))));
+  }
   render();
-  return [h('input', { class: 'input', type: 'search', placeholder: 'Filter equipment…',
+  return [h('p', { class: 'hint' }, 'Deficit = equipment missing in fielded divisions minus the stockpile (estimate: '
+    + 'divisions in training and production lines are not counted). Click a row to show its variants.'),
+  h('input', { class: 'input', type: 'search', placeholder: 'Filter equipment or variant…',
     onInput: (e) => { filter = e.target.value; render(); } }), host];
 }
 
@@ -116,7 +146,7 @@ export default {
       fromSave ? saveLine(res.data) : demoBanner(res.note),
       fromSave ? null : notice('info', 'Adding or removing equipment stays disabled until a safe method has been '
         + 'implemented and tested.'),
-      card(fromSave ? `Stockpile of ${tag}` : 'Stockpile', fromSave ? saveTable(res.data.items, tag) : demoTable(res, tag)),
+      card(fromSave ? `Equipment of ${tag}` : 'Stockpile', fromSave ? groupTable(res.data.groups ?? [], tag, ctx) : demoTable(res, tag)),
       adder?.el,
     ].filter(Boolean));
     return () => adder?.stop();

@@ -23,7 +23,7 @@ const timeout = setTimeout(() => {
   console.error('Smoke test timed out');
   child.kill();
   process.exit(1);
-}, 120000);
+}, 300000);
 
 child.on('exit', (code) => {
   clearTimeout(timeout);

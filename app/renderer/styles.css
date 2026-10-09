@@ -325,3 +325,11 @@ textarea.input { resize: vertical; width: 100%; }
 .focus-queue { margin: 0 0 10px; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
 .focus-queue li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .focus-queue-name { font-weight: 600; }
+
+/* --- equipment groups ------------------------------------------------------ */
+.eq-table .eq-group { cursor: pointer; }
+.eq-table .eq-group:hover { background: var(--bg-elev-2); }
+.eq-table .eq-deficit td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
+.eq-caret { display: inline-block; width: 18px; color: var(--text-muted); font-size: 11px; }
+.eq-indent { display: inline-block; width: 26px; }
+.eq-table .eq-variant td { font-size: 12.5px; }
