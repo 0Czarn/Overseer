@@ -13,7 +13,9 @@ export async function countryPicker(ctx, { label = 'Country', key = 'selectedCou
   const { data } = await loadCountries(ctx);
   const value = ctx.state[key];
   return h('label', { class: 'field-inline' }, h('span', null, label),
-    select(data.map((c) => ({ value: c.tag, label: `${c.tag} - ${c.name}` })), value, (tag) => {
+    // Existing countries first (when known from a save); the current selection stays selectable.
+    select(data.filter((c) => c.exists !== false || c.tag === value)
+      .map((c) => ({ value: c.tag, label: `${c.tag} - ${c.name}` })), value, (tag) => {
       if (onChange) onChange(tag);
       else ctx.setState({ [key]: tag });
     }, { class: 'input' }));

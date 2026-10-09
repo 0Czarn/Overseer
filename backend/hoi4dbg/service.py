@@ -10,7 +10,7 @@ import platform
 import sys
 import time
 
-from . import __version__, demo
+from . import __version__, demo, gamefiles
 from .applog import RingBufferHandler
 from .integration import GameIntegration, NullIntegration
 from .reports import ReportStore
@@ -143,15 +143,61 @@ class DebuggerService:
                 caps[key].update(source=UNAVAILABLE, note=self.integration.reason)
         return caps
 
-    # -- game data (DEMO until Stage 3) ---------------------------------------------------
+    # -- countries (game files + newest save) -----------------------------------------------
+    def _install_path(self) -> Path | None:
+        path = (self.detect().get("install") or {}).get("path")
+        return Path(path) if path and (Path(path) / "common" / "country_tags").is_dir() else None
+
     def countries(self) -> dict:
-        return envelope(DEMO, demo.countries(), DEMO_NOTE)
+        """Tags from the game files, names from its localisation; existence, ideology and players from the
+        newest save (countries owning at least one state). DEMO only when neither is available."""
+        install = self._install_path()
+        tags = gamefiles.tag_order(install) if install else []
+        names = gamefiles.country_names(install) if install else {}
+        summary, note = None, None
+        picked = self._pick_save(None)
+        if picked is not None:
+            try:
+                summary = self.saves.country_list(picked[0])
+            except SaveFormatError as exc:
+                note = f"Country list not read from {picked[0].name}: {exc}"
+        if not tags and summary is None:
+            return envelope(DEMO, demo.countries(), DEMO_NOTE)
+        owners = (summary or {}).get("owners") or {}
+        ruling = (summary or {}).get("ruling") or {}
+        header = ((summary or {}).get("analysis") or {}).get("header") or {}
+        players = {p["tag"]: p.get("name") for p in header.get("players") or [] if p.get("tag")}
+        items = []
+        for tag in tags or sorted(owners):
+            party = ruling.get(tag)
+            items.append({
+                "tag": tag, "name": names.get(f"{tag}_{party}") or names.get(tag) or tag,
+                "exists": (tag in owners) if summary else None, "states": owners.get(tag, 0),
+                "ruling_party": party, "player": players.get(tag),
+                "is_player_country": tag == header.get("player_tag"), "is_ai": tag not in players,
+            })
+        if summary:
+            items = [i for i in items if i["exists"]] + [i for i in items if not i["exists"]]
+            analysis = summary["analysis"]
+            note = (f"{len(owners)} countries own states in {analysis['file']['name']} "
+                    f"({(header.get('date') or {}).get('text') or 'date unknown'}); names from the game localisation.")
+        return envelope(SAVE if summary else LIVE, items, note or "Tags and names from the game files; "
+                        "no readable save for existence and players.")
 
     def country(self, tag: str) -> dict:
-        data = demo.country(tag)
-        if data is None:
+        tag = tag.upper()
+        listing = self.countries()
+        if listing["source"] == DEMO:
+            data = demo.country(tag)
+            if data is None:
+                raise NotFound(f"Unknown country tag: {tag}")
+            return envelope(DEMO, {**data, "fields": demo.COUNTRY_FIELDS, "editable": False}, DEMO_NOTE)
+        found = next((c for c in listing["data"] if c["tag"] == tag), None)
+        if found is None:
             raise NotFound(f"Unknown country tag: {tag}")
-        return envelope(DEMO, {**data, "fields": demo.COUNTRY_FIELDS, "editable": False}, DEMO_NOTE)
+        return envelope(SAVE, {**found, "values": {}, "fields": demo.COUNTRY_FIELDS,
+                               "editable": False}, "Country identity from game files and the newest save; "
+                        "values come from /save-values and live memory.")
 
     def states(self, owner: str | None = None) -> dict:
         items = demo.states()

@@ -369,3 +369,21 @@ gubione przy restarcie) i szybka kalibracja z zapamiętanego układu (`python -m
 `ProcessMemory.modules()` (lista modułów procesu).
 
 **Testy (2026-10-09):** backend 132 OK, JS 24 OK, smoke 18/18.
+
+---
+
+## Krok A: Countries & Players z prawdziwych danych (2026-10-09) ✅
+
+- Lista państw: tagi z `common/country_tags/*.txt` (kolejność gry), nazwy z lokalizacji gry z uwzględnieniem
+  rządzącej partii (`GER_fascism` → „German Reich”, `SOV_communism` → „Soviet Union”), istnienie = posiadanie
+  stanów w najnowszym zapisie, gracze z nagłówka zapisu (`saves/countries.py`, `gamefiles.py`).
+- Zapis binarny 1.19.3: nowe tokeny `states` 0x2e3b, `owner` 0x283e, `ruling_party` 0x3008 – ustalone na parze
+  tekst/binarny tej samej gry; wynik identyczny (99 państw, te same partie dla wszystkich).
+- Naprawa: zapis tekstowy ma wiersze bez wcięcia w środku bloków (`given_resource_rights`), więc granice bloku są
+  wyznaczane licznikiem nawiasów, nie po wcięciu.
+- UI: Countries & Players bez DEMO (tag, nazwa, partia, liczba stanów, gracz; filtr; opcja „pokaż nieistniejące”);
+  wybór państwa w innych zakładkach pokazuje istniejące państwa; Country Editor: nazwa, gracz/AI, partia.
+- DEMO zostaje tylko, gdy nie ma ani instalacji gry, ani czytelnego zapisu.
+- Ograniczenia: istnienie i partia według najnowszego zapisu (migawka); kolejność tagów z plików gry bez modów
+  (mody dodające tagi: niesprawdzone – dotyczy też tablicy państw w pamięci).
+- Testy: backend 139 OK, JS 24 OK, smoke 18/18 (Countries & Players i Country Editor: 0 oznaczeń DEMO).

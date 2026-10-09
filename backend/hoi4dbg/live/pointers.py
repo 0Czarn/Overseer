@@ -13,14 +13,13 @@ from __future__ import annotations
 
 import re
 import struct
-from pathlib import Path
 
+from ..gamefiles import tag_order  # noqa: F401 - tag index = position in this list + 1
 from ..integration.memory import ENCODINGS
 
 MODULE = "hoi4.exe"
 VERIFIED_VERSION = re.compile(r"v1\.19\.3\.0\.c01a\b")
 COUNTRY_TABLE = (0x332F260, 0x310)
-MAX_TAGS = 2000
 
 # field -> (offsets inside the country object: all but the last are pointer hops, encoding)
 FIELDS: dict[str, tuple[tuple[int, ...], str]] = {
@@ -34,8 +33,6 @@ FIELDS: dict[str, tuple[tuple[int, ...], str]] = {
     "air_experience": ((0x1588, 0x40), "fixed64_32768"),
 }
 
-TAG_LINE = re.compile(r"^\s*([A-Z][A-Z0-9]{2})\s*=", re.M)
-
 
 class PointerError(Exception):
     def __init__(self, code: str, message: str) -> None:
@@ -45,16 +42,6 @@ class PointerError(Exception):
 
 def supported(version: str | None) -> bool:
     return bool(VERIFIED_VERSION.search(version or ""))
-
-
-def tag_order(install: Path) -> list[str]:
-    """Tags in the order the game loads them (files of common/country_tags by name, lines in order)."""
-    tags: list[str] = []
-    for path in sorted((install / "common" / "country_tags").glob("*.txt"), key=lambda p: p.name.lower()):
-        text = path.read_text(encoding="utf-8-sig", errors="replace")
-        text = re.sub(r"#[^\n]*", "", text)
-        tags += [t for t in TAG_LINE.findall(text) if t not in tags]
-    return tags[:MAX_TAGS]
 
 
 def _ptr(memory, address: int) -> int | None:

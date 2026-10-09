@@ -594,7 +594,7 @@ class CountryTableTests(TempDirMixin, unittest.TestCase):
                                            "freshness": {"category": "current_session"}, "values": {}}}
 
     def test_tag_order_follows_files_and_lines(self):
-        self.assertEqual(pointers.tag_order(self.install), ["GER", "ENG", "ITA", "D01"])
+        self.assertEqual(pointers.tag_order(self.install), ["GER", "ENG", "ITA", "D01"])  # gamefiles.tag_order
 
     def test_player_and_any_country_without_calibration(self):
         res = self.svc.read("stability")

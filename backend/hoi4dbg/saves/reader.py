@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from . import binary, binvalues, fields, text
+from . import binary, binvalues, countries, fields, text
 
 SAVE_SUFFIX = ".hoi4"
 SNIFF_BYTES = 16
@@ -107,6 +107,7 @@ class SaveAnalyzer:
         self.log = logger
         self._lock = threading.Lock()
         self._results: dict[tuple, dict] = {}
+        self._country_lists: dict[str, dict] = {}  # copy path -> summary (copies are per save version)
 
     def analyse(self, path: Path) -> dict:
         stat = path.stat()
@@ -167,6 +168,24 @@ class SaveAnalyzer:
             result.update(changes)
             result["validation"] = update
         self.log.info("Save %s validated: %s (%s)", key[0], update["status"], update.get("message"))
+
+    def country_list(self, path: Path) -> dict:
+        """Existing countries (owning states) and ruling parties from the cached copy of a save."""
+        result = self.analyse(path)
+        if result["error"]:
+            raise binary.SaveFormatError(result["error"]["code"], result["error"]["message"])
+        with self._lock:
+            cached = self._country_lists.get(result["copy"])
+        if cached is None:
+            data = Path(result["copy"]).read_bytes()
+            if result["format"] == "text":
+                cached = countries.summary_text(data)
+            else:
+                cached = countries.summary_binary(data, result.get("float_width"),
+                                                  (result.get("header") or {}).get("version"))
+            with self._lock:
+                self._country_lists = {result["copy"]: cached}  # keep only the newest
+        return {"analysis": result, **copy_module.deepcopy(cached)}
 
     def country_values(self, path: Path, tag: str) -> dict:
         """Country Editor values for `tag` from the cached copy of a save (text, or binary 1.19.3)."""

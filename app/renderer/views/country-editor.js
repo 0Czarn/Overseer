@@ -112,8 +112,11 @@ export default {
       viewHeader('Country Editor', 'Political, military and logistic values of the selected country.',
         picker, sourceBadge(fromSave ? 'save' : meta.source, fromSave ? saved.note : meta.note)),
       card(null, h('div', { class: 'country-head' }, tagChip(tag, 'tag-chip-lg'),
-        h('div', null, h('h2', null, meta.data.name), h('p', { class: 'muted' }, fromSave && saved.data.player_tag === tag
-          ? 'Player country in this save' : 'Country name from the built-in list')))),
+        h('div', null, h('h2', null, meta.data.name), h('p', { class: 'muted' }, [
+          fromSave && saved.data.player_tag === tag ? 'Player country in this save'
+            : meta.data.player ? `Played by ${meta.data.player}` : 'AI country',
+          meta.data.ruling_party ? ` · ruling party: ${meta.data.ruling_party}` : '',
+          meta.data.exists === false ? ' · does not exist in the newest save' : ''].join(''))))),
     );
     // Live memory read is calibrated for the player's country only.
     // Live values for any country (game country table); changes only for the player country (console commands).
@@ -126,11 +129,11 @@ export default {
         ppTestCard(ctx, tag, saved.data),
       );
     } else {
-      root.append(
-        notice('warn', `Real values unavailable: ${saved.note ?? 'no save'}${saved.data?.file ? ` (${saved.data.file})` : ''}`),
-        demoBanner(meta.note),
-        h('div', { class: 'tile-grid' }, fields.map((f) => demoTile(f, meta.data.values[f.key]))),
-      );
+      root.append(...[
+        notice('warn', `Save values unavailable: ${saved.note ?? 'no save'}${saved.data?.file ? ` (${saved.data.file})` : ''}`),
+        meta.source === 'demo' ? demoBanner(meta.note) : null,
+        meta.source === 'demo' ? h('div', { class: 'tile-grid' }, fields.map((f) => demoTile(f, meta.data.values[f.key]))) : null,
+      ].filter(Boolean)); // append(null) would print "null"
     }
     return () => live?.stop();
   },
