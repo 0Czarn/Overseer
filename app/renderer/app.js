@@ -90,23 +90,18 @@ async function renderView() {
   }
   document.body.dataset.view = view.id;
   document.body.dataset.loading = '1';
+  delete document.body.dataset.rendered; // set only when THIS view's content is on screen (smoke test waits on it)
   for (const link of document.querySelectorAll('.nav a')) link.classList.toggle('active', link.dataset.view === view.id);
   document.title = `${view.title} - HOI4 Debugger`;
 
   const root = h('div', { class: 'view-inner' });
   let viewCleanup = null;
-  // Views reading a large save can take seconds: say so instead of leaving the previous view on screen.
-  const slow = setTimeout(() => {
-    if (seq === renderSeq) clear(viewEl).append(h('div', { class: 'view-inner' }, h('div', { class: 'view-header' }, h('h1', null, view.title)),
-      h('p', { class: 'muted' }, 'Loading… (reading the newest save)')));
-  }, 300);
   try {
     viewCleanup = await view.render(root, ctx);
   } catch (err) {
     root.append(h('div', { class: 'view-header' }, h('h1', null, view.title)), errorBox(`Could not load this view: ${err.message}`));
     api.log('error', `View ${view.id} failed: ${err.message}`);
   }
-  clearTimeout(slow);
   if (seq !== renderSeq) {
     viewCleanup?.();
     return;
@@ -115,6 +110,7 @@ async function renderView() {
   clear(viewEl).append(root);
   root.dispatchEvent(new Event('mounted'));
   document.body.dataset.loading = '0';
+  document.body.dataset.rendered = view.id;
 }
 
 function buildNav() {

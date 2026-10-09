@@ -41,13 +41,18 @@ function runSmoke(win, outDir, quit) {
           await wc.executeJavaScript(`location.hash = '#/${tab}'`);
           // the first read of a new 40 MB binary save takes a few seconds per view (pure Python parser)
           const ok = await waitFor(wc,
-            `document.body.dataset.view === '${tab}' && document.body.dataset.loading === '0'`, 20000);
-          await sleep(250);
+            `document.body.dataset.rendered === '${tab}' && document.body.dataset.loading === '0'`, 20000);
+          // the window is hidden: large views (focus tree: hundreds of nodes) need time to be painted, otherwise
+          // capturePage() returns the previous frame
+          await sleep(900);
           const info = await wc.executeJavaScript(`({
             heading: document.querySelector('.view-header h1')?.textContent ?? null,
             demoBadges: document.querySelectorAll('.badge-demo').length,
             errors: [...document.querySelectorAll('.view .error-box')].map((e) => e.textContent),
             hScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+            // focus tree checked in the DOM (a hidden window may not repaint a very large tree for the screenshot)
+            focusNodes: Object.fromEntries(['completed', 'in_progress', 'available', 'blocked', 'excluded'].map(
+              (s) => [s, document.querySelectorAll('.focus-node.focus-' + s).length])),
           })`);
           const image = await wc.capturePage();
           const file = path.join(outDir, `${size.name}-${tab}.png`);

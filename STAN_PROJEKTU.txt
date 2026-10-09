@@ -35,6 +35,8 @@ DO ZROBIENIA (w tej kolejności)
             [x] plan kolejki w aplikacji (sprawdzanie wymagań i wykluczeń, zapis trwały)
             [x] cel na żywo z pamięci: bieżący, postęp, lista ukończonych
             [x] powiadomienie, gdy cel się skończy, z nazwą następnego z planu (wariant A)
+            [x] kolory: ukończone zielone, w trakcie pulsujący żółty, dostępne srebrne,
+                niemożliwe szare (wykluczone ciemnoszare) - odświeżane na żywo
             [ ] potwierdzenie powiadomienia Windows w grze (po poprawce)
 [ ] Krok G  Intelligence Lab (poziomy wywiadu) i Game Tools (narzędzia lokalne)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)

@@ -1,5 +1,6 @@
 import { h, card, demoBanner, meter, notice, sourceBadge, toast, viewHeader } from '../lib/dom.js';
 import { FOCUS_COLUMNS, formatAge, freshnessInfo, groupFocuses } from '../lib/format.js';
+import { focusStatuses } from '../lib/focus-status.js';
 import { countryPicker } from './shared.js';
 
 const CELL_W = 118;
@@ -120,6 +121,7 @@ export default {
       try {
         const live = (await ctx.api.get(`/api/live/focus?tag=${encodeURIComponent(tag)}`)).data;
         showCurrent(live);
+        applyLive(live);
       } catch { /* live reading unavailable - keep the save snapshot */ }
       liveTimer = setTimeout(pollLive, 4000);
     };
@@ -138,8 +140,24 @@ export default {
     };
     const move = (i, step) => { const next = ids(); [next[i], next[i + step]] = [next[i + step], next[i]]; save(next); };
     const remove = (i) => save(ids().filter((_, j) => j !== i));
+    // Live memory: focuses completed since the save turn green and their successors silver without a new save.
+    const savedCompleted = new Set(d.focuses.filter((f) => f.status === 'completed').map((f) => f.id));
+    let liveKey = null;
+    function applyLive(live) {
+      if (live.loading) return;
+      const key = `${live.current}|${(live.completed_since_save ?? []).join(',')}`;
+      if (key === liveKey) return;
+      liveKey = key;
+      const completed = new Set([...savedCompleted, ...(live.completed_since_save ?? [])]);
+      const statuses = focusStatuses(d.focuses, completed, live.current);
+      for (const f of d.focuses) f.status = statuses.get(f.id);
+      render();
+    }
     function render() {
+      const scroller = treeHost.querySelector('.focus-tree-scroll');
+      const keep = scroller ? [scroller.scrollLeft, scroller.scrollTop] : null;
       treeHost.replaceChildren(treeView(d.focuses, queue, toggle));
+      if (keep) { const s2 = treeHost.querySelector('.focus-tree-scroll'); [s2.scrollLeft, s2.scrollTop] = keep; }
       queueHost.replaceChildren(queueList(byId, queue, save, move, remove));
     }
     render();
@@ -160,8 +178,9 @@ export default {
             + 'completed instantly).')])),
       card(`Tree ${d.tree} - ${d.focuses.length} focuses (${counts.completed?.length ?? 0} completed, `
         + `${counts.available?.length ?? 0} available)`, [
-        h('p', { class: 'hint' }, 'Click a focus to add it to the plan or remove it. Dashed lines: one of several prerequisites. '
-          + '"Available" means the prerequisites are met - the game may still require other conditions.'),
+        h('p', { class: 'hint' }, 'Green: completed · pulsing yellow: in progress · silver: can be taken next · grey: not yet '
+          + 'possible (dark grey: excluded by an earlier choice). Click a focus to add it to the plan or remove it. Dashed '
+          + 'lines: one of several prerequisites. Silver means the prerequisites are met - the game may still require other conditions.'),
         treeHost]),
     );
     return () => clearTimeout(liveTimer);

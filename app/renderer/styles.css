@@ -333,3 +333,23 @@ textarea.input { resize: vertical; width: 100%; }
 .eq-caret { display: inline-block; width: 18px; color: var(--text-muted); font-size: 11px; }
 .eq-indent { display: inline-block; width: 26px; }
 .eq-table .eq-variant td { font-size: 12.5px; }
+
+/* focus tree colours: completed green, in progress pulsing yellow, available silver, blocked grey */
+.focus-node.focus-completed { border-color: rgba(76, 195, 138, 0.6); border-left-color: var(--ok); background: rgba(76, 195, 138, 0.22); color: #dff5ea; opacity: 1; }
+.focus-node.focus-in_progress { border-color: var(--warn); border-left-color: var(--warn); color: #fff3cf; animation: focus-pulse 1.6s ease-in-out infinite; }
+.focus-node.focus-available { border-color: #c9ced6; border-left-color: #e3e7ec; background: linear-gradient(160deg, rgba(220, 225, 232, 0.28), rgba(150, 158, 170, 0.18)); color: #f2f4f7; opacity: 1; }
+.focus-node.focus-blocked { border-color: #3a4049; border-left-color: #4a515c; background: rgba(120, 126, 136, 0.12); color: #8b929c; opacity: 1; }
+.focus-node.focus-excluded { border-color: #2c3138; border-left-color: #2c3138; background: rgba(60, 64, 72, 0.25); color: #5f656e; opacity: 0.7; }
+@keyframes focus-pulse {
+  0%, 100% { background: rgba(224, 179, 65, 0.18); box-shadow: 0 0 0 0 rgba(224, 179, 65, 0.0); }
+  50% { background: rgba(224, 179, 65, 0.42); box-shadow: 0 0 10px 2px rgba(224, 179, 65, 0.45); }
+}
+@media (prefers-reduced-motion: reduce) { .focus-node.focus-in_progress { animation: none; background: rgba(224, 179, 65, 0.35); } }
+
+/* Loading indicator driven only by body[data-loading] (set by renderView): it never replaces view content.
+   Shown after 300 ms so fast views do not flicker. */
+.view-loading { display: none; position: sticky; top: 0; z-index: 5; margin: 0 24px; padding: 6px 12px; border-radius: 0 0 8px 8px;
+  background: var(--bg-elev-2); color: var(--text-muted); font-size: 12.5px; width: fit-content; }
+body[data-loading="1"] .view-loading { display: block; opacity: 0; animation: view-loading-in 0.2s ease 0.3s forwards; }
+body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s; }
+@keyframes view-loading-in { to { opacity: 1; } }
