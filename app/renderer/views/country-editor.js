@@ -116,7 +116,7 @@ export default {
           ? 'Player country in this save' : 'Country name from the built-in list')))),
     );
     // Live memory read is calibrated for the player's country only.
-    const live = !fromSave || saved.data.player_tag === tag ? liveCard(ctx, { withCalibration: false }) : null;
+    const live = !fromSave || saved.data.player_tag === tag ? liveCard(ctx, { withCalibration: false, withChange: true }) : null;
     if (live) root.append(live.el);
     if (fromSave) {
       root.append(

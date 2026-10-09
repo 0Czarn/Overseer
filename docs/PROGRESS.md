@@ -20,7 +20,7 @@ Legenda: ✅ zrobione · 🟡 w toku / częściowo · ⏳ zaplanowane · ⛔ wym
 | 1 | Aplikacja desktopowa, UI (9 zakładek), logi, testy, dokumentacja | ✅ |
 | 2 | Wykrywanie procesu HOI4 i wersji gry | ✅ |
 | 3 | Wiarygodny odczyt danych z aktywnej rozgrywki | 🟡 zapisy ✅; **PP z pamięci procesu ✅ (tylko odczyt, po kalibracji)**; pozostałe pola z pamięci ❌ |
-| 4 | Prototyp modyfikacji pojedynczej wartości (SP) + weryfikacja | 🟡 PP +10 zweryfikowane w grze (komenda diagnostyczna + odczyt zapisu); brak docelowej metody edycji |
+| 4 | Prototyp modyfikacji pojedynczej wartości (SP) + weryfikacja | ✅ PP: zmiana z aplikacji (komenda `pp` + weryfikacja w pamięci), sprawdzone w grze; MP nietestowane |
 | 5 | Edytory państw, stanów, sprzętu | ⏳ |
 | 6 | Cele narodowe, narzędzia debugowania | ⏳ |
 | 7 | Testy synchronizacji MP (w tym inicjowanie przez nie-hosta) | ⏳ |
@@ -256,3 +256,17 @@ Liczba tylko w stanie LIVE (i przekreślona jako STALE).
 - MP: nietestowane. Odczyt pamięci pokazuje stan lokalnego klienta.
 
 **Testy (2026-10-09)**: backend 117 OK, JS 24 OK, smoke 18/18.
+
+---
+
+## Etap 4: zweryfikowana zmiana Political Power z aplikacji (2026-10-09) ✅
+
+- Country Editor → karta Live → „Change (verified)”: tryb **Add** albo **Set to** → aplikacja przygotowuje udokumentowaną
+  komendę `pp N` (Set to tylko dla różnicy całkowitej) → tester wpisuje ją w konsoli → backend wykrywa ją w
+  `console_history.txt` → odczyt pamięci porównuje z wartością oczekiwaną (`confirmed` / `mismatch` / `expired` / `error`).
+- **Zapis do pamięci gry nie istnieje.** Wspólny stan zmienia wyłącznie komenda gry (wymóg MP; patrz REPORT-LIVE-AND-WRITE §4).
+- Test w grze (SP, GER, pauza, PID 28728): `pp 3` 751.3 → 754.3 **confirmed**; „Set to 760.3” → `pp 6` 754.3 → 760.3
+  **confirmed** (wartości odczytane z pamięci).
+- Ograniczenia: tester musi wpisać komendę sam; działa na kraj gracza; gra musi być na pauzie (inaczej dzienny przyrost
+  daje `mismatch`); MP nietestowane.
+- Testy: backend 117 OK, JS 24 OK, smoke 18/18 (z uruchomioną grą: karta pokazuje LIVE 760.300).
