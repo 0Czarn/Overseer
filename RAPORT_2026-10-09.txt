@@ -1,0 +1,118 @@
+HOI4 DEBUGGER - RAPORT Z PRACY, 2026-10-09
+==========================================
+Do przeczytania przed jutrzejszą sesją. Krótko: co działa, jak tego używać, co jest otwarte,
+od czego zacząć. Szczegóły techniczne i dowody: docs/PROGRESS.md. Lista zrobione / do zrobienia:
+STAN_PROJEKTU.txt.
+
+Stan na koniec dnia: wszystko zacommitowane (ostatni commit 084a04c).
+Testy: backend 167 OK, interfejs (JS) 31 OK, smoke 18/18 zakładek.
+
+
+1. NAJWAŻNIEJSZA ZMIANA DNIA
+----------------------------
+Aplikacja czyta grę NA ŻYWO bez żadnej kalibracji. Znalazłem w pamięci gry jej własną tablicę
+wszystkich państw (stałe miejsce w hoi4.exe -> tablica -> obiekt państwa). Dzięki temu:
+- po uruchomieniu gry nie trzeba już zapisów, komend ani skanowania (wcześniej ok. 10 min pracy),
+- można czytać KAŻDE państwo, nie tylko swoje,
+- sprawdzone po kilku restartach gry: 80/80 i 99/99 państw zgodnych z zapisami co do cyfry.
+UWAGA: działa tylko na wersji gry 1.19.3.0.c01a. Po aktualizacji gry trzeba to ustalić od nowa
+(aplikacja wtedy sama wraca do starej metody kalibracji).
+
+
+2. CO JEST GOTOWE (w kolejności zakładek)
+----------------------------------------
+Countries & Players
+- Prawdziwa lista państw (nazwy z gry zależne od partii, np. "German Reich"), liczba stanów,
+  gracze. Gracz rozpoznawany z pamięci (patrz punkt 4 - ograniczenie).
+
+Country Editor
+- Na żywo: PP, stabilność i poparcie wojny (w %), CP, paliwo, doświadczenie armii/floty/lotnictwa.
+- Manpower i konwoje z zapisu (manpower = pula ze stanów + nadwyżka z komend; zgodne z paskiem gry).
+- "Change (verified)": aplikacja przygotowuje komendę konsoli, Ty ją wpisujesz, aplikacja sprawdza
+  wynik w pamięci. Dla stabilności/poparcia wpisujesz procenty (Set to 80 = 80%).
+- "Set directly (memory write)": NOWE - zmiana od razu w pamięci gry, bez konsoli. Szczegóły w pkt 3.
+
+State Editor
+- 1081 stanów z zapisu: właściciel, kontroler, budynki, zasoby, rdzenie, roszczenia, pula manpower.
+
+National Focus Manager
+- Drzewko wykrywane automatycznie (także z modów), ułożone jak w grze.
+- Kolory: ukończone ZIELONE, w trakcie PULSUJĄCY ŻÓŁTY, możliwe jako następne SREBRNE,
+  jeszcze niemożliwe SZARE, wykluczone CIEMNOSZARE. Odświeżane na żywo z pamięci.
+- Karta "Current focus" LIVE (postęp w dniach).
+- Plan kolejki: klikasz cele w drzewku, strzałkami zmieniasz kolejność, aplikacja sprawdza
+  wymagania i wykluczenia. Gdy cel się skończy -> powiadomienie Windows + komunikat w aplikacji
+  z nazwą następnego celu. (Gra nie ma komendy "rozpocznij cel", więc klikasz go sam.)
+
+Equipment Manager
+- Grupy według typu (np. "Light tank chassis"), klik rozwija / zwija warianty (BT-7, Test Tank...).
+- Kolumny: potrzebne w dywizjach / mają dywizje / magazyn / DEFICYT (czerwone na górze).
+- "Live stockpile": magazyn na żywo z pamięci + edycja ilości przyciskiem "Set" (pkt 3).
+- "Add equipment (verified)": komenda add_equipment ze sprawdzeniem w następnym zapisie,
+  także po nazwie własnego projektu (np. "Test Tank" - bez cudzysłowu).
+
+
+3. ZAPIS DO PAMIĘCI GRY (Set directly / Set w magazynie)
+--------------------------------------------------------
+- Włączasz przełącznikiem "Enable direct memory writes" (domyślnie wyłączony; pamiętany).
+- Działa TYLKO w grze jednoosobowej: aplikacja sprawdza w logs/game.log wpis
+  "Launching SINGLEPLAYER-game". W multiplayerze odmawia (zmiana byłaby tylko u Ciebie = desync).
+- Każdy zapis jest od razu odczytywany z powrotem i zapisywany w logu aplikacji.
+- Magazyn: edytować można warianty, które mają już wpis w magazynie (także z ilością 0).
+  Nowy wariant dodaj raz przez "Add equipment", potem da się go ustawiać.
+- Sprawdzone przez Ciebie: stabilność i magazyn "Test Tank" - działa.
+
+
+4. ZNANE PROBLEMY / RZECZY DO SPRAWDZENIA
+----------------------------------------
+a) Powiadomienie o końcu celu: po poprawce NIE ZOSTAŁO JESZCZE potwierdzone w grze.
+   Pierwsza rzecz do sprawdzenia jutro (pkt 6).
+b) Rozpoznawanie gracza: miejsce w pamięci, które uznałem za "znacznik AI", okazało się
+   znacznikiem WIDOCZNOŚCI (mgła wojny). Działa, gdy mgła jest włączona; po komendzie "fow"
+   aplikacja używa ostatniego pewnego wyniku albo zapisu. Opisane w docs/PROGRESS.md.
+c) Deficyt sprzętu to szacunek (bez dywizji w szkoleniu i bez produkcji). Jeśli w grze liczba
+   jest inna - podaj mi ją, dopasuję wzór.
+d) Pierwsze otwarcie zakładki po nowym zapisie binarnym trwa 2-4 s (widać pasek "Loading...").
+   Kolejne są natychmiastowe. Do poprawy w kroku I (wspólny indeks zapisu).
+e) Stany, lista państw, cele - z ostatniego zapisu (migawka). Na żywo: wartości państwa, cel
+   narodowy, magazyn sprzętu.
+f) Mody dodające nowe państwa: nieprzetestowane. Multiplayer: nieprzetestowany.
+
+
+5. CO ZOSTAŁO DO ZROBIENIA (plan, kolejność)
+-------------------------------------------
+[ ] F  dokończenie: potwierdzić powiadomienie o końcu celu w grze
+[ ] G  Intelligence Lab (poziomy wywiadu) i Game Tools (narzędzia lokalne) - obie jeszcze DEMO
+[ ] H  test multiplayera na 2 komputerach/kontach (czy zmiany od nie-hosta się synchronizują)
+[ ] I  instrukcja użytkownika, raport kompatybilności, szybszy odczyt zapisów,
+       narzędzie do ponownego ustalenia adresów po aktualizacji gry
+
+
+6. JAK ZACZĄĆ JUTRO
+------------------
+1. Uruchom HOI4 (wersja 1.19.3), wczytaj grę jako jednoosobową.
+2. Uruchom aplikację: w folderze projektu "npm start" (albo poproś mnie).
+3. Napisz mi "kontynuuj" - zacznę od sprawdzenia powiadomienia o końcu celu:
+   w National Focus Manager ustaw kolejkę, rozpocznij cel w grze, odpauzuj do jego końca.
+4. Potem krok G (Intelligence Lab / Game Tools), chyba że wolisz inaczej.
+
+
+7. LISTA ZMIAN Z DZISIAJ (commity, od najnowszego)
+-------------------------------------------------
+084a04c Kolory drzewka celów odświeżane na żywo; pasek "Loading..."
+88b5042 Magazyn sprzętu na żywo z pamięci + edycja ilości (lokalnie)
+87f6c88 Deficyt sprzętu i rozwijane grupy wariantów
+b679198 Zapis do pamięci (tylko singleplayer, włączany) + sprostowanie "znacznika AI"
+5df0226 Stabilność/poparcie w %, niezawodne powiadomienia o końcu celu
+ce9dd2e Cel narodowy na żywo: bieżący, postęp, ukończone
+aec6afe National Focus Manager: drzewko, stan, plan kolejki
+01aaf7e Dodawanie własnych projektów sprzętu po nazwie
+4c3418f Equipment Manager: magazyn, warianty, konwoje, dodawanie ze sprawdzeniem
+9a71c44 Manpower państwa zgodny z paskiem gry
+68ff5e5 State Editor z zapisu
+177d664 Rozpoznawanie gracza z pamięci
+c50b3ee Automatyczne mapowanie pól zapisu na pamięć
+554d029 Countries & Players z prawdziwych danych
+8774541 Odczyt na żywo bez kalibracji (tablica państw gry)
+25f8a83 Kalibracja 9 pól, jednostka komendy fuel
+8af08c6 Odczyt zapisów binarnych 1.19.3
