@@ -144,7 +144,9 @@ class LiveService:
                 info = cal.as_dict()
                 info["current_process"] = bool(process)
                 cals[field] = info
+            players = self.players(process) if process else []
             return {"process": process, "error": error, "calibrations": cals, "job": dict(self._job or {}),
+                    "players": players,
                     "invalidated": dict(self.invalidated),
                     "commands": {k: {"doc": v["doc"], "verified": v["factor"] is not None}
                                  for k, v in console.COMMANDS.items()}}
@@ -351,17 +353,43 @@ class LiveService:
 
     # -- live values -----------------------------------------------------------------------
     def player_tag(self, process: dict) -> str:
-        """Player country of the newest save of the running game (the game keeps no static player index)."""
+        """Player country: the game's own AI flag of each country (verified version), else the newest save."""
         key = (process["pid"], process.get("started"))
         now = self._clock()
         if self._player and self._player[1] == key and now - self._player[0] < 5:
             return self._player[2]
-        save = self._fresh_save(process)
-        tag = save.get("player_tag") or save.get("tag")
+        tag = None
+        if pointers.supported(process.get("version")):
+            humans = self.players(process)
+            if len(humans) == 1:
+                tag = humans[0]
+        if tag is None:
+            save = self._fresh_save(process)
+            tag = save.get("player_tag") or save.get("tag")
         if not tag:
             raise LiveError("player_unknown", "The newest save has no player country")
         self._player = (now, key, tag)
         return tag
+
+    def players(self, process: dict | None = None) -> list[str]:
+        """Human-controlled countries read from game memory ([] if unavailable)."""
+        process = process or self._process()
+        if not pointers.supported(process.get("version")):
+            return []
+        key = (process["pid"], process.get("started"))
+        install = process.get("install") or ""
+        if install not in self._tags:
+            self._tags[install] = pointers.tag_order(Path(install))
+        try:
+            with self._open_memory(process["pid"]) as mem:
+                if key not in self._module_base:
+                    module = mem.modules().get(pointers.MODULE)
+                    if not module:
+                        return []
+                    self._module_base[key] = module[0]
+                return pointers.player_tags(mem, self._module_base[key], self._tags[install])
+        except (MemoryAccessError, OSError):
+            return []
 
     def _read_pointer(self, process: dict, field: str, tag: str | None) -> dict:
         tag = tag or self.player_tag(process)

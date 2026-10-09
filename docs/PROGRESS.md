@@ -405,3 +405,19 @@ gubione przy restarcie) i szybka kalibracja z zapamiętanego układu (`python -m
 - **Konwoje:** suma sprzętu w magazynie; w zapisie binarnym wymaga tabeli nazw sprzętu → krok E.
 - Testy: backend 143 OK (mapper: znalezienie bezpośrednie i za wskaźnikiem, odrzucenie stałych wartości i
   zbyt małej próby, regresja końca regionu).
+
+---
+
+## Krok C: państwo gracza z pamięci gry, bez zapisu (2026-10-09) ✅
+
+- Logi gry nie zawierają państwa gracza; stały wskaźnik gracza istnieje (jedno miejsce zmieniało się SOV → GER),
+  ale nie ma do niego ścieżki z `hoi4.exe` w ≤ 3 przeskokach – porzucone.
+- **Znacznik AI w obiekcie państwa:** `[państwo + 0xfa0] + 0x1c0` = 1 dla państw AI, 0 dla gracza. Znalezione przez
+  porównanie wszystkich państw przy trzech różnych graczach (GER → ITA → SOV, PID 25320): jedyne miejsce, które
+  podążało za graczem; wśród wszystkich 439 tagów tylko gracz ma 0.
+- `LiveService.players()` / `player_tag()`: gracz z pamięci (wersja zweryfikowana), zapis tylko jako zapas;
+  `/api/live` zwraca `players` (w MP może być kilku). Country Editor: „Player country (live)”, zmiana wartości
+  dostępna dla gracza wg pamięci (nie wg starego zapisu).
+- Ograniczenia: sprawdzone w jednym procesie gry (3 stany); odstęp w obiekcie, jak pozostałe pola, powinien być
+  stały po restarcie – do potwierdzenia przy najbliższym uruchomieniu. MP nietestowane.
+- Testy: backend 145 OK (gracz z flagi zamiast starego zapisu; zapas, gdy flaga nieczytelna), JS 24 OK, smoke 18/18.

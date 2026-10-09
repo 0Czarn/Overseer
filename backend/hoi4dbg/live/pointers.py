@@ -20,6 +20,9 @@ from ..integration.memory import ENCODINGS
 MODULE = "hoi4.exe"
 VERIFIED_VERSION = re.compile(r"v1\.19\.3\.0\.c01a\b")
 COUNTRY_TABLE = (0x332F260, 0x310)
+# [country + 0xfa0] + 0x1c0: 1 = AI-controlled, 0 = human player. Verified 2026-10-09 (PID 25320) with the player
+# switched GER -> ITA -> SOV: the only location that followed the player; 438 of 439 tags had 1, the player 0.
+PLAYER_FLAG = (0xFA0, 0x1C0)
 
 # field -> (offsets inside the country object: all but the last are pointer hops, encoding)
 FIELDS: dict[str, tuple[tuple[int, ...], str]] = {
@@ -64,6 +67,29 @@ def country_object(memory, module_base: int, tags: list[str], tag: str) -> int:
     if country is None:
         raise PointerError("country_missing", f"{tag} has no country object in the running game")
     return country
+
+
+def player_tags(memory, module_base: int, tags: list[str]) -> list[str]:
+    """Countries controlled by a human (more than one in multiplayer). Empty when the flag is not readable."""
+    table = _ptr(memory, module_base + COUNTRY_TABLE[0])
+    array = _ptr(memory, table + COUNTRY_TABLE[1]) if table else None
+    if array is None:
+        return []
+    data = memory.read(array + 8, 8 * len(tags))
+    if not data:
+        return []
+    humans, readable = [], 0
+    for i, tag in enumerate(tags):
+        country = struct.unpack_from("<Q", data, 8 * i)[0]
+        sub = _ptr(memory, country + PLAYER_FLAG[0]) if 0x10000 <= country < 0x7FFF_FFFF_FFFF else None
+        flag = memory.read(sub + PLAYER_FLAG[1], 1) if sub else None
+        if flag is None:
+            continue
+        readable += 1
+        if flag[0] == 0:
+            humans.append(tag)
+    # sanity: nearly all countries are AI; anything else means the layout does not match
+    return humans if readable and len(humans) <= max(8, readable // 10) else []
 
 
 def read_field(memory, country: int, field: str) -> float:

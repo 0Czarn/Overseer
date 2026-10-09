@@ -100,11 +100,16 @@ export default {
   short: 'CE',
   async render(root, ctx) {
     const tag = ctx.state.selectedCountry;
-    const [meta, saved, picker] = await Promise.all([
+    const [meta, saved, picker, liveStatus] = await Promise.all([
       ctx.api.get(`/api/countries/${encodeURIComponent(tag)}`),
       ctx.api.get(`/api/countries/${encodeURIComponent(tag)}/save-values`),
       countryPicker(ctx),
+      ctx.api.get('/api/live').catch(() => null),
     ]);
+    // Human player(s) read from game memory; the save's player is only a fallback (it may be stale).
+    const livePlayers = liveStatus?.players ?? [];
+    const isPlayer = livePlayers.length ? livePlayers.includes(tag) : fromSaveIsPlayer();
+    function fromSaveIsPlayer() { return saved.source === 'save' && saved.data.player_tag === tag; }
     const fields = meta.data.fields;
     const fromSave = saved.source === 'save';
 
@@ -113,14 +118,15 @@ export default {
         picker, sourceBadge(fromSave ? 'save' : meta.source, fromSave ? saved.note : meta.note)),
       card(null, h('div', { class: 'country-head' }, tagChip(tag, 'tag-chip-lg'),
         h('div', null, h('h2', null, meta.data.name), h('p', { class: 'muted' }, [
-          fromSave && saved.data.player_tag === tag ? 'Player country in this save'
+          livePlayers.includes(tag) ? 'Player country (live)'
+            : !livePlayers.length && fromSave && saved.data.player_tag === tag ? 'Player country in this save'
             : meta.data.player ? `Played by ${meta.data.player}` : 'AI country',
           meta.data.ruling_party ? ` · ruling party: ${meta.data.ruling_party}` : '',
           meta.data.exists === false ? ' · does not exist in the newest save' : ''].join(''))))),
     );
     // Live memory read is calibrated for the player's country only.
     // Live values for any country (game country table); changes only for the player country (console commands).
-    const live = liveCard(ctx, { withCalibration: false, withChange: !fromSave || saved.data.player_tag === tag, tag });
+    const live = liveCard(ctx, { withCalibration: false, withChange: isPlayer, tag });
     if (live) root.append(live.el);
     if (fromSave) {
       root.append(

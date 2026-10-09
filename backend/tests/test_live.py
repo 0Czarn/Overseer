@@ -564,6 +564,7 @@ class CountryTableTests(TempDirMixin, unittest.TestCase):
         self.mem = FakeMemory(0x8000)
         self.mem.modules = lambda: {"hoi4.exe": (self.MODULE, self.MODULE + 0x8000)}
         self.version = "Operation Postern v1.19.3.0.c01a (5632)"
+        self.save_player = "GER"   # stale save: the player switched to ITA since
         self.process = {"pid": 7, "path": str(self.install / "hoi4.exe"), "started": "a"}
         # hoi4.exe+rva -> table object; +0x310 -> array; slot i -> country objects
         rva, slot = pointers.COUNTRY_TABLE
@@ -575,13 +576,15 @@ class CountryTableTests(TempDirMixin, unittest.TestCase):
         for i, tag in enumerate(["GER", "ENG", "ITA"], start=1):
             if tag in self.countries:
                 self.mem.put(array + 8 * i, "Q", self.countries[tag])
-        self.put_country("GER", stability=0.71, pp=772.3)
-        self.put_country("ITA", stability=0.6, pp=31.1972)
+        self.put_country("GER", stability=0.71, pp=772.3, ai=1)
+        self.put_country("ITA", stability=0.6, pp=31.1972, ai=0)
         self.svc = LiveService(self.detect, self.save_values, self.tmp / "live", logging.getLogger("test"),
                                open_memory=lambda pid: self.mem)
 
-    def put_country(self, tag, stability, pp):
+    def put_country(self, tag, stability, pp, ai=1):
         c = self.countries[tag]
+        self.mem.put(c + pointers.PLAYER_FLAG[0], "Q", c + 0x1C00)  # AI-control sub-object
+        self.mem.regions_data[BASE][c - BASE + 0x1C00 + pointers.PLAYER_FLAG[1]] = ai
         self.mem.put(c + 0x10D0, "q", round(stability * 100000))
         self.mem.put(c + 0xF90, "Q", c + 0x1800)           # politics object
         self.mem.put(c + 0x1800 + 0xE0, "q", round(pp * 100000))
@@ -590,7 +593,7 @@ class CountryTableTests(TempDirMixin, unittest.TestCase):
         return {"process": self.process, "install": {"path": str(self.install), "version": {"display": self.version}}}
 
     def save_values(self):
-        return {"source": "save", "data": {"player_tag": "ITA", "file": {"name": "s.hoi4", "mtime": 1.0},
+        return {"source": "save", "data": {"player_tag": self.save_player, "file": {"name": "s.hoi4", "mtime": 1.0},
                                            "freshness": {"category": "current_session"}, "values": {}}}
 
     def test_tag_order_follows_files_and_lines(self):
@@ -603,6 +606,17 @@ class CountryTableTests(TempDirMixin, unittest.TestCase):
         values = self.svc.values("GER")
         self.assertEqual(values["stability"]["value"], 0.71)
         self.assertEqual(values["manpower"]["status"], "unavailable")   # not in the country table map
+
+    def test_player_comes_from_the_ai_flag_not_the_stale_save(self):
+        self.assertEqual(self.svc.players(), ["ITA"])          # ENG has no object (slot empty)
+        self.assertEqual(self.svc.status()["players"], ["ITA"])
+        self.assertEqual(self.svc.read("stability")["tag"], "ITA")
+
+    def test_player_falls_back_to_the_save_when_the_flag_is_unreadable(self):
+        for c in self.countries.values():
+            self.mem.put(c + pointers.PLAYER_FLAG[0], "Q", 0)
+        self.assertEqual(self.svc.players(), [])
+        self.assertEqual(self.svc.read("stability")["tag"], "GER")
 
     def test_missing_country_and_unknown_tag(self):
         with self.assertRaises(LiveError) as ctx:
