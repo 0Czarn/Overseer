@@ -16,6 +16,7 @@ import threading
 from . import __version__, applog, paths
 from .integration import NullIntegration
 from .integration.hoi4 import Hoi4Integration
+from .live.service import LiveService
 from .reports import ReportStore
 from .saves.reader import SaveAnalyzer, SaveSnapshotter
 from .server import make_server
@@ -43,6 +44,8 @@ def main(argv: list[str] | None = None) -> int:
     saves = SaveAnalyzer(SaveSnapshotter(data_dir / "save-cache"), logger)
     service = DebuggerService(build_integration(args.no_game), ReportStore(data_dir / "reports"), ring,
                               logger, str(data_dir), saves=saves)
+    if not args.no_game:
+        service.live = LiveService(service.detect, service.player_save_values, data_dir / "live", logger)
     server = make_server(service, token, args.port)
     port = server.server_address[1]
 

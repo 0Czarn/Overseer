@@ -11,7 +11,7 @@ Legenda: ✅ zrobione · 🟡 w toku / częściowo · ⏳ zaplanowane · ⛔ wym
 | HOI4 | Steam, `C:\NIBY DYSK\Steam\steamapps\common\Hearts of Iron IV` |
 | Wersja gry | `Operation Postern v1.19.3.0.c01a (5632)` (`launcher-settings.json`), build `c01a3d507` (`logs/code_revisions.log`) |
 | Dane użytkownika | `%USERPROFILE%\Documents\Paradox Interactive\Hearts of Iron IV` |
-| Uwagi | `zalozenia.md` w katalogu projektu jest pusty (0 bajtów) – praca wg `prompt.md` |
+| Uwagi | `zalozenia.md` był pusty (0 bajtów) i został usunięty; praca wg `prompt.md` (usunięty z katalogu, dostępny w historii git) |
 
 ## Etapy
 
@@ -19,7 +19,7 @@ Legenda: ✅ zrobione · 🟡 w toku / częściowo · ⏳ zaplanowane · ⛔ wym
 |---|---|---|
 | 1 | Aplikacja desktopowa, UI (9 zakładek), logi, testy, dokumentacja | ✅ |
 | 2 | Wykrywanie procesu HOI4 i wersji gry | ✅ |
-| 3 | Wiarygodny odczyt danych z aktywnej rozgrywki | 🟡 zapisy: nagłówek, gracze, mody ✅; wartości Country Editor z zapisów tekstowych ✅; odczyt procesu ❌ |
+| 3 | Wiarygodny odczyt danych z aktywnej rozgrywki | 🟡 zapisy ✅; **PP z pamięci procesu ✅ (tylko odczyt, po kalibracji)**; pozostałe pola z pamięci ❌ |
 | 4 | Prototyp modyfikacji pojedynczej wartości (SP) + weryfikacja | 🟡 PP +10 zweryfikowane w grze (komenda diagnostyczna + odczyt zapisu); brak docelowej metody edycji |
 | 5 | Edytory państw, stanów, sprzętu | ⏳ |
 | 6 | Cele narodowe, narzędzia debugowania | ⏳ |
@@ -200,9 +200,9 @@ CP 0.286, paliwo 297201.87, doświadczenie armii 30.
 ## Otwarte kwestie / do decyzji
 - ✅ Metoda etapu 3: A (zapisy) – zatwierdzona 2026-10-09.
 - ✅ Zapis tekstowy: uzyskany przez `-force_text_save` (bez zmiany `settings.txt`).
-- ⛔ Analiza `hoi4.exe` / pamięci procesu: zablokowana przez uprawnienia Claude Code; wymaga wyraźnej zgody użytkownika.
 - Generator komend: tylko narzędzie diagnostyczne (decyzja z prompt4.md), nie docelowa implementacja edytorów.
-- `zalozenia.md` jest pusty – jeśli miał zawierać dodatkowe wymagania, trzeba go uzupełnić.
+- ✅ Odczyt pamięci procesu (tylko odczyt): dopuszczony przez użytkownika (test.txt, 2026-10-09).
+- `zalozenia.md` był pusty i został usunięty – bez wpływu na projekt.
 
 ---
 
@@ -216,3 +216,43 @@ CP 0.286, paliwo 297201.87, doświadczenie armii 30.
 - **Otwarte:** nazwa pliku sugeruje 203.3 i 10 w UI gry. Jak UI przelicza wartości z zapisu, niepotwierdzone.
 - Poprawka: zapisy tekstowe mają końce linii CRLF (wcześniej nieobsłużone w tabeli sprzętu).
 - Testy: backend 89 OK (nowe: CRLF, konwoje, test na prawdziwej parze zapisów), JS 20 OK, smoke 18/18.
+
+---
+
+## Odczyt Political Power z pamięci gry (2026-10-09) ✅
+
+Decyzja użytkownika (test.txt): opcja 1 – dokończyć odczyt pamięci, wyłącznie odczyt.
+
+**Metoda** (`integration/memory.py`, `live/calibration.py`, `live/service.py`)
+- Proces otwierany tylko z `PROCESS_QUERY_INFORMATION | PROCESS_VM_READ`; w module nie ma ścieżki zapisu (test pilnuje).
+- Kalibracja bez zgadywania adresów: skan pamięci na dokładną wartość z niezależnego źródła (świeży zapis tekstowy)
+  w 5 kandydujących kodowaniach → zawężanie po każdej udokumentowanej komendzie `pp N` (wykrywanej w
+  `console_history.txt`) lub nowym zapisie → „confirmed” dopiero po ≥ 3 różnych wartościach, ≤ 8 adresach, jednym kodowaniu.
+- Adresy są ważne tylko dla procesu (PID + czas startu), w którym je znaleziono. Kalibracja innego procesu albo
+  po zamknięciu gry jest odrzucana (także z `calibrations.json`); odczyt zwraca wtedy `process_changed`.
+- Niepotwierdzona lokalizacja nigdy nie daje liczby (`unverified`).
+
+**Wynik na prawdziwej grze (SP, GER, PID 28728, 1.19.3)**
+- Skan (68 s): 3 kandydatów w 2 kodowaniach dla PP 700.324.
+- `pp 7` → 707.324, `pp 5` → 712.324: zostaje **1 adres, kodowanie `fixed64_100000`** (int64, wartość × 100 000).
+- Nowy zapis `claude_save_pp.hoi4`: 712.324 = pamięć.
+- Po odpauzowaniu (`python -m hoi4dbg.live check`): zapis `3.hoi4` 1936.1.30 – zapis 751.3 / pamięć 751.3 (PASS).
+  Zapisy `1.hoi4` i `2.hoi4`: pamięć wyższa o dokładnie 2 × i 4 × dzienny przyrost PP (1.344) – pamięć odczytana
+  2–4 dni gry po zapisie (gra nie była na pauzie). Adres śledzi PP przez 18 dni gry.
+- Pamięć ma 5 miejsc po przecinku, zapis 3 – porównanie z zapisem w tolerancji 0.0005.
+
+**UI**: karta „Live game memory (read-only)” na Dashboardzie (z kalibracją) i w Country Editorze. Stany:
+LIVE / STALE (>10 s bez udanego odczytu) / UNVERIFIED / NO GAME / NO ACCESS / RESTARTED / NOT CALIBRATED / READ ERROR.
+Liczba tylko w stanie LIVE (i przekreślona jako STALE).
+
+**Naprawy**: `python -m unittest tests.<moduł>` działa (pakiet `tests/__init__.py`); usunięte odwołanie do nieistniejącego
+`livecal.py`; komunikat o zapisie w trakcie zapisywania (`save_in_progress`).
+
+**Ograniczenia**
+- Po każdym uruchomieniu gry kalibrację trzeba powtórzyć (adres sterty zmienia się); powtarzalność w nowym procesie
+  niesprawdzona. Wczytanie innego zapisu w tym samym procesie prawdopodobnie unieważnia adres (wykrywane jako
+  `unreadable`/zmiana wartości dopiero przy weryfikacji – niesprawdzone).
+- Tylko PP i tylko kraj gracza. Wymaga zapisu tekstowego (`-force_text_save`) jako źródła wartości bazowej.
+- MP: nietestowane. Odczyt pamięci pokazuje stan lokalnego klienta.
+
+**Testy (2026-10-09)**: backend 117 OK, JS 24 OK, smoke 18/18.

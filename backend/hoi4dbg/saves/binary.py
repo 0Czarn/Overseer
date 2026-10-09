@@ -9,7 +9,7 @@ Format as verified on real saves 1.16.10 - 1.19.3 (docs/SAVE-FORMAT.md):
     0x0167 8 bytes      0x029c u64 (8)      0x0317 8 bytes
     0x000d 4 bytes in 1.16.x, 8 bytes in 1.17.0+ (see detect_float_width)
 - Every other u16 is a field-name token. Paradox does not publish the id -> name map;
-  meanings we rely on are listed in fields.py together with the evidence.
+  meanings we rely on are listed in hoi4dbg/saves/fields.py together with the evidence.
 """
 
 from __future__ import annotations

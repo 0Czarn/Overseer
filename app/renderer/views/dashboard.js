@@ -1,6 +1,7 @@
 import { h, card, keyValues, notice, sourceBadge, table, viewHeader } from '../lib/dom.js';
 import { formatDuration, humanize } from '../lib/format.js';
 import { headerDetails, pollAnalysis, saveBanner, saveError } from './save-ui.js';
+import { liveCard } from './live-ui.js';
 
 function processCard(game) {
   const proc = game.process;
@@ -102,12 +103,14 @@ export default {
     ]);
     const { game, capabilities, app } = status;
     const latestSave = latestSaveCard(ctx);
+    const live = liveCard(ctx, { cls: 'span-2' });
 
     root.append(
       viewHeader('Dashboard', `Backend ${app.version} - Python ${app.python}`),
       h('div', { class: 'grid' },
         processCard(game),
         versionCard(game),
+        live.el,
         sessionCard(game),
         pathsCard(game),
         latestSave.el,
@@ -126,6 +129,7 @@ export default {
     return () => {
       unsubscribe();
       latestSave.stop();
+      live.stop();
     };
   },
 };

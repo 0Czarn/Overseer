@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable
 from urllib.parse import parse_qs, urlsplit
 
+from .live.service import LiveError
 from .reports import ReportError
 from .service import DebuggerService, NotFound
 
@@ -27,6 +28,12 @@ def _int(query: dict, key: str, default: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, value))
 
 
+def _number(value) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise LiveError("bad_amount", "amount must be a number")
+    return float(value)
+
+
 def _str(query: dict, key: str, default: str = "") -> str:
     return query.get(key, [default])[0]
 
@@ -36,6 +43,21 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         return method, re.compile(f"^{pattern}$"), fn
 
     tag = r"(?P<tag>[A-Za-z0-9_]{1,8})"
+
+    def live():
+        if svc.live is None:
+            raise LiveError("disabled", "Live game access is disabled (--no-game)")
+        return svc.live
+
+    def calibration(body: dict) -> dict:
+        field, action = str(body.get("field", "")), body.get("action")
+        if action == "start":
+            return live().start_calibration(field)
+        if action == "refine":
+            return live().refine_calibration(field, str(body.get("source", "")))
+        if action == "reset":
+            return live().reset_calibration(field)
+        raise LiveError("bad_action", "action must be start, refine or reset")
     return [
         r("GET", "/api/health", lambda q, b: {"ok": True}),
         r("GET", "/api/status", lambda q, b: svc.status()),
@@ -52,6 +74,14 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("GET", "/api/saves", lambda q, b: svc.saves_list()),
         r("GET", "/api/saves/analysis", lambda q, b: svc.save_analysis(_str(q, "name") or None)),
         r("GET", "/api/saves/fields", lambda q, b: svc.save_fields()),
+        r("GET", "/api/live", lambda q, b: live().status()),
+        r("GET", "/api/live/values", lambda q, b: {"data": live().values()}),
+        r("POST", "/api/live/calibration", lambda q, b: calibration(b)),
+        r("POST", "/api/live/operations", lambda q, b: live().create_operation(
+            str(b.get("field", "")), str(b.get("mode", "")), _number(b.get("amount")))),
+        r("GET", r"/api/live/operations/(?P<op>op-[0-9]{1,9})", lambda q, b, op: live().poll_operation(op)),
+        r("POST", r"/api/live/operations/(?P<op>op-[0-9]{1,9})/cancel",
+          lambda q, b, op: live().cancel_operation(op)),
         r("GET", "/api/logs/app", lambda q, b: svc.app_log(
             _int(q, "limit", 200, 1, 2000), _str(q, "level", "debug"), _int(q, "after", 0, 0, 10**12))),
         r("POST", "/api/logs/app", lambda q, b: svc.client_log(b)),
@@ -122,6 +152,8 @@ def make_handler(svc: DebuggerService, token: str) -> type[BaseHTTPRequestHandle
                     self._send(HTTPStatus.NOT_FOUND, {"error": str(exc)})
                 except ReportError as exc:
                     self._send(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                except LiveError as exc:
+                    self._send(HTTPStatus.CONFLICT, {"error": str(exc), "code": exc.code})
                 except Exception as exc:  # keep the server alive, surface the error in the app log
                     svc.log.exception("Unhandled error on %s %s", method, parts.path)
                     self._send(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"internal error: {exc}"})

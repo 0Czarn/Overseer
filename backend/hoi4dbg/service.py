@@ -98,8 +98,10 @@ def save_freshness(save_mtime: float, game: dict, now: float | None = None) -> d
 
 class DebuggerService:
     def __init__(self, integration: GameIntegration, reports: ReportStore, ring: RingBufferHandler,
-                 logger: logging.Logger, data_dir: str = "", saves: SaveAnalyzer | None = None) -> None:
+                 logger: logging.Logger, data_dir: str = "", saves: SaveAnalyzer | None = None,
+                 live=None) -> None:
         self.saves = saves
+        self.live = live  # live.service.LiveService (process memory, read-only) or None
         self.integration = integration
         self.reports = reports
         self.ring = ring
@@ -259,6 +261,18 @@ class DebuggerService:
             "read_at": read_at,
             **extra,
         }, SAVE_NOTE)
+
+    def player_save_values(self) -> dict:
+        """Values of the player country of the newest save (evidence source for live calibration)."""
+        analysis = self.save_analysis(None)
+        data = analysis.get("data") or {}
+        tag = (data.get("header") or {}).get("player_tag")
+        if analysis["source"] != SAVE or not tag:
+            error = data.get("error") or {}
+            note = (f"{error['message']} [{error.get('code')}]" if error.get("message")
+                    else analysis.get("note") if analysis["source"] != SAVE else "Newest save has no player country")
+            return envelope(UNAVAILABLE, {"error": error} if error else None, note)
+        return self.country_save_values(tag, None)
 
     def save_fields(self) -> dict:
         return envelope(LIVE, save_fields.field_catalog())

@@ -1,6 +1,7 @@
 import { h, card, demoBanner, notice, scopeBadge, sourceBadge, toast, viewHeader } from '../lib/dom.js';
 import { formatAge, formatValue, freshnessInfo } from '../lib/format.js';
 import { ppCommand, verifyChange } from '../lib/verify.js';
+import { liveCard } from './live-ui.js';
 import { countryPicker, tagChip } from './shared.js';
 
 const STATUS_NOTE = { read: null, absent: 'not in save', unmapped: 'not mapped yet' };
@@ -114,6 +115,9 @@ export default {
         h('div', null, h('h2', null, meta.data.name), h('p', { class: 'muted' }, fromSave && saved.data.player_tag === tag
           ? 'Player country in this save' : 'Country name from the built-in list')))),
     );
+    // Live memory read is calibrated for the player's country only.
+    const live = !fromSave || saved.data.player_tag === tag ? liveCard(ctx, { withCalibration: false }) : null;
+    if (live) root.append(live.el);
     if (fromSave) {
       root.append(
         snapshotBanner(saved.data),
@@ -127,5 +131,6 @@ export default {
         h('div', { class: 'tile-grid' }, fields.map((f) => demoTile(f, meta.data.values[f.key]))),
       );
     }
+    return () => live?.stop();
   },
 };
