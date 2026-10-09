@@ -207,5 +207,33 @@ class RealTextSaveTests(TempDirMixin, unittest.TestCase):
         self.assertEqual(hashlib.sha1(original.read_bytes()).hexdigest(), digest)
 
 
+def pp_test_pair() -> tuple[Path, Path] | None:
+    directory = real_saves_dir()
+    if directory is None:
+        return None
+    before, after = directory / "PROJEKT-OVERSEER.hoi4", directory / "pp save 2.hoi4"
+    return (before, after) if before.is_file() and after.is_file() else None
+
+
+@unittest.skipUnless(pp_test_pair(), "PP in-game test saves not present")
+class RealPpChangeTests(TempDirMixin, unittest.TestCase):
+    """In-game test 2026-10-09: GER paused at 1936.1.1.12, console `pp 10`, then `savegame`.
+    Both saves are read from copies; the change must be exactly +10 and nothing else may change."""
+
+    def test_pp_plus_10_verified_from_saves(self):
+        logger, _ = applog.setup(None)
+        analyzer = reader.SaveAnalyzer(reader.SaveSnapshotter(self.tmp / "cache"), logger)
+        results = []
+        for original in pp_test_pair():
+            staged = Path(shutil.copy2(original, self.tmp / original.name))
+            out = analyzer.country_values(staged, "GER")
+            results.append((out["analysis"]["header"]["date"]["text"], out["values"]))
+        (date_before, before), (date_after, after) = results
+        self.assertEqual(date_before, date_after)
+        self.assertAlmostEqual(after["political_power"]["value"] - before["political_power"]["value"], 10.0, places=3)
+        for field in ("stability", "war_support", "command_power", "fuel", "army_experience"):
+            self.assertEqual(before[field]["value"], after[field]["value"], field)
+
+
 if __name__ == "__main__":
     unittest.main()

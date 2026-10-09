@@ -16,7 +16,7 @@ sprawdzono, jest oznaczone jako *do weryfikacji*.
 | Zapisy: wartości Country Editor | ✅ z zapisów tekstowych (`-force_text_save`); manpower/convoys nieustalone |
 | Zapisy: stany, cele, sprzęt | ❌ jeszcze nie mapowane |
 | Odczyt na żywo | ❌ |
-| Modyfikacja | 🟡 PP: komenda diagnostyczna + niezależna weryfikacja przez zapis; test w grze niewykonany |
+| Modyfikacja | 🟡 PP +10 zweryfikowane w SP (komenda `pp 10` + niezależny odczyt zapisu); brak docelowej metody edycji |
 
 ## 2. Etap pośredni: zapis jako źródło „prawie na żywo”
 

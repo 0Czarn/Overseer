@@ -20,7 +20,7 @@ Legenda: ✅ zrobione · 🟡 w toku / częściowo · ⏳ zaplanowane · ⛔ wym
 | 1 | Aplikacja desktopowa, UI (9 zakładek), logi, testy, dokumentacja | ✅ |
 | 2 | Wykrywanie procesu HOI4 i wersji gry | ✅ |
 | 3 | Wiarygodny odczyt danych z aktywnej rozgrywki | 🟡 zapisy: nagłówek, gracze, mody ✅; wartości Country Editor z zapisów tekstowych ✅; odczyt procesu ❌ |
-| 4 | Prototyp modyfikacji pojedynczej wartości (SP) + weryfikacja | 🟡 PP: metoda diagnostyczna + niezależna weryfikacja gotowe; test w grze niewykonany |
+| 4 | Prototyp modyfikacji pojedynczej wartości (SP) + weryfikacja | 🟡 PP +10 zweryfikowane w grze (komenda diagnostyczna + odczyt zapisu); brak docelowej metody edycji |
 | 5 | Edytory państw, stanów, sprzętu | ⏳ |
 | 6 | Cele narodowe, narzędzia debugowania | ⏳ |
 | 7 | Testy synchronizacji MP (w tym inicjowanie przez nie-hosta) | ⏳ |
@@ -167,9 +167,17 @@ Instrukcje: `prompt4.md` (2026-10-09).
 **Wartości odczytane z prawdziwego zapisu (GER, 1936.1.1.12):** PP 2.324, stabilność 0.7, poparcie wojny 0.3,
 CP 0.286, paliwo 297201.87, doświadczenie armii 30.
 
+**Test w grze (2026-10-09, SP, GER, gra na pauzie 1936.1.1.12): ✅ PASS**
+- Wartość bazowa: `PROJEKT-OVERSEER.hoi4` (14:02:46): `politics.political_power = 2.324`.
+- Gracz wpisał `pp 10` i `savegame` → `pp save 2.hoi4` (14:12:02).
+- Niezależny odczyt kopii nowego zapisu: `political_power = 12.324`, ta sama data w grze. Zmiana dokładnie +10.000.
+  Stabilność, poparcie wojny, CP, paliwo i doświadczenie armii bez zmian.
+- `verifyChange` (logika przycisku Verify): `pass`. SHA-1 oryginałów bez zmian.
+- Utrwalone jako test regresyjny `RealPpChangeTests` (pomijany, gdy pliki nie istnieją).
+
 **Czego brakuje (uczciwie)**
-- **Modyfikacja PP nie została jeszcze wykonana ani zweryfikowana w grze.** Metoda i weryfikacja są gotowe, ale wymagają
-  wpisania `pp 10` i `savegame` w grze uruchomionej z `-force_text_save`. Gra była zamknięta w chwili implementacji.
+- Zmiana działa przez komendę konsoli wpisaną ręcznie przez gracza (narzędzie diagnostyczne), a nie przez edytor.
+  Docelowa metoda edycji z poziomu debuggera nie istnieje. Komenda działa tylko na kraj gracza.
 - **Odczyt aktywnego procesu nie istnieje.** Statyczna analiza `hoi4.exe` (mapa tokenów) została zablokowana przez
   system uprawnień Claude Code, a analiza pamięci procesu nie była prowadzona. Wymaga wyraźnego dopuszczenia przez użytkownika.
 - Manpower i Convoys: lokalizacja w zapisie nieustalona.
