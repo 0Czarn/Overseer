@@ -537,4 +537,4 @@ wyniku aplikacja używa ostatniego jednoznacznego wyniku z tego procesu gry, pot
   które już mają wpis w magazynie (także zerowe – np. własne projekty); nowe – raz przez `add_equipment`.
 - Wydajność: szybsze pomijanie tokenów (tablica rozmiarów); limit widoku w smoke teście 20 s (pierwszy odczyt
   dużego zapisu binarnego trwa kilka sekund – do poprawy wspólnym indeksem zapisu, krok I).
-- Testy: backend 168 OK, JS 30 OK, smoke 18/18.
+- Testy: backend 167 OK, JS 30 OK, smoke 18/18.
