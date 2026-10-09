@@ -181,7 +181,7 @@ class SaveAnalyzer:
         block = text.country_block(data, tag)
         if block is None:
             raise binary.SaveFormatError("country_missing", f"Country {tag} does not exist in this save")
-        return {"analysis": result, "values": text.country_values(block)}
+        return {"analysis": result, "values": text.country_values(block, text.equipment_names(data))}
 
     def wait_idle(self, timeout: float = 60.0) -> None:
         """Test helper: wait until no validation is pending."""

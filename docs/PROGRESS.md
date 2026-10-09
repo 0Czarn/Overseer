@@ -180,7 +180,7 @@ CP 0.286, paliwo 297201.87, doświadczenie armii 30.
   Docelowa metoda edycji z poziomu debuggera nie istnieje. Komenda działa tylko na kraj gracza.
 - **Odczyt aktywnego procesu nie istnieje.** Statyczna analiza `hoi4.exe` (mapa tokenów) została zablokowana przez
   system uprawnień Claude Code, a analiza pamięci procesu nie była prowadzona. Wymaga wyraźnego dopuszczenia przez użytkownika.
-- Manpower i Convoys: lokalizacja w zapisie nieustalona.
+- ~~Manpower i Convoys~~: zmapowane 2026-10-09 (patrz niżej). Zgodność z wartościami w UI gry niepotwierdzona.
 - Zapisy binarne: brak mapy tokenów dla pól państwa.
 - MP: komendy konsoli działają na kraj gracza wydającego komendę („to player”). Działanie dla klienta niebędącego hostem
   oraz synchronizacja **nie były testowane** (wymaga dwóch klientów).
@@ -203,3 +203,16 @@ CP 0.286, paliwo 297201.87, doświadczenie armii 30.
 - ⛔ Analiza `hoi4.exe` / pamięci procesu: zablokowana przez uprawnienia Claude Code; wymaga wyraźnej zgody użytkownika.
 - Generator komend: tylko narzędzie diagnostyczne (decyzja z prompt4.md), nie docelowa implementacja edytorów.
 - `zalozenia.md` jest pusty – jeśli miał zawierać dodatkowe wymagania, trzeba go uzupełnić.
+
+---
+
+## Manpower i konwoje z zapisów tekstowych (2026-10-09) ✅/🟡
+
+- `manpower.current` = dostępna pula siły ludzkiej (pole pomijane przez grę, gdy wynosi 0).
+- Konwoje = suma `convoys.equipment` dla sprzętu typu `convoy*`. Nazwy z top-level `equipments={}` (4504 definicje w zapisie).
+- Weryfikacja na parze zapisów `pp save 2` → `Manpower 203.3, convoy 10` (komendy z `console_history.txt`):
+  - manpower: brak → 201 692 736 (komendy dodały 202 000 000; różnica niewyjaśniona);
+  - konwoje: 200 → 15 (bez komendy dotyczącej konwojów).
+- **Otwarte:** nazwa pliku sugeruje 203.3 i 10 w UI gry. Jak UI przelicza wartości z zapisu, niepotwierdzone.
+- Poprawka: zapisy tekstowe mają końce linii CRLF (wcześniej nieobsłużone w tabeli sprzętu).
+- Testy: backend 89 OK (nowe: CRLF, konwoje, test na prawdziwej parze zapisów), JS 20 OK, smoke 18/18.

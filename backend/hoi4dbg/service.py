@@ -35,7 +35,7 @@ CAPABILITIES: dict[str, dict] = {
                     "note": "Save header: country, in-game date, version, difficulty, ideology, mods."},
     "country_values": {"source": SAVE, "write": False,
                        "note": "From text saves (-force_text_save): political power, stability, war support, "
-                               "command power, fuel, army XP. Manpower/convoys not mapped. No write method."},
+                               "command power, fuel, army XP, manpower, convoys. No write method."},
     "states": {"source": DEMO, "write": False, "note": WRITE_NOTE},
     "focus": {"source": DEMO, "write": False, "note": "Read-only preview. Queueing is not implemented."},
     "equipment": {"source": DEMO, "write": False, "note": WRITE_NOTE},

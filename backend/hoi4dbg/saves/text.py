@@ -24,12 +24,12 @@ COUNTRY_FIELDS: dict[str, tuple[str, ...]] = {
     "army_experience": ("experience_status", "army_experience"),
     "air_experience": ("experience_status", "air_experience"),
     "navy_experience": ("experience_status", "navy_experience"),
+    # Confirmed 2026-10-09: absent before, 201692736 after console `manpower 2000000` + `manpower 200000000`.
+    "manpower": ("manpower", "current"),
 }
 # Fields whose location in the save is not confirmed yet (never guessed).
-UNMAPPED_FIELDS = {
-    "manpower": "The country block only has manpower.ratio; the available manpower pool was not located yet.",
-    "convoys": "convoys.equipment lists amounts per equipment id; mapping the id to convoys is not confirmed.",
-}
+UNMAPPED_FIELDS: dict[str, str] = {}
+EQUIPMENT_DEF_RE = re.compile(rb"\n\t([A-Za-z0-9_]+)=\{\r?\n\t\tid=\{ id=(\d+) type=(\d+) \}")  # real saves use CRLF
 # Absent experience fields: the game omits some values from text saves (observed: only army_experience present).
 OMITTED_NOTE = "Not present in the save (the game omits some values, likely when they are 0)."
 
@@ -157,7 +157,41 @@ def country_block(data: bytes, tag: str) -> list | None:
     return parse(data[pos + len(marker):i - 1].decode("utf-8", errors="replace"))
 
 
-def country_values(block: list) -> dict:
+def equipment_names(data: bytes) -> dict[str, str]:
+    """Equipment id -> type name from the top-level `equipments={...}` table (e.g. "1" -> "convoy_1")."""
+    start = data.find(b"\nequipments={")
+    if start < 0:
+        return {}
+    end = data.find(b"\n}", start)
+    return {m.group(2).decode(): m.group(1).decode() for m in EQUIPMENT_DEF_RE.finditer(data, start, end)}
+
+
+def convoys(block: list, names: dict[str, str]) -> dict:
+    """Convoys = sum of convoys.equipment entries whose equipment type name starts with "convoy"."""
+    entries = get(block, "convoys", "equipment")
+    if entries is None:
+        return {"value": None, "path": "convoys.equipment", "status": "absent", "note": OMITTED_NOTE}
+    total = 0.0
+    parts = []
+    unknown = []
+    for item in entries:
+        if not (isinstance(item, tuple) and item[0] == "equipment" and isinstance(item[1], list)):
+            continue
+        eq_id = get(item[1], "id", "id")
+        amount = _number(get(item[1], "amount"))
+        name = names.get(eq_id)
+        if name is None:
+            unknown.append(eq_id)
+        elif name.startswith("convoy") and amount is not None:
+            total += amount
+            parts.append(f"{name}#{eq_id}={amount:g}")
+    if unknown:
+        return {"value": None, "path": "convoys.equipment", "status": "unmapped",
+                "note": f"Equipment id(s) {', '.join(map(str, unknown))} not found in the equipments table"}
+    return {"value": total, "path": "convoys.equipment", "status": "read", "raw": " + ".join(parts) or "0"}
+
+
+def country_values(block: list, names: dict[str, str] | None = None) -> dict:
     """Country Editor values with per-field provenance."""
     values = {}
     for field, path in COUNTRY_FIELDS.items():
@@ -167,6 +201,7 @@ def country_values(block: list) -> dict:
             values[field] = {"value": None, "path": ".".join(path), "status": "absent", "note": OMITTED_NOTE}
         else:
             values[field] = {"value": number, "path": ".".join(path), "status": "read", "raw": raw}
+    values["convoys"] = convoys(block, names or {})
     for field, note in UNMAPPED_FIELDS.items():
         values[field] = {"value": None, "path": None, "status": "unmapped", "note": note}
     return values

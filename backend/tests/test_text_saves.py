@@ -36,6 +36,16 @@ mods={
 }
 session=24
 speed=0
+equipments={
+\tconvoy_1={
+\t\tid={ id=1 type=70 }
+\t\tcreator="GER"
+\t}
+\tinfantry_equipment_1={
+\t\tid={ id=7 type=70 }
+\t\tcreator="GER"
+\t}
+}
 countries={
 \tGER={
 \t\tinstances_counter=0
@@ -52,6 +62,19 @@ countries={
 \t\t\truling_party=fascism
 \t\t\tlast_election="1933.3.5.1"
 \t\t\tpolitical_power=2.324
+\t\t}
+\t\tconvoys={
+\t\t\tequipment={
+\t\t\t\tequipment={
+\t\t\t\t\tid={ id=1 type=70 }
+\t\t\t\t\tamount=15
+\t\t\t\t}
+\t\t\t\tallow_zero_entries=no
+\t\t\t}
+\t\t}
+\t\tmanpower={
+\t\t\tcurrent=201692736
+\t\t\tratio=250000
 \t\t}
 \t\tstability=0.7
 \t\twar_support=0.3
@@ -90,7 +113,8 @@ class TextParserTests(unittest.TestCase):
         self.assertEqual(result["missing_fields"], [])
 
     def test_country_values_for_editor(self):
-        values = text.country_values(text.country_block(TEXT_SAVE.encode(), "GER"))
+        data = TEXT_SAVE.encode()
+        values = text.country_values(text.country_block(data, "GER"), text.equipment_names(data))
         self.assertEqual(values["political_power"]["value"], 2.324)
         self.assertEqual(values["political_power"]["path"], "politics.political_power")
         self.assertEqual(values["stability"]["value"], 0.7)
@@ -99,8 +123,26 @@ class TextParserTests(unittest.TestCase):
         self.assertEqual(values["fuel"]["value"], 297201.86508)
         self.assertEqual(values["army_experience"]["value"], 30.0)
         self.assertEqual(values["air_experience"]["status"], "absent")
-        self.assertEqual(values["manpower"]["status"], "unmapped")
-        self.assertEqual(values["convoys"]["status"], "unmapped")
+        self.assertEqual(values["manpower"]["value"], 201692736)
+        self.assertEqual(values["manpower"]["path"], "manpower.current")
+        self.assertEqual(values["convoys"]["value"], 15)
+        self.assertEqual(values["convoys"]["raw"], "convoy_1#1=15")
+
+    def test_crlf_saves(self):
+        # Real saves use CRLF line endings.
+        data = TEXT_SAVE.replace("\n", "\r\n").encode()
+        self.assertEqual(text.equipment_names(data), {"1": "convoy_1", "7": "infantry_equipment_1"})
+        values = text.country_values(text.country_block(data, "GER"), text.equipment_names(data))
+        self.assertEqual((values["manpower"]["value"], values["convoys"]["value"]), (201692736, 15))
+        self.assertEqual(text.analyse_header(data)["header"]["player_tag"], "GER")
+
+    def test_convoys_ignore_other_equipment_and_flag_unknown_ids(self):
+        block = text.parse("convoys={ equipment={ equipment={ id={ id=1 type=70 } amount=15 } "
+                           "equipment={ id={ id=7 type=70 } amount=99 } } }")
+        names = {"1": "convoy_1", "7": "infantry_equipment_1"}
+        self.assertEqual(text.convoys(block, names)["value"], 15)
+        self.assertEqual(text.convoys(block, {"7": "x"})["status"], "unmapped")
+        self.assertEqual(text.convoys([], names)["status"], "absent")
 
     def test_country_block_is_bounded_to_that_country(self):
         sov = text.country_values(text.country_block(TEXT_SAVE.encode(), "SOV"))
@@ -233,6 +275,30 @@ class RealPpChangeTests(TempDirMixin, unittest.TestCase):
         self.assertAlmostEqual(after["political_power"]["value"] - before["political_power"]["value"], 10.0, places=3)
         for field in ("stability", "war_support", "command_power", "fuel", "army_experience"):
             self.assertEqual(before[field]["value"], after[field]["value"], field)
+
+
+def manpower_test_pair() -> tuple[Path, Path] | None:
+    directory = real_saves_dir()
+    if directory is None:
+        return None
+    before, after = directory / "pp save 2.hoi4", directory / "Manpower 203.3, convoy 10.hoi4"
+    return (before, after) if before.is_file() and after.is_file() else None
+
+
+@unittest.skipUnless(manpower_test_pair(), "manpower/convoy in-game test saves not present")
+class RealManpowerConvoyTests(TempDirMixin, unittest.TestCase):
+    """In-game test 2026-10-09 (GER, 1936.1.1.12): console `manpower 2000000`, `manpower 200000000`,
+    `add_latest_equipment 999`, `add_latest_equipment 10`, then savegame. Read from copies."""
+
+    def test_values_change_as_observed(self):
+        logger, _ = applog.setup(None)
+        analyzer = reader.SaveAnalyzer(reader.SaveSnapshotter(self.tmp / "cache"), logger)
+        before, after = (analyzer.country_values(Path(shutil.copy2(p, self.tmp / p.name)), "GER")["values"]
+                         for p in manpower_test_pair())
+        self.assertEqual(before["manpower"]["status"], "absent")
+        self.assertEqual(after["manpower"]["value"], 201692736)
+        self.assertEqual((before["convoys"]["value"], after["convoys"]["value"]), (200, 15))
+        self.assertEqual(before["political_power"]["value"], after["political_power"]["value"])
 
 
 if __name__ == "__main__":

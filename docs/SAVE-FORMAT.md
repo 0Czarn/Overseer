@@ -120,8 +120,21 @@ więc jego edycja przy działającej grze byłaby zawodna.
 | Fuel | `fuel_status.fuel` | 297201.86508 |
 | Army Experience | `experience_status.army_experience` | 30.0 |
 | Air / Navy Experience | `experience_status.air_experience` / `navy_experience` | brak w pliku (gra pomija wartości, prawdopodobnie zerowe) |
-| Manpower | **nie zlokalizowano**. W bloku jest tylko `manpower.ratio`. | – |
-| Convoys | **niepotwierdzone**. `convoys.equipment` zawiera ilości dla ID sprzętu. | – |
+| Manpower | `manpower.current` (brak pola, gdy pula = 0) | brak → 201692736 po teście ↓ |
+| Convoys | suma `convoys.equipment[].amount` dla sprzętu, którego nazwa w top-level `equipments={}` zaczyna się od `convoy` | 200 → 15 po teście ↓ |
+
+**Test manpower/konwojów (2026-10-09, GER, 1936.1.1.12).** Komendy z `console_history.txt`: `manpower 2000000`,
+`manpower 200000000`, `add_latest_equipment 999`, `add_latest_equipment 10`, a potem zapis `Manpower 203.3, convoy 10.hoi4`.
+Porównanie bloku GER z `pp save 2.hoi4`:
+- `manpower.current` pojawiło się z wartością 201692736. Suma komend to 202000000; różnica 307264 jest niewyjaśniona.
+- `convoys.equipment` (id 1 = `convoy_1`): 200 → 15. Żadna wpisana komenda nie dotyczyła konwojów.
+- `production.equipments`: istniejące pozycje +1009 (= 999 + 10), nowe pozycje 1009. To potwierdza magazyn sprzętu.
+
+**Niezgodność z nazwą pliku.** Nazwa pliku podaje „Manpower 203.3, convoy 10”, a zapis zawiera 201,69 mln i 15.
+Jak UI gry przelicza te wartości (np. konwoje dostępne vs wszystkie), nie zostało potwierdzone.
+Debugger pokazuje surową wartość z zapisu i ścieżkę pola.
+
+Zapisy tekstowe używają końców linii CRLF.
 
 Kontrola: SOV PP 1.5856, ENG PP 2.3182. Wartości różnią się między państwami, a bloki są poprawnie rozgraniczone.
 
