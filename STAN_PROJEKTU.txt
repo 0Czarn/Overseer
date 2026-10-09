@@ -1,5 +1,5 @@
 HOI4 DEBUGGER - STAN PROJEKTU
-Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-09 (krok F, część 1)
+Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-09 (krok F, część 2)
 Szczegóły i dowody: docs/PROGRESS.md, plan: docs/STATUS-AND-PLAN.md
 
 ======================================================================
@@ -13,9 +13,12 @@ ZROBIONE
       - dla DOWOLNEGO państwa, przez tablicę państw gry (sprawdzone po restartach gry)
 [x] Zmiana wartości z aplikacji (komenda konsoli + sprawdzenie w pamięci):
       PP, stabilność, poparcie wojny, CP, paliwo - sprawdzone w grze
+[x] Bezpośredni zapis do pamięci (LOKALNY, tylko singleplayer, włączany przełącznikiem):
+      stabilność / poparcie wojny w %, PP, CP, paliwo, XP - dowolne państwo
 [x] Krok A  Countries & Players: lista państw, nazwy z gry, partia, liczba stanów, gracze
 [x] Krok B  Automatyczne mapowanie pól zapisu na pamięć (wszystkie państwa naraz)
-[x] Krok C  Gracz rozpoznawany z pamięci gry (bez zapisu)
+[x] Krok C  Gracz rozpoznawany z pamięci gry (przy włączonej mgle wojny; inaczej ostatni
+            pewny wynik / zapis) - patrz sprostowanie w docs/PROGRESS.md
 [x] Krok D  State Editor: 1081 stanów (właściciel, kontroler, budynki, zasoby, rdzenie,
             roszczenia, manpower stanu); manpower państwa zgodny z paskiem gry
 [x] Krok E  Equipment Manager: magazyn, warianty, konwoje z zapisu; dodawanie sprzętu
@@ -28,8 +31,9 @@ DO ZROBIENIA (w tej kolejności)
 [~] Krok F  National Focus Manager                                          <- W TRAKCIE
             [x] drzewko wykrywane automatycznie (gra + mody), stan celów z zapisu
             [x] plan kolejki w aplikacji (sprawdzanie wymagań i wykluczeń, zapis trwały)
-            [ ] automatyczne rozpoczynanie kolejnego celu - gra nie ma na to komendy;
-                CZEKA NA DECYZJĘ: powiadomienie / klikanie za gracza (patrz rozmowa)
+            [x] cel na żywo z pamięci: bieżący, postęp, lista ukończonych
+            [x] powiadomienie, gdy cel się skończy, z nazwą następnego z planu (wariant A)
+            [ ] potwierdzenie powiadomienia Windows w grze (po poprawce)
 [ ] Krok G  Intelligence Lab (poziomy wywiadu) i Game Tools (narzędzia lokalne)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)
             -> wymaga drugiego komputera/konta
@@ -42,4 +46,4 @@ ZNANE OGRANICZENIA
 - Stany, manpower, lista państw, sprzęt - z ostatniego zapisu (migawka), nie na żywo.
 - Sprzętu nie da się usuwać (komenda gry tylko dodaje).
 - Mody dodające nowe tagi państw: nieprzetestowane.
-- Multiplayer: nieprzetestowany.
+- Multiplayer: nieprzetestowany. Zapis do pamięci w MP jest celowo zablokowany.

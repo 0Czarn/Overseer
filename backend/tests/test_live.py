@@ -565,7 +565,9 @@ class CountryTableTests(TempDirMixin, unittest.TestCase):
         self.mem.modules = lambda: {"hoi4.exe": (self.MODULE, self.MODULE + 0x8000)}
         self.version = "Operation Postern v1.19.3.0.c01a (5632)"
         self.save_player = "GER"   # stale save: the player switched to ITA since
-        self.process = {"pid": 7, "path": str(self.install / "hoi4.exe"), "started": "a"}
+        self.process = {"pid": 7, "path": str(self.install / "hoi4.exe"), "started": "2026-10-09T10:00:00+00:00"}
+        self.logs = self.tmp / "logs"
+        self.game_log("SINGLEPLAYER")
         # hoi4.exe+rva -> table object; +0x310 -> array; slot i -> country objects
         rva, slot = pointers.COUNTRY_TABLE
         self.mem.regions_data[self.MODULE] = bytearray(max(0x8000, rva + 8))
@@ -583,14 +585,20 @@ class CountryTableTests(TempDirMixin, unittest.TestCase):
 
     def put_country(self, tag, stability, pp, ai=1):
         c = self.countries[tag]
-        self.mem.put(c + pointers.PLAYER_FLAG[0], "Q", c + 0x1C00)  # AI-control sub-object
+        self.mem.put(c + pointers.PLAYER_FLAG[0], "Q", c + 0x1C00)  # visibility sub-object (0 = visible)
         self.mem.regions_data[BASE][c - BASE + 0x1C00 + pointers.PLAYER_FLAG[1]] = ai
         self.mem.put(c + 0x10D0, "q", round(stability * 100000))
         self.mem.put(c + 0xF90, "Q", c + 0x1800)           # politics object
         self.mem.put(c + 0x1800 + 0xE0, "q", round(pp * 100000))
 
     def detect(self):
-        return {"process": self.process, "install": {"path": str(self.install), "version": {"display": self.version}}}
+        return {"process": self.process, "install": {"path": str(self.install), "version": {"display": self.version}},
+                "userdata": {"logs_dir": str(self.logs)}}
+
+    def game_log(self, mode):
+        self.logs.mkdir(exist_ok=True)
+        (self.logs / "game.log").write_text(f"[19:59:34][1936.02.01.03][frontend.cpp:682]: \n\n\t\t[[ Launching {mode}-game ]]\n"
+                                            "\tStart-date: 1936.2.1.3\n", encoding="utf-8")
 
     def save_values(self):
         return {"source": "save", "data": {"player_tag": self.save_player, "file": {"name": "s.hoi4", "mtime": 1.0},
@@ -647,6 +655,60 @@ class CountryTableTests(TempDirMixin, unittest.TestCase):
         self.assertEqual((res["progress_days"], res["completed"]), (23.0, ["ITA_army"]))
         self.mem.put(state + pointers.FOCUS["definition"], "Q", 0)        # nothing selected
         self.assertIsNone(self.svc.focus("ITA")["current"])
+
+    def writer(self):
+        """The fake memory doubles as the writer; it records writes."""
+        self.writes = []
+
+        def write(address, data):
+            self.writes.append((address, data))
+            for base, region in self.mem.regions_data.items():
+                if base <= address < base + len(region):
+                    region[address - base:address - base + len(data)] = data
+        self.mem.write = write
+        self.svc._open_writer = lambda pid: self.mem
+
+    def test_local_write_sets_the_value_and_reads_it_back(self):
+        self.writer()
+        res = self.svc.write_value("stability", 0.8, expected_before=0.6)        # player ITA
+        self.assertEqual((res["tag"], res["before"], res["after"], res["scope"]), ("ITA", 0.6, 0.8, "local"))
+        self.assertEqual(self.writes, [(self.countries["ITA"] + 0x10D0, struct.pack("<q", 80000))])
+        self.assertEqual(self.svc.read("stability")["value"], 0.8)
+        res = self.svc.write_value("political_power", 500, tag="GER")             # behind a pointer, any country
+        self.assertEqual(res["after"], 500.0)
+
+    def test_local_write_is_refused_in_multiplayer_out_of_range_or_when_the_value_moved(self):
+        self.writer()
+        for kwargs, code in ((dict(field="stability", value=1.5), "out_of_range"),
+                             (dict(field="manpower", value=5), "unsupported_field"),
+                             (dict(field="stability", value=0.5, expected_before=0.7), "value_changed")):
+            with self.assertRaises(LiveError) as ctx:
+                self.svc.write_value(**kwargs)
+            self.assertEqual(ctx.exception.code, code, kwargs)
+        self.game_log("MULTIPLAYER")
+        with self.assertRaises(LiveError) as ctx:
+            self.svc.write_value("stability", 0.5)
+        self.assertEqual(ctx.exception.code, "multiplayer")
+        (self.logs / "game.log").write_text("[19:59:10][no_game_date][gamestate.cpp:2844]: Loaded 13414 provinces.\n")
+        with self.assertRaises(LiveError) as ctx:                                 # no launch line: unknown
+            self.svc.write_value("stability", 0.5)
+        self.assertEqual(ctx.exception.code, "mode_unknown")
+        self.assertEqual(self.writes, [])
+
+    def test_player_with_fog_of_war_off_keeps_the_last_unambiguous_result(self):
+        """Correction: the flag is fog-of-war visibility - after `fow` every existing country is visible."""
+        self.assertEqual(self.svc.read("stability")["tag"], "ITA")              # only ITA visible
+        self.svc._player = None
+        self.put_country("GER", stability=0.71, pp=772.3, ai=0)                   # `fow`: GER visible too
+        self.assertEqual(self.svc.players(), ["GER", "ITA"])
+        self.assertEqual(self.svc.read("stability")["tag"], "ITA")
+
+    def test_writer_module_requests_only_the_rights_it_needs(self):
+        from hoi4dbg.integration import memory_write
+        self.assertEqual(memory_write.WRITE_ACCESS_RIGHTS, 0x0400 | 0x0010 | 0x0020 | 0x0008)
+        source = Path(memory_write.__file__).read_text(encoding="utf-8")
+        for forbidden in ("VirtualProtectEx(", "PROCESS_ALL_ACCESS =", "CreateRemoteThread("):
+            self.assertNotIn(forbidden, source)
 
     def test_missing_country_and_unknown_tag(self):
         with self.assertRaises(LiveError) as ctx:

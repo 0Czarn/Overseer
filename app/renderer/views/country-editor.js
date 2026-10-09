@@ -126,7 +126,7 @@ export default {
     );
     // Live memory read is calibrated for the player's country only.
     // Live values for any country (game country table); changes only for the player country (console commands).
-    const live = liveCard(ctx, { withCalibration: false, withChange: isPlayer, tag });
+    const live = liveCard(ctx, { withCalibration: false, withChange: isPlayer, withDirect: true, tag });
     if (live) root.append(live.el);
     if (fromSave) {
       root.append(

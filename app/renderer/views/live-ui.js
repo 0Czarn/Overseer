@@ -134,9 +134,63 @@ function otherFields(last) {
   return tiles.length ? h('div', { class: 'tile-grid live-grid' }, tiles) : null;
 }
 
+const DIRECT_FIELDS = ['stability', 'war_support', 'political_power', 'command_power', 'fuel',
+  'army_experience', 'navy_experience', 'air_experience'];
+const DIRECT_PREF = 'hoi4dbg.directWrite';
+
+function directEnabled() {
+  try { return localStorage.getItem(DIRECT_PREF) === '1'; } catch { return false; }
+}
+
+/** LOCAL direct memory write (opt-in, single player): sets the value immediately, no console. The backend
+ *  refuses it with more than one human player (it would desynchronise a multiplayer game). */
+function directSection(ctx, tag, getValues) {
+  const fieldSel = h('select', { class: 'input input-small', 'aria-label': 'Field' },
+    DIRECT_FIELDS.map((k) => h('option', { value: k }, FIELD_LABELS[k])));
+  const value = h('input', { class: 'input input-small', type: 'number', step: 'any', 'aria-label': 'New value' });
+  const unit = h('span', { class: 'muted' });
+  const result = h('div');
+  const fill = () => {
+    const v = getValues()?.[fieldSel.value];
+    unit.textContent = PERCENT_FIELDS.has(fieldSel.value) ? '%' : '';
+    if (v?.status === 'live') value.value = String(PERCENT_FIELDS.has(fieldSel.value) ? +(v.value * 100).toFixed(2) : +v.value.toFixed(3));
+  };
+  fieldSel.addEventListener('change', fill);
+  const toggle = h('input', { type: 'checkbox', checked: directEnabled(), onChange: (e) => {
+    try { localStorage.setItem(DIRECT_PREF, e.target.checked ? '1' : '0'); } catch { /* preference only */ }
+    setBtn.disabled = !e.target.checked;
+  } });
+  const set = async () => {
+    const field = fieldSel.value;
+    const before = getValues()?.[field];
+    try {
+      const res = await ctx.api.post('/api/live/write', {
+        field, tag, value: toValueUnits(Number(value.value), field), confirm_local: true,
+        expected_before: before?.status === 'live' ? before.value : undefined,
+      });
+      result.replaceChildren(notice('info', [h('b', null, 'LOCAL WRITE: '),
+        `${FIELD_LABELS[field]} ${res.tag}: ${formatLiveValue(res.before, field)} -> ${formatLiveValue(res.after, field)} `
+        + '(read back from memory). This client only - not a shared game change.']));
+      ctx.api.log('warning', `Local memory write ${res.tag} ${field}: ${res.before} -> ${res.after}`);
+    } catch (err) {
+      result.replaceChildren(notice('warn', err.message));
+    }
+  };
+  const setBtn = h('button', { class: 'btn btn-small btn-primary', disabled: !directEnabled(), onClick: set }, 'Set now');
+  setTimeout(fill, 0);
+  return h('div', { class: 'live-cal' },
+    h('h3', null, 'Set directly (memory write)'),
+    notice('warn', ['Writes the value straight into game memory - ', scopeBadge('local'), ' only. Single player: in a '
+      + 'multiplayer game it would exist on your client only (desync), so the app refuses it there. Use "Change (verified)" '
+      + 'for changes that go through the game.']),
+    h('label', { class: 'switch' }, toggle, h('span', null, 'Enable direct memory writes')),
+    h('div', { class: 'toolbar live-change' }, fieldSel, value, unit, setBtn),
+    result);
+}
+
 /** Returns { el, stop }. `withCalibration` adds the calibration controls, `withChange` the verified change;
  *  `tag` reads that country (game country table) instead of the player country. */
-export function liveCard(ctx, { withCalibration = true, withChange = false, cls, tag } = {}) {
+export function liveCard(ctx, { withCalibration = true, withChange = false, withDirect = false, cls, tag } = {}) {
   const badgeHost = h('span');
   const body = h('div', { class: 'card-body-inner' }, h('p', { class: 'muted' }, 'Connecting to live reader…'));
   let stopped = false;
@@ -144,6 +198,7 @@ export function liveCard(ctx, { withCalibration = true, withChange = false, cls,
   let last = { status: null, value: null, fetchedAt: NaN };
   let change = null;
   const changeHost = h('div');
+  const directHost = withDirect ? directSection(ctx, tag, () => last.all) : null;
 
   const render = (error) => {
     const now = Date.now() / 1000;
@@ -164,7 +219,7 @@ export function liveCard(ctx, { withCalibration = true, withChange = false, cls,
           ? new Date(last.fetchedAt * 1000).toLocaleTimeString() : null],
       ]),
       withCalibration && last.status ? calibrationSection(ctx, last.status, tick) : null,
-      withChange ? changeHost : null].filter(Boolean)); // replaceChildren would print "null"
+      withChange ? changeHost : null, directHost].filter(Boolean)); // replaceChildren would print "null"
     // Keep the change form (and a running operation) across refreshes; rebuild it only when availability changes.
     if (withChange && (change === null || change.enabled !== (info.state === 'live'))) {
       change?.stop();
@@ -188,7 +243,7 @@ export function liveCard(ctx, { withCalibration = true, withChange = false, cls,
   }
   tick();
   return {
-    el: card('Live game memory (read-only)', body, { extra: badgeHost, cls }),
+    el: card(withDirect ? 'Live game memory' : 'Live game memory (read-only)', body, { extra: badgeHost, cls }),
     stop: () => { stopped = true; clearTimeout(timer); change?.stop(); },
   };
 }

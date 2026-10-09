@@ -7,15 +7,18 @@ verified independently by re-reading the calibrated memory location (and, option
 
 from __future__ import annotations
 
+import datetime as dt
 import itertools
 import json
 import logging
+import re
 import threading
 import time
 from pathlib import Path
 from typing import Callable
 
 from ..integration.memory import ENCODINGS, MemoryAccessError, ProcessMemory, needles_for, scan
+from ..integration.memory_write import ProcessMemoryWriter
 from . import console, layout, pointers
 from .calibration import SCAN_LIMIT, CalibrationError, FieldCalibration, holds, scan_many, tolerance_for
 
@@ -38,10 +41,12 @@ class LiveError(Exception):
 class LiveService:
     def __init__(self, detect: Callable[[], dict], save_values: Callable[[], dict], store_dir: Path,
                  logger: logging.Logger, open_memory: Callable[[int], object] = ProcessMemory,
-                 clock: Callable[[], float] = time.time) -> None:
+                 clock: Callable[[], float] = time.time,
+                 open_writer: Callable[[int], object] = ProcessMemoryWriter) -> None:
         self._detect = detect
         self._save_values = save_values      # newest save's values for its player country (envelope)
         self._open_memory = open_memory
+        self._open_writer = open_writer
         self._clock = clock
         self.log = logger
         self.store = store_dir / "calibrations.json"
@@ -353,16 +358,20 @@ class LiveService:
 
     # -- live values -----------------------------------------------------------------------
     def player_tag(self, process: dict) -> str:
-        """Player country: the game's own AI flag of each country (verified version), else the newest save."""
+        """Player country: the only country not hidden by fog of war (verified version); with fog of war off the
+        last unambiguous result of this game process; else the newest save."""
         key = (process["pid"], process.get("started"))
         now = self._clock()
         if self._player and self._player[1] == key and now - self._player[0] < 5:
             return self._player[2]
         tag = None
         if pointers.supported(process.get("version")):
-            humans = self.players(process)
-            if len(humans) == 1:
-                tag = humans[0]
+            visible = self.players(process)
+            if len(visible) == 1:
+                tag = visible[0]
+                self._last_unique_player = (key, tag)
+            elif getattr(self, "_last_unique_player", (None, None))[0] == key:
+                tag = self._last_unique_player[1]
         if tag is None:
             save = self._fresh_save(process)
             tag = save.get("player_tag") or save.get("tag")
@@ -435,6 +444,77 @@ class LiveService:
         except (MemoryAccessError, OSError) as exc:
             raise LiveError("memory_error", str(exc)) from exc
         return {**out, "tag": tag, "read_at": self._clock()}
+
+    def game_mode(self) -> str | None:
+        """SINGLEPLAYER / MULTIPLAYER from the newest `[[ Launching X-game ]]` line of logs/game.log, written by
+        the running game (log modified after the process started). None when unknown."""
+        game = self._detect()
+        logs = (game.get("userdata") or {}).get("logs_dir")
+        process = game.get("process") or {}
+        if not logs:
+            return None
+        path = Path(logs) / "game.log"
+        try:
+            stat = path.stat()
+            if stat.st_size > 50 << 20:
+                return None
+            started = process.get("started")
+            if started:
+                if stat.st_mtime < dt.datetime.fromisoformat(started).timestamp() - 5:
+                    return None  # log of an earlier game run
+            found = re.findall(r"\[\[ Launching ([A-Z]+)-game \]\]", path.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, ValueError):
+            return None
+        return found[-1] if found else None
+
+    def write_value(self, field: str, value: float, tag: str | None = None,
+                    expected_before: float | None = None) -> dict:
+        """LOCAL direct write of one country field into game memory (opt-in, single player only).
+
+        Refused in multiplayer (more than one human player): the change would exist on this client only.
+        `expected_before` (the value the user saw) guards against overwriting a value that moved meanwhile."""
+        if field not in pointers.WRITE_RANGES:
+            raise LiveError("unsupported_field", f"Direct writes are not available for {field}")
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Direct writes are only available for the verified game version")
+        lo, hi = pointers.WRITE_RANGES[field]
+        if not isinstance(value, (int, float)) or value != value or not lo <= value <= hi:
+            raise LiveError("out_of_range", f"{field} must be between {lo:g} and {hi:g}")
+        mode = self.game_mode()
+        if mode != "SINGLEPLAYER":
+            raise LiveError("multiplayer" if mode else "mode_unknown",
+                            (f"The running game is {mode}" if mode else "Single player could not be confirmed from "
+                             "game.log") + ": a memory write would change this client only and desynchronise a "
+                             "multiplayer game - use the console command instead")
+        humans = []
+        tag = tag or self.player_tag(process)
+        key = (process["pid"], process.get("started"))
+        install = process.get("install") or ""
+        if install not in self._tags:
+            self._tags[install] = pointers.tag_order(Path(install))
+        enc = ENCODINGS[pointers.FIELDS[field][1]]
+        packed = enc.pack(value)
+        if packed is None:
+            raise LiveError("out_of_range", f"{value} cannot be stored as {enc.name}")
+        try:
+            with self._open_writer(process["pid"]) as mem:
+                if key not in self._module_base:
+                    self._module_base[key] = mem.modules()[pointers.MODULE][0]
+                country = pointers.country_object(mem, self._module_base[key], self._tags[install], tag)
+                before = pointers.read_field(mem, country, field)
+                if expected_before is not None and abs(before - expected_before) > 1e-6:
+                    raise LiveError("value_changed", f"{field} is {before:g} now, not {expected_before:g} - "
+                                                     "check the value and try again")
+                mem.write(pointers.field_address(mem, country, field), packed)
+                after = pointers.read_field(mem, country, field)
+        except pointers.PointerError as exc:
+            raise LiveError(exc.code, str(exc)) from exc
+        except (MemoryAccessError, OSError, KeyError) as exc:
+            raise LiveError("memory_error", f"Memory write failed: {exc}") from exc
+        self.log.warning("LOCAL memory write %s %s: %s -> %s (requested %s)", tag, field, before, after, value)
+        return {"field": field, "tag": tag, "before": before, "after": after, "requested": value,
+                "scope": "local", "players": humans, "written_at": self._clock()}
 
     def read(self, field: str, tag: str | None = None) -> dict:
         """Live value: through the game's country table (verified game version), else a calibrated location."""

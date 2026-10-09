@@ -20,8 +20,10 @@ from ..integration.memory import ENCODINGS
 MODULE = "hoi4.exe"
 VERIFIED_VERSION = re.compile(r"v1\.19\.3\.0\.c01a\b")
 COUNTRY_TABLE = (0x332F260, 0x310)
-# [country + 0xfa0] + 0x1c0: 1 = AI-controlled, 0 = human player. Verified 2026-10-09 (PID 25320) with the player
-# switched GER -> ITA -> SOV: the only location that followed the player; 438 of 439 tags had 1, the player 0.
+# [country + 0xfa0] + 0x1c0: 0 = visible to the player, 1 = hidden by fog of war. With fog of war ON only the
+# player's own country is 0 (2026-10-09, player switched GER -> ITA -> SOV: the only location that followed the
+# player). CORRECTION (same day): after the console command `fow` (fog of war off) all 99 existing countries had 0
+# - it is a visibility flag, not an AI flag. It identifies the player only when exactly one country has 0.
 PLAYER_FLAG = (0xFA0, 0x1C0)
 
 # field -> (offsets inside the country object: all but the last are pointer hops, encoding)
@@ -70,7 +72,8 @@ def country_object(memory, module_base: int, tags: list[str], tag: str) -> int:
 
 
 def player_tags(memory, module_base: int, tags: list[str]) -> list[str]:
-    """Countries controlled by a human (more than one in multiplayer). Empty when the flag is not readable."""
+    """Countries not hidden by fog of war - the player's own country when that is unambiguous. Empty when the flag
+    is not readable or too many countries are visible (fog of war off). Not a multiplayer indicator."""
     table = _ptr(memory, module_base + COUNTRY_TABLE[0])
     array = _ptr(memory, table + COUNTRY_TABLE[1]) if table else None
     if array is None:
@@ -90,6 +93,22 @@ def player_tags(memory, module_base: int, tags: list[str]) -> list[str]:
             humans.append(tag)
     # sanity: nearly all countries are AI; anything else means the layout does not match
     return humans if readable and len(humans) <= max(8, readable // 10) else []
+
+
+# Plausible ranges for direct (local) writes; the game itself clamps some of them.
+WRITE_RANGES = {"stability": (0.0, 1.0), "war_support": (0.0, 1.0), "political_power": (-10_000.0, 100_000.0),
+                "command_power": (0.0, 10_000.0), "fuel": (0.0, 100_000_000.0), "army_experience": (0.0, 100_000.0),
+                "navy_experience": (0.0, 100_000.0), "air_experience": (0.0, 100_000.0)}
+
+
+def field_address(memory, country: int, field: str) -> int:
+    offsets, _ = FIELDS[field]
+    addr = country
+    for off in offsets[:-1]:
+        addr = _ptr(memory, addr + off)
+        if addr is None:
+            raise PointerError("unreadable", f"{field}: pointer inside the country object is not readable")
+    return addr + offsets[-1]
 
 
 def read_field(memory, country: int, field: str) -> float:

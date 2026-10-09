@@ -498,3 +498,24 @@ gubione przy restarcie) i szybka kalibracja z zapamiętanego układu (`python -m
   przez specyfikację). Opcje → decyzja użytkownika (STATUS-AND-PLAN.md).
 - Sprawdzone na prawdziwych danych: SOV (311 celów, w trakcie SOV_heavy_industry 30/35 dni), GER (438, 11 ukończonych,
   5 wykluczonych). Testy: backend 161 OK, JS 24 OK, smoke 18/18 (zakładka bez DEMO).
+
+---
+
+## Bezpośredni zapis do pamięci – LOKALNY, jednoosobowy (2026-10-09) ✅ – decyzja użytkownika
+
+- Na prośbę użytkownika (wybrana opcja B po przedstawieniu ryzyka): „Set directly” w Country Editorze zapisuje
+  wartość prosto do pamięci gry – stabilność, poparcie wojny (w %), PP, CP, paliwo, XP; dowolne państwo.
+- Zabezpieczenia: osobny moduł `integration/memory_write.py` (czytnik `memory.py` pozostaje tylko do odczytu – test);
+  prawa QUERY|VM_READ|VM_WRITE|VM_OPERATION, maks. 8 B, odczyt kontrolny po zapisie; zakresy wartości; odrzucenie,
+  gdy wartość zmieniła się od chwili, w której użytkownik ją widział; opcja domyślnie wyłączona (przełącznik w UI),
+  każdy zapis w logu (WARNING); wynik oznaczony **LOCAL**.
+- **Blokada multiplayera:** zapis tylko gdy `logs/game.log` bieżącej gry zawiera „[[ Launching SINGLEPLAYER-game ]]”
+  (MULTIPLAYER lub brak wpisu → odmowa). Zapis w MP zmieniłby stan tylko u jednego klienta (desynchronizacja).
+- Sprawdzone w grze: zapis tej samej wartości (poparcie wojny SOV 0.3 → 0.3) – zapis i odczyt kontrolny działają.
+
+### Sprostowanie do kroku C
+`[państwo + 0xfa0] + 0x1c0` to **widoczność (mgła wojny)**, nie znacznik AI: po komendzie `fow` wszystkie 99 istniejących
+państw miały 0. Gracza wskazuje tylko przy włączonej mgle (jedno widoczne państwo). Poprawka: przy niejednoznacznym
+wyniku aplikacja używa ostatniego jednoznacznego wyniku z tego procesu gry, potem zapisu; flaga nie służy do wykrywania MP.
+
+**Testy:** backend 166 OK, JS 30 OK, smoke 18/18.

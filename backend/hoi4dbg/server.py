@@ -51,6 +51,14 @@ def build_routes(svc: DebuggerService) -> list[Route]:
             raise LiveError("disabled", "Live game access is disabled (--no-game)")
         return svc.live
 
+    def live_write(body: dict) -> dict:
+        if body.get("confirm_local") is not True:
+            raise LiveError("not_confirmed", "Direct memory writes must be enabled explicitly (local only)")
+        before = body.get("expected_before")
+        return live().write_value(str(body.get("field", "")), _number(body.get("value")),
+                                  str(body.get("tag") or "").upper() or None,
+                                  _number(before) if before is not None else None)
+
     def calibration(body: dict) -> dict:
         field, action = str(body.get("field", "")), body.get("action")
         if action == "start":
@@ -84,6 +92,7 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("GET", "/api/live/focus", lambda q, b: svc.live_focus(_str(q, "tag").upper() or None)),
         r("GET", "/api/live/values", lambda q, b: {"data": live().values(_str(q, "tag").upper() or None)}),
         r("POST", "/api/live/calibration", lambda q, b: calibration(b)),
+        r("POST", "/api/live/write", lambda q, b: live_write(b)),
         r("POST", "/api/live/operations", lambda q, b: live().create_operation(
             str(b.get("field", "")), str(b.get("mode", "")), _number(b.get("amount")))),
         r("GET", r"/api/live/operations/(?P<op>op-[0-9]{1,9})", lambda q, b, op: live().poll_operation(op)),
