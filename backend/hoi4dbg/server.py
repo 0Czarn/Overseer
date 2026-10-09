@@ -71,7 +71,7 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("GET", f"/api/focus/{tag}", lambda q, b, tag: svc.focus(tag)),
         r("GET", f"/api/equipment/{tag}", lambda q, b, tag: svc.equipment(tag)),
         r("POST", f"/api/equipment/{tag}/changes", lambda q, b, tag: changes.create(
-            tag, str(b.get("archetype", "")), b.get("amount"))),
+            tag, str(b.get("archetype", "")), b.get("amount"), str(b.get("variant", "")))),
         r("GET", r"/api/equipment/changes/(?P<op>eq-[0-9]{1,9})", lambda q, b, op: changes.poll(op)),
         r("GET", f"/api/intel/(?P<observer>[A-Za-z0-9_]{{1,8}})/{tag}",
           lambda q, b, observer, tag: svc.intel(observer, tag)),

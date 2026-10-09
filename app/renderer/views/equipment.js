@@ -35,11 +35,17 @@ const POLL_MS = 3000;
 const FINAL = ['confirmed', 'mismatch', 'expired'];
 
 /** Add equipment: documented console command, verified by the next save (the stockpile is not read live). */
-function addCard(ctx, tag, items) {
+function addCard(ctx, tag, items, designs) {
   const archetypes = [...new Set(items.filter((r) => r.pool === 'stockpile').map((r) => r.archetype))].sort();
+  let variant = '';
   const pick = select([{ value: '', label: 'Equipment type…' }, ...archetypes.map((a) => ({ value: a, label: a }))], '',
-    (v) => { custom.value = v; }, { class: 'input', 'aria-label': 'Equipment type' });
-  const custom = h('input', { class: 'input', placeholder: 'or type a key, e.g. infantry_equipment_1' });
+    (v) => { custom.value = v; variant = ''; designSel.value = ''; }, { class: 'input', 'aria-label': 'Equipment type' });
+  // Own designs (tank/plane/ship designer): the game accepts the design NAME (tested in game).
+  const designSel = select([{ value: '', label: designs.length ? 'or one of your designs…' : 'no own designs in this save' },
+    ...designs.map((d) => ({ value: d.name, label: `${d.name} (${d.archetype}${d.obsolete ? ', obsolete' : ''}) - ${d.amount}` }))], '',
+  (v) => { variant = v; if (v) { custom.value = ''; pick.value = ''; } }, { class: 'input', 'aria-label': 'Own design' });
+  const custom = h('input', { class: 'input', placeholder: 'or type a key, e.g. infantry_equipment_1',
+    onInput: () => { variant = ''; designSel.value = ''; } });
   const amount = h('input', { class: 'input', type: 'number', min: '1', step: '1', value: '100', 'aria-label': 'Amount' });
   const result = h('div');
   let timer = null;
@@ -62,14 +68,14 @@ function addCard(ctx, tag, items) {
   const create = async () => {
     try {
       show(await ctx.api.post(`/api/equipment/${encodeURIComponent(tag)}/changes`,
-        { archetype: custom.value.trim(), amount: Number(amount.value) }));
+        variant ? { variant, amount: Number(amount.value) } : { archetype: custom.value.trim(), amount: Number(amount.value) }));
     } catch (err) { toast(err.message, 'error'); }
   };
   const el = card('Add equipment (verified)', [
     notice('info', ['Changes the ', scopeBadge('shared'), '. Only ADDING is possible: the game command ', h('code', null, 'add_equipment'),
       ' does not remove equipment (a negative amount added 1000 in our test). The command acts on the player country. '
       + 'Enter it in the console with the game PAUSED, then save - the app compares the new save with this one.']),
-    h('div', { class: 'toolbar' }, pick, custom, amount, h('button', { class: 'btn btn-small btn-primary', onClick: create }, 'Prepare command')),
+    h('div', { class: 'toolbar' }, pick, designSel, custom, amount, h('button', { class: 'btn btn-small btn-primary', onClick: create }, 'Prepare command')),
     result,
   ]);
   return { el, stop: () => clearTimeout(timer) };
@@ -102,7 +108,7 @@ export default {
     const [res, picker] = await Promise.all([
       ctx.api.get(`/api/equipment/${encodeURIComponent(tag)}`), countryPicker(ctx)]);
     const fromSave = res.source === 'save';
-    const adder = fromSave ? addCard(ctx, tag, res.data.items) : null;
+    const adder = fromSave ? addCard(ctx, tag, res.data.items, res.data.designs ?? []) : null;
 
     root.append(...[
       viewHeader('Equipment Manager', 'Stockpiles and variants of the selected country.',

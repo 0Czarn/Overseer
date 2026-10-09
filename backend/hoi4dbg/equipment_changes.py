@@ -5,6 +5,11 @@ name"). In-game test 2026-10-09 (SOV, paused, mapa.hoi4 -> sprzet.hoi4): `add_eq
 added exactly 100; `add_equipment -50 train_equipment_1` ADDED 1000 instead of removing 50 - negative amounts are
 not supported, so the app only prepares additions. The stockpile is not read live, so the result is verified by
 the next save of the running game: amount of that archetype must grow by exactly N.
+
+The argument may also be the NAME of a design (tank/plane/ship designer). Test 2026-10-09 (SOV, wariant1-3):
+`add_equipment 5 TestTank` -> +5 to the variant "TestTank" (even though obsolete); `add_equipment 7 Test Tank`
+(space, no quotes) -> +7 to the first variant named "Test Tank" (two variants had that name). Verification then
+sums all variants with that exact name.
 """
 
 from __future__ import annotations
@@ -21,6 +26,8 @@ from .saves.binary import SaveFormatError
 MAX_AMOUNT = 1_000_000
 TIMEOUT_S = 900
 ARCHETYPE = re.compile(r"[a-z][a-z0-9_]{1,80}")
+# design names as typed in the console: no quotes, #, =, braces or line breaks; no leading/trailing space
+VARIANT_NAME = re.compile(r'[^\s"#={}](?:[^"#={}\r\n\t]{0,58}[^\s"#={}])?')
 
 
 class ChangeError(Exception):
@@ -31,6 +38,21 @@ class ChangeError(Exception):
 
 def archetype_total(data: dict, archetype: str) -> float:
     return sum(n for i, n in data["stockpile"].items() if (data["variants"].get(i) or {}).get("type") == archetype)
+
+
+def variant_total(data: dict, name: str) -> float:
+    return sum(n for i, n in data["stockpile"].items() if (data["variants"].get(i) or {}).get("name") == name)
+
+
+def designs(data: dict, tag: str) -> list[dict]:
+    """Named variants designed by `tag` (tank/plane/ship designer) - targets for add_equipment by name."""
+    out: dict[str, dict] = {}
+    for _, v in sorted(data["variants"].items(), key=lambda kv: int(kv[0]) if kv[0].isdigit() else 0):
+        name = v.get("name")
+        if name and v.get("creator") == tag and VARIANT_NAME.fullmatch(name):
+            out.setdefault(name, {"name": name, "archetype": v.get("type"), "obsolete": v.get("obsolete"),
+                                  "amount": variant_total(data, name)})
+    return list(out.values())
 
 
 class EquipmentChanges:
@@ -61,29 +83,39 @@ class EquipmentChanges:
         players = live.players() if live is not None else []
         return players or [((save_data["analysis"].get("header") or {}).get("player_tag"))]
 
-    def create(self, tag: str, archetype: str, amount) -> dict:
+    def create(self, tag: str, archetype: str, amount, variant: str = "") -> dict:
+        """Prepares `add_equipment N <archetype key | design name>` (one of `archetype` / `variant`)."""
         tag = tag.upper()
-        if not ARCHETYPE.fullmatch(archetype or ""):
+        if variant:
+            if not VARIANT_NAME.fullmatch(variant):
+                raise ChangeError("bad_variant", f"Design names with quotes, #, = or braces cannot be typed: {variant!r}")
+        elif not ARCHETYPE.fullmatch(archetype or ""):
             raise ChangeError("bad_archetype", f"Not an equipment archetype key: {archetype!r}")
         if not isinstance(amount, int) or isinstance(amount, bool) or not 1 <= amount <= MAX_AMOUNT:
             raise ChangeError("bad_amount", f"Amount must be a whole number 1..{MAX_AMOUNT} (the game cannot "
                                             "remove equipment with this command)")
         path, data = self._newest(tag)
-        known = {v.get("type") for v in data["variants"].values()}
-        if archetype not in known:
+        if variant:
+            if variant not in {v.get("name") for v in data["variants"].values()}:
+                raise ChangeError("unknown_variant", f"No design named {variant!r} in {path.name} - save the game "
+                                                     "after creating it")
+        elif archetype not in {v.get("type") for v in data["variants"].values()}:
             raise ChangeError("unknown_archetype", f"{archetype} is not in the equipment table of {path.name}")
         if tag not in self._player_tags(data):
             raise ChangeError("not_player", f"Console commands change the player's country, not {tag}")
-        op = {"id": f"eq-{next(self._ids)}", "tag": tag, "archetype": archetype, "amount": amount,
-              "command": f"add_equipment {amount} {archetype}", "before": archetype_total(data, archetype),
+        target = variant or archetype
+        before = variant_total(data, variant) if variant else archetype_total(data, archetype)
+        op = {"id": f"eq-{next(self._ids)}", "tag": tag, "archetype": None if variant else archetype,
+              "variant": variant or None, "amount": amount,
+              "command": f"add_equipment {amount} {target}", "before": before,
               "before_save": path.name, "before_mtime": data["analysis"]["file"]["mtime"],
               "mark": self._history().mark(), "state": "waiting_for_command", "created": self.clock()}
         op["expected"] = op["before"] + amount
         op["message"] = (f"Enter `{op['command']}` in the game console (game paused), then save the game. "
-                         f"Expected {archetype}: {op['before']:g} -> {op['expected']:g}.")
+                         f"Expected {target}: {op['before']:g} -> {op['expected']:g}.")
         with self._lock:
             self._ops[op["id"]] = op
-        self.svc.log.info("Equipment change %s: %s %s %s -> expected %s via `%s`", op["id"], tag, archetype,
+        self.svc.log.info("Equipment change %s: %s %s %s -> expected %s via `%s`", op["id"], tag, target,
                           op["before"], op["expected"], op["command"])
         return self._public(op)
 
@@ -109,10 +141,10 @@ class EquipmentChanges:
             return self._public(op)  # regression: a save being written aborted the check
         if data["analysis"]["file"]["mtime"] <= op["before_mtime"]:
             return self._public(op)
-        after = archetype_total(data, op["archetype"])
+        after = variant_total(data, op["variant"]) if op["variant"] else archetype_total(data, op["archetype"])
         op["actual"], op["after_save"] = after, path.name
         if abs(after - op["expected"]) < 0.5:
-            return self._finish(op, "confirmed", f"Verified in {path.name}: {op['archetype']} "
+            return self._finish(op, "confirmed", f"Verified in {path.name}: {op['variant'] or op['archetype']} "
                                                  f"{op['before']:g} -> {after:g} (expected {op['expected']:g}).")
         return self._finish(op, "mismatch", f"{path.name} shows {after:g}, expected {op['expected']:g} "
                                             "(game unpaused, or production/losses in between?).")

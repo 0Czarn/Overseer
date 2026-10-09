@@ -6,6 +6,7 @@ import time
 import unittest
 from pathlib import Path
 
+from hoi4dbg import equipment_changes
 from hoi4dbg.equipment_changes import ChangeError, EquipmentChanges
 from hoi4dbg.live import console
 from hoi4dbg.saves import binary as b
@@ -80,6 +81,7 @@ class FakeService:
         self.install = install
         self.log = logging.getLogger("test")
         self.stock = {"7": 100.0}
+        self.variants = {"7": {"type": "infantry_equipment_1"}, "9": {"type": "light_tank_chassis_1"}}
         self.writing = False
         self.mtime = 10.0
         self.players = ["SOV"]
@@ -96,7 +98,7 @@ class FakeService:
         if self.writing:
             raise SaveFormatError("in_progress", "The game may still be writing this save; try again shortly")
         return {"analysis": {"file": {"mtime": self.mtime}, "header": {"player_tag": "SOV"}},
-                "variants": {"7": {"type": "infantry_equipment_1"}, "9": {"type": "light_tank_chassis_1"}},
+                "variants": dict(self.variants),
                 "stockpile": dict(self.stock), "convoys": {}}
 
 
@@ -153,6 +155,28 @@ class EquipmentChangeTests(TempDirMixin, unittest.TestCase):
         with self.assertRaises(ChangeError) as ctx:
             self.changes.create("GER", "infantry_equipment_1", 5)
         self.assertEqual(ctx.exception.code, "not_player")
+
+    def test_design_name_with_space(self):
+        """In game: `add_equipment 7 Test Tank` (no quotes) added 7 to the first design named "Test Tank"."""
+        self.svc.variants = {"4505": {"type": "light_tank_chassis_2", "name": "Test Tank", "creator": "SOV"},
+                             "4507": {"type": "light_tank_chassis_2", "name": "Test Tank", "creator": "SOV"},
+                             "4506": {"type": "light_tank_chassis_2", "name": "TestTank", "creator": "SOV",
+                                      "obsolete": True}}
+        self.svc.stock = {"4505": 20.0, "4506": 5.0}
+        self.assertEqual([d["name"] for d in equipment_changes.designs(self.svc.equipment(None, "SOV"), "SOV")],
+                         ["Test Tank", "TestTank"])
+        op = self.changes.create("SOV", "", 7, variant="Test Tank")
+        self.assertEqual((op["command"], op["before"], op["expected"]), ("add_equipment 7 Test Tank", 20, 27))
+        self.type_command("add_equipment 7 Test Tank")
+        self.svc.stock["4505"], self.svc.mtime = 27.0, 20.0
+        self.assertEqual(self.changes.poll(op["id"])["state"], "confirmed")
+
+    def test_design_names_that_cannot_be_typed_or_do_not_exist(self):
+        for name, code in (('Tank "X"', "bad_variant"), (" Tank", "bad_variant"), ("a#b", "bad_variant"),
+                           ("Unknown Tank", "unknown_variant")):
+            with self.assertRaises(ChangeError) as ctx:
+                self.changes.create("SOV", "", 5, variant=name)
+            self.assertEqual(ctx.exception.code, code, name)
 
     def test_expires(self):
         op = self.changes.create("SOV", "infantry_equipment_1", 5)

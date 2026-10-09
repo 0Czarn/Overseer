@@ -10,7 +10,7 @@ import platform
 import sys
 import time
 
-from . import __version__, demo, gamefiles
+from . import __version__, demo, equipment_changes, gamefiles
 from .applog import RingBufferHandler
 from .integration import GameIntegration, NullIntegration
 from .reports import ReportStore
@@ -244,6 +244,7 @@ class DebuggerService:
                 header = analysis.get("header") or {}
                 return envelope(SAVE, {
                     "tag": tag, "items": save_equipment.rows(data, gamefiles.equipment_names(install)),
+                    "designs": equipment_changes.designs(data, tag),
                     "editable": False, "file": analysis["file"], "in_game_date": header.get("date"),
                     "player_tag": header.get("player_tag"),
                     "freshness": save_freshness(analysis["file"]["mtime"], self.detect()),

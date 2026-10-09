@@ -19,7 +19,8 @@ ZROBIONE
 [x] Krok D  State Editor: 1081 stanów (właściciel, kontroler, budynki, zasoby, rdzenie,
             roszczenia, manpower stanu); manpower państwa zgodny z paskiem gry
 [x] Krok E  Equipment Manager: magazyn, warianty, konwoje z zapisu; dodawanie sprzętu
-            komendą add_equipment ze sprawdzeniem w następnym zapisie (sprawdzone w grze)
+            komendą add_equipment ze sprawdzeniem w następnym zapisie (sprawdzone w grze),
+            także WŁASNYCH PROJEKTÓW po nazwie (np. "Test Tank"; sprawdzone dla czołgów)
 
 ======================================================================
 DO ZROBIENIA (w tej kolejności)

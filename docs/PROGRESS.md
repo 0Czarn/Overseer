@@ -466,3 +466,15 @@ gubione przy restarcie) i szybka kalibracja z zapamiętanego układu (`python -m
 - Naprawa (regresja z testu w grze): sprawdzanie czeka, gdy gra jeszcze zapisuje plik (wcześniej przerywało).
 - Ograniczenia: magazyn z zapisu (migawka), nie na żywo; zmiana tylko dla państwa gracza; usuwanie sprzętu niedostępne.
 - Testy: backend 156 OK, JS 24 OK, smoke 18/18 (Equipment Manager bez DEMO).
+
+### Krok E – uzupełnienie: dodawanie własnych projektów (2026-10-09) ✅
+
+- Komenda `add_equipment N <nazwa projektu>` przyjmuje też **nazwę wariantu** z projektanta czołgów/samolotów/okrętów.
+  Test w grze (SOV, zapisy wariant1–3): `add_equipment 5 TestTank` → +5 do „TestTank” (mimo oznaczenia jako
+  przestarzały); `add_equipment 7 Test Tank` (spacja, **bez cudzysłowu**) → +7 do pierwszego wariantu „Test Tank”
+  (były dwa o tej nazwie). W pierwszej próbie `TestTank` trafił do „Test Tank” – prawdopodobnie projekt nie miał
+  jeszcze tej nazwy (niesprawdzone); dlatego wynik zawsze jest sprawdzany zapisem.
+- Aplikacja: lista projektów państwa gracza w Equipment Managerze, dodawanie po nazwie, weryfikacja sumy wszystkich
+  wariantów o tej nazwie. Nazwy z cudzysłowem, #, = lub nawiasami są odrzucane (nie da się ich wpisać w konsoli).
+- Sprawdzone tylko dla czołgów; samoloty/okręty – ta sama komenda, ale w grze nietestowane.
+- Testy: backend 158 OK, JS 24 OK, smoke 18/18.
