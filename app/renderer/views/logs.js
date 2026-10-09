@@ -128,6 +128,9 @@ export default {
       gameLog = errorBox(`HOI4 logs: ${err.message}`);
     }
     await Promise.all([appLog.start(), reports.load()]);
+    root.addEventListener('mounted', () => {
+      for (const el of root.querySelectorAll('.log-pre, .log-list')) el.scrollTop = el.scrollHeight;
+    });
     root.append(
       viewHeader('Logs & Test Reports', 'Application log, the game\'s own logs and tester reports.'),
       h('div', { class: 'split' }, appLog.el, gameLog),

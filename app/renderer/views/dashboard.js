@@ -9,13 +9,13 @@ function processCard(game) {
       (game.warnings ?? []).map((w) => notice('warn', w)),
     ], { extra: sourceBadge(game.warnings?.length ? 'unavailable' : 'live') });
   }
-  return card('Game process', keyValues([
+  return card('Game process', [keyValues([
     ['Status', h('span', { class: 'status-ok' }, 'Running')],
     ['PID', proc.pid],
     ['Executable', h('code', null, proc.path ?? proc.name)],
     ['Started', proc.started ? new Date(proc.started).toLocaleString() : null],
     ['Uptime', formatDuration(proc.uptime_s)],
-  ]), { extra: sourceBadge('live') });
+  ]), (game.warnings ?? []).map((w) => notice('warn', w))], { extra: sourceBadge('live') });
 }
 
 function versionCard(game) {
@@ -23,13 +23,22 @@ function versionCard(game) {
   if (!install) {
     return card('Game version', notice('muted', 'Installation not detected.'), { extra: sourceBadge('unavailable') });
   }
+  const rev = install.revision ?? {};
+  let buildMatch = null;
+  if (rev.install_hash && rev.running_hash && rev.from_current_run) {
+    buildMatch = rev.install_hash === rev.running_hash
+      ? h('span', { class: 'status-ok' }, 'Running build = installed build')
+      : h('span', { class: 'bad-text' }, 'Running build differs from installed build');
+  }
   return card('Game version', keyValues([
     ['Version', h('strong', null, install.version?.display ?? '—')],
     ['Raw version', install.version?.raw],
-    ['Checksum', install.version?.checksum ? h('code', null, install.version.checksum) : null],
-    ['Build hash', install.revision?.hash_short ? h('code', null, install.revision.hash_short) : null],
-    ['Build date', install.revision?.timestamp],
-    ['Version source', install.version?.source],
+    ['Build suffix', install.version?.build_suffix ? h('code', null, install.version.build_suffix) : null],
+    ['Build hash', rev.hash_short ? h('code', null, rev.hash_short) : null],
+    ['Build date', rev.timestamp],
+    ['Build check', buildMatch],
+    ['Steam build id', install.steam?.build_id],
+    ['Detected via', [install.source, install.version?.source ? ` + ${install.version.source}` : '']],
   ]), { extra: sourceBadge('live') });
 }
 

@@ -106,6 +106,7 @@ async function renderView() {
   }
   cleanup = typeof viewCleanup === 'function' ? viewCleanup : null;
   clear(viewEl).append(root);
+  root.dispatchEvent(new Event('mounted'));
   document.body.dataset.loading = '0';
 }
 
@@ -134,7 +135,7 @@ function renderStatus(status, error) {
   }
   const version = game.install?.version?.display;
   const date = game.session?.last_game_date;
-  meta.textContent = [version, date ? `game.log date ${date}` : null].filter(Boolean).join(' · ');
+  meta.textContent = [version, date ? `game.log date (may lag): ${date}` : null].filter(Boolean).join(' · ');
 }
 
 async function pollStatus() {

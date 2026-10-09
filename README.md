@@ -35,6 +35,7 @@ Przydatne zmienne środowiskowe:
 |---|---|
 | `HOI4DBG_PYTHON` | ścieżka do interpretera Pythona |
 | `HOI4DBG_NO_GAME=1` | backend w ogóle nie dotyka gry (praca nad UI, testy) |
+| `HOI4DBG_GAME_USER_DIR` | inny folder danych użytkownika HOI4 (domyślnie z `launcher-settings.json` → Dokumenty) |
 | `HOI4DBG_DATA_DIR` | katalog na logi i raporty aplikacji (domyślnie `%LOCALAPPDATA%\HOI4Debugger`) |
 
 Backend można też uruchomić samodzielnie (wypisze port i token):

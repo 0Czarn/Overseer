@@ -15,6 +15,7 @@ import threading
 
 from . import __version__, applog, paths
 from .integration import NullIntegration
+from .integration.hoi4 import Hoi4Integration
 from .reports import ReportStore
 from .server import make_server
 from .service import DebuggerService
@@ -23,7 +24,7 @@ from .service import DebuggerService
 def build_integration(disabled: bool):
     if disabled:
         return NullIntegration("Game integration disabled (--no-game)")
-    return NullIntegration("Game detection is not implemented yet (Stage 2)")
+    return Hoi4Integration()
 
 
 def main(argv: list[str] | None = None) -> int:
