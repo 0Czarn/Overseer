@@ -292,8 +292,9 @@ class Parser:
                 raise SaveFormatError("truncated", "File ends in the middle of a value", end)
         self.pos = pos
 
-    def top_level(self, wanted: set[int], max_entries: int = 400, block_budget: int = 20000) -> dict[int, object]:
-        """Reads top-level `key = value` entries until all `wanted` keys were seen.
+    def top_level(self, wanted: set[int], max_entries: int = 400, block_budget: int = 20000,
+                  until: int | None = None) -> dict[int, object]:
+        """Reads top-level `key = value` entries until all `wanted` keys were seen (or the `until` key was read).
         Blocks for unwanted keys are skipped; wanted ones are parsed (bounded by block_budget tokens)."""
         found: dict[int, object] = {}
         for _ in range(max_entries):
@@ -308,4 +309,6 @@ class Parser:
                 found[key] = self.value([block_budget])
             else:
                 self.skip_value()
+            if key == until:
+                break
         return found

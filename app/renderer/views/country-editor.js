@@ -1,7 +1,7 @@
 import { h, card, demoBanner, notice, scopeBadge, sourceBadge, toast, viewHeader } from '../lib/dom.js';
 import { formatAge, formatValue, freshnessInfo } from '../lib/format.js';
 import { ppCommand, verifyChange } from '../lib/verify.js';
-import { liveCard } from './live-ui.js';
+import { countryLivePanel } from './country-live.js';
 import { countryPicker, tagChip } from './shared.js';
 
 const STATUS_NOTE = { read: null, absent: 'not in save', unmapped: 'not mapped yet' };
@@ -124,10 +124,9 @@ export default {
           meta.data.ruling_party ? ` · ruling party: ${meta.data.ruling_party}` : '',
           meta.data.exists === false ? ' · does not exist in the newest save' : ''].join(''))))),
     );
-    // Live memory read is calibrated for the player's country only.
-    // Live values for any country (game country table); changes only for the player country (console commands).
-    const live = liveCard(ctx, { withCalibration: false, withChange: isPlayer, withDirect: true, tag });
-    if (live) root.append(live.el);
+    // Live values for any country (game country table); verified console changes only for the player country.
+    const live = countryLivePanel(ctx, tag, { isPlayer });
+    root.append(live.el);
     if (fromSave) {
       root.append(
         snapshotBanner(saved.data),

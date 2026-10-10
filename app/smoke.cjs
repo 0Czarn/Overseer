@@ -54,6 +54,27 @@ function runSmoke(win, outDir, quit) {
             focusNodes: Object.fromEntries(['completed', 'in_progress', 'available', 'blocked', 'excluded'].map(
               (s) => [s, document.querySelectorAll('.focus-node.focus-' + s).length])),
           })`);
+          if (tab === 'countries') {
+            // Live tab: switch, wait for the memory read (countries table or a reason), switch back
+            await wc.executeJavaScript(`document.querySelector('[data-tab="live"]').click()`);
+            await waitFor(wc, `!!document.querySelector('[data-panel="live"] .card-body-inner > :not(p.muted)')`, 15000);
+            info.live = await wc.executeJavaScript(`({
+              rows: document.querySelectorAll('[data-panel="live"] .table tbody tr').length,
+              notice: document.querySelector('[data-panel="live"] .notice')?.textContent ?? null,
+            })`);
+            await wc.executeJavaScript(`document.querySelector('[data-tab="saves"]').click()`);
+            if (!info.live.rows && !info.live.notice) result.failures.push(`${size.name}/countries: Live tab shows nothing`);
+          }
+          if (tab === 'country-editor') {
+            // stability / war support: wait until the modifiers from the save are in (first read takes seconds)
+            await waitFor(wc, `[...document.querySelectorAll('.hoi-source')].some((e) => /Modifiers from|unavailable/.test(e.textContent))`, 30000);
+            info.gauges = await wc.executeJavaScript(`[...document.querySelectorAll('.hoi-gauge')].map((g) => ({
+              value: g.querySelector('.hoi-gauge-value').textContent,
+              lines: g.querySelectorAll('.hoi-lines .hoi-line').length }))`);
+            if (info.gauges.length !== 2) result.failures.push(`${size.name}/country-editor: stability/war support gauges missing`);
+            info.editableChips = await wc.executeJavaScript(`document.querySelectorAll('.hoi-chip .hoi-chip-input').length`);
+            if (info.editableChips !== 6) result.failures.push(`${size.name}/country-editor: ${info.editableChips}/6 editable live values`);
+          }
           const image = await wc.capturePage();
           const file = path.join(outDir, `${size.name}-${tab}.png`);
           fs.writeFileSync(file, image.toPNG());

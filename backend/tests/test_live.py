@@ -620,6 +620,19 @@ class CountryTableTests(TempDirMixin, unittest.TestCase):
         self.assertEqual(self.svc.status()["players"], ["ITA"])
         self.assertEqual(self.svc.read("stability")["tag"], "ITA")
 
+    def test_session_lists_countries_owning_states(self):
+        self.mem.put(self.countries["GER"] + pointers.OWNED_STATES, "i", 12)
+        self.mem.put(self.countries["ITA"] + pointers.OWNED_STATES, "i", 0)   # annexed
+        res = self.svc.session()
+        self.assertEqual(res["states"], {"GER": 12, "ITA": 0})               # ENG: empty slot
+        self.assertEqual((res["game_mode"], res["players"]), ("SINGLEPLAYER", ["ITA"]))
+
+    def test_session_rejects_implausible_state_counts(self):
+        self.mem.put(self.countries["GER"] + pointers.OWNED_STATES, "i", -5)
+        with self.assertRaises(LiveError) as ctx:
+            self.svc.session()
+        self.assertEqual(ctx.exception.code, "no_country_table")
+
     def test_player_falls_back_to_the_save_when_the_flag_is_unreadable(self):
         for c in self.countries.values():
             self.mem.put(c + pointers.PLAYER_FLAG[0], "Q", 0)

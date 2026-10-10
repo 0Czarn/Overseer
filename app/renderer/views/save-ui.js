@@ -13,6 +13,20 @@ const VALIDATION_TEXT = {
   not_run: ['muted', 'Not checked'],
 };
 
+/** Multiplayer / single player of a save header (flag in binary saves; player count in text saves). */
+export function sessionType(header) {
+  if (!header || header.multiplayer === undefined) return null;
+  const count = header.players?.length ?? 0;
+  if (header.multiplayer) {
+    return h('span', { class: 'session-mp', title: header.multiplayer_basis === 'flag'
+      ? 'The save carries the multiplayer flag (inferred field)' : `${count} players listed (text save)` },
+    `Multiplayer (${count} player${count === 1 ? '' : 's'})`);
+  }
+  return h('span', { class: 'session-sp', title: count > 1
+    ? `No multiplayer flag, but ${count} players are listed - probably an earlier multiplayer game continued alone`
+    : 'One player, no multiplayer flag' }, count > 1 ? `Single player (lists ${count} players)` : 'Single player');
+}
+
 export function saveBanner(analysis) {
   const fresh = freshnessInfo(analysis.freshness?.category);
   const header = analysis.header;
@@ -24,6 +38,7 @@ export function saveBanner(analysis) {
       sourceBadge('save'),
       h('strong', null, analysis.file.name),
       header?.date ? h('span', null, 'In-game date ', h('b', null, header.date.text)) : null,
+      sessionType(header),
       h('span', { class: 'muted' }, `written ${written} (${formatAge(analysis.freshness?.age_s)})`)),
     h('div', { class: 'fresh' }, analysis.freshness?.label ?? fresh.short),
     h('div', { class: 'save-banner-line' },
@@ -42,7 +57,9 @@ export function playersTable(header) {
   return table([
     { key: 'tag', label: 'Country', render: (p) => tagChip(p.tag, p.tag === header.player_tag ? 'tag-chip-warn' : '') },
     { key: 'name', label: 'Player', render: (p) => p.name ?? h('span', { class: 'muted' }, 'unknown') },
-    { key: 'role', label: '', render: (p) => (p.tag === header.player_tag ? h('span', { class: 'muted' }, 'saved this file') : '') },
+    { key: 'role', label: '', render: (p) => h('span', { class: 'muted' }, [
+      p.tag === header.player_tag && p.country_leader !== false ? 'saved this file' : null,
+      p.country_leader === false ? 'co-op (not country leader)' : null].filter(Boolean).join(', ')) },
   ], players, { keyField: 'tag', empty: 'No players listed in this save' });
 }
 
@@ -50,6 +67,7 @@ export function headerDetails(analysis) {
   const header = analysis.header;
   if (!header) return null;
   return keyValues([
+    ['Session', sessionType(header)],
     ['Saving country', header.player_tag ? tagChip(header.player_tag) : null],
     ['Ideology', header.ideology ? [header.ideology, h('span', { class: 'muted' }, ' (inferred field)')] : null],
     ['Difficulty', header.difficulty ? [header.difficulty, h('span', { class: 'muted' }, ' (inferred field)')] : null],

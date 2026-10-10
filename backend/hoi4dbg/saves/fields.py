@@ -30,7 +30,9 @@ DIFFICULTY = 0x299F
 VERSION = 0x00EE
 PLAYERS = 0x3567
 PLAYER_NAME = 0x00E2
+COUNTRY_LEADER = 0x3035
 MODS = 0x3769
+MULTIPLAYER = 0x365C
 
 FIELDS: dict[int, FieldInfo] = {
     PLAYER_TAG: FieldInfo("player_tag", "Saving player's country", "verified",
@@ -47,6 +49,10 @@ FIELDS: dict[int, FieldInfo] = {
                            "Strings are account names; the saving player's tag is always among the keys."),
     MODS: FieldInfo("mods", "Enabled mods", "verified",
                     "All 14 names in the newest save equal 'name=' of installed .mod files."),
+    MULTIPLAYER: FieldInfo("multiplayer", "Saved during a multiplayer session", "inferred",
+                           "Present (true) in 79 of 179 binary saves (1.16.10 - 1.19.2, 2026-10-10), every one listing "
+                           "2-31 players; absent in all 87 saves listing one player. 13 saves list several players "
+                           "without it (an earlier multiplayer game continued in single player, presumably)."),
     IDEOLOGY: FieldInfo("ideology", "Ruling ideology of the saving player's country", "inferred",
                         "Values across 158 saves are ideology names (fascism, communism, democratic, "
                         "neutrality, plus mod ideologies)."),
@@ -54,7 +60,8 @@ FIELDS: dict[int, FieldInfo] = {
                           "Values across 158 saves: easy, normal, hard, very_hard."),
 }
 
-HEADER_KEYS = {PLAYER_TAG, IDEOLOGY, DATE, DIFFICULTY, VERSION, PLAYERS, MODS}
+HEADER_KEYS = {PLAYER_TAG, IDEOLOGY, DATE, DIFFICULTY, VERSION, PLAYERS, MODS, MULTIPLAYER}
+HEADER_END = MODS  # last header field; MULTIPLAYER is absent in single-player saves
 
 
 def decode_date(value: int) -> dict:
@@ -93,15 +100,17 @@ def extract_players(block) -> list[dict]:
         if not (isinstance(entry, tuple) and isinstance(entry[0], str) and isinstance(entry[1], list)):
             continue
         tag, body = entry
-        name = None
+        name, leader = None, None
         other = {}
         for item in body:
             if isinstance(item, tuple) and isinstance(item[0], Token):
                 if item[0].id == PLAYER_NAME and isinstance(item[1], str):
                     name = item[1]
+                elif item[0].id == COUNTRY_LEADER and isinstance(item[1], bool):
+                    leader = item[1]
                 else:
                     other[f"#{item[0].id:04x}"] = _plain(item[1])
-        players.append({"tag": tag, "name": name, "unidentified_fields": other})
+        players.append({"tag": tag, "name": name, "country_leader": leader, "unidentified_fields": other})
     return players
 
 
@@ -116,6 +125,7 @@ def extract_header(found: dict[int, object]) -> dict:
         "ideology": found.get(IDEOLOGY) if isinstance(found.get(IDEOLOGY), str) else None,
         "difficulty": found.get(DIFFICULTY) if isinstance(found.get(DIFFICULTY), str) else None,
         "players": extract_players(found.get(PLAYERS)),
+        "multiplayer": found.get(MULTIPLAYER) is True, "multiplayer_basis": "flag",
         "mods": [m for m in mods if isinstance(m, str)] if isinstance(mods, list) else None,
     }
 

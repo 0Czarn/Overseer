@@ -116,6 +116,8 @@ def analyse_header(data: bytes) -> dict:
         "ideology": get(items, "ideology"),
         "difficulty": get(items, "difficulty"),
         "players": players,
+        # no multiplayer save in text format seen yet: decided by the number of players
+        "multiplayer": len(players) > 1, "multiplayer_basis": "player_count",
         "mods": [m for m in mods if isinstance(m, str)] if isinstance(mods, list) else None,
     }
     missing = [k for k in ("player_tag", "date", "version") if not header[k]]

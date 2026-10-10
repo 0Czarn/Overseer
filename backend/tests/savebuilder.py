@@ -64,7 +64,7 @@ def encode_date(year: int, month: int, day: int, hour: int) -> int:
 
 def realistic_save(version: str = "Operation Postern v1.19.3.0.c01a (ff0e)", float_width: int = 8,
                    players: list[tuple[str, str]] = (("GER", "Czarny"),), mods: list[str] = ("Toolpack+",),
-                   body_values: int = 3) -> bytes:
+                   body_values: int = 3, multiplayer: bool = False) -> bytes:
     """Same top-level order as a real 1.19.3 save, followed by a body that uses 0x000d values
     (the token whose width changed between versions)."""
     bld = Builder(float_width)
@@ -74,6 +74,8 @@ def realistic_save(version: str = "Operation Postern v1.19.3.0.c01a (ff0e)", flo
     bld.key(f.DIFFICULTY).qstr("normal")
     bld.key(f.VERSION).qstr(version)
     bld.key(0x2DF8).boolean(False)
+    if multiplayer:
+        bld.key(f.MULTIPLAYER).boolean(True)
     bld.key(f.PLAYERS).open()
     for index, (tag, name) in enumerate(players, start=1):
         bld.qstr(tag).tok(b.EQUALS).open()

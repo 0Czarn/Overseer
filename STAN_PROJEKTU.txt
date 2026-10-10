@@ -16,9 +16,20 @@ ZROBIONE
 [x] Bezpośredni zapis do pamięci (LOKALNY, tylko singleplayer, włączany przełącznikiem):
       stabilność / poparcie wojny w %, PP, CP, paliwo, XP - dowolne państwo
 [x] Krok A  Countries & Players: lista państw, nazwy z gry, partia, liczba stanów, gracze
+            + zakładki: "Save files" (Players (from save file) / Countries) i "Live"
+            + Live: państwa biorące udział (liczba stanów z pamięci, co 3 s), tryb gry, gracz lokalny
+            + zapis: Multiplayer / Single player (flaga 0x365c w nagłówku, sprawdzona na 179 zapisach)
 [x] Krok B  Automatyczne mapowanie pól zapisu na pamięć (wszystkie państwa naraz)
 [x] Krok C  Gracz rozpoznawany z pamięci gry (przy włączonej mgle wojny; inaczej ostatni
             pewny wynik / zapis) - patrz sprostowanie w docs/PROGRESS.md
+[x] Country Editor: panel "Live game memory" w stylu HOI4 (kompaktowy pasek wartości na żywo)
+            + stabilność i poparcie wojny JAK W GRZE: baza (pamięć) + modyfikatory z rozpisaniem
+              (popularność partii, idee/prawa, przywódca, doradcy, modyfikatory dynamiczne, reguły frakcji
+              np. "Declaring Country is Considered Major", napięcie światowe x0.4, Pride of the Fleet)
+            + edycja na żywo: baza ST/WS oraz PP, CP, paliwo, XP armii/floty/lotnictwa (przełącznik
+              "Edit live values", lokalny zapis do pamięci, tylko singleplayer)
+            ZSRR stabilność 43,2% = gra 43% (sprawdzone z tooltipem); poparcie wojny 36,9% - do potwierdzenia
+            Nieczytane jeszcze: ochrona wybrzeży, wojna, propaganda, opór, bombardowania/straty/konwoje
 [x] Krok D  State Editor: 1081 stanów (właściciel, kontroler, budynki, zasoby, rdzenie,
             roszczenia, manpower stanu); manpower państwa zgodny z paskiem gry
 [x] Krok E  Equipment Manager: magazyn, warianty, konwoje z zapisu; dodawanie sprzętu
@@ -48,7 +59,10 @@ DO ZROBIENIA (w tej kolejności)
 ZNANE OGRANICZENIA
 ======================================================================
 - Odczyt na żywo tylko dla wersji gry 1.19.3.0.c01a (po aktualizacji gry: do ponownego ustalenia).
-- Stany, manpower, lista państw - z ostatniego zapisu (migawka); magazyn sprzętu także na żywo.
+- Stany, manpower - z ostatniego zapisu (migawka); lista państw i magazyn sprzętu także na żywo.
+- Live: pozostali gracze sesji multiplayer nie są jeszcze czytani z pamięci (wymaga testu MP, Krok H).
+- Odczyt liczby stanów na żywo (+0x484) sprawdzony ze starszym zapisem (439/439); do potwierdzenia
+  świeżym zapisem i po aneksji/przekazaniu stanu.
 - Pierwsze otwarcie widoku po nowym zapisie binarnym trwa 2-4 s (do poprawy: wspólny indeks zapisu).
 - Sprzętu nie da się usuwać (komenda gry tylko dodaje).
 - Mody dodające nowe tagi państw: nieprzetestowane.

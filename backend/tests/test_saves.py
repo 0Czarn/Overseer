@@ -57,8 +57,20 @@ class FormatTests(unittest.TestCase):
         self.assertEqual(header["version"], "Operation Postern v1.19.3.0.c01a (ff0e)")
         self.assertEqual((header["ideology"], header["difficulty"]), ("fascism", "normal"))
         self.assertEqual([(p["tag"], p["name"]) for p in header["players"]], [("GER", "Czarny"), ("SOV", "Tester Two")])
-        self.assertEqual(header["players"][1]["unidentified_fields"], {"#3035": True, "#000b": 2})
+        self.assertEqual(header["players"][1]["unidentified_fields"], {"#000b": 2})
         self.assertEqual(header["mods"], ["Toolpack+", "FPS Map"])
+        self.assertEqual(header["players"][0]["country_leader"], True)
+        self.assertEqual((header["multiplayer"], header["multiplayer_basis"]), (False, "flag"))
+
+    def test_multiplayer_flag_and_header_end(self):
+        data = realistic_save(players=[("GER", "Czarny"), ("ITA", "Two")], multiplayer=True)
+        self.assertTrue(reader.analyse_bytes(data)["header"]["multiplayer"])
+        # without the flag the header parse stops at the mods (last header field), not in the body
+        parser = binary.Parser(realistic_save(), 8)
+        found = parser.top_level(fields.HEADER_KEYS, until=fields.HEADER_END)
+        self.assertNotIn(fields.MULTIPLAYER, found)
+        self.assertIn(fields.MODS, found)
+        self.assertEqual(parser.peek(), 0x2D49)  # positioned at the first body field
 
     def test_validation_picks_width_by_structure(self):
         new = realistic_save(float_width=8)

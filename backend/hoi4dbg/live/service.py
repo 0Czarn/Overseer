@@ -467,6 +467,30 @@ class LiveService:
             return None
         return found[-1] if found else None
 
+    def session(self) -> dict:
+        """Running game: mode (game.log), local player country and states owned by every country (memory)."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Live country reading is only verified for 1.19.3.0.c01a")
+        key = (process["pid"], process.get("started"))
+        install = process.get("install") or ""
+        if install not in self._tags:
+            self._tags[install] = pointers.tag_order(Path(install))
+        try:
+            with self._open_memory(process["pid"]) as mem:
+                if key not in self._module_base:
+                    module = mem.modules().get(pointers.MODULE)
+                    if not module:
+                        raise LiveError("no_module", f"{pointers.MODULE} is not loaded in the game process")
+                    self._module_base[key] = module[0]
+                states = pointers.owned_states(mem, self._module_base[key], self._tags[install])
+        except (MemoryAccessError, OSError) as exc:
+            raise LiveError("memory_error", str(exc)) from exc
+        if not states:
+            raise LiveError("no_country_table", "The country table is not readable (main menu or loading)")
+        return {"process": process, "game_mode": self.game_mode(), "players": self.players(process),
+                "states": states, "read_at": self._clock()}
+
     def _with_country(self, process: dict, tag: str, fn, writer: bool = False):
         """Runs fn(memory, country object) for `tag` in the running game (country table)."""
         key = (process["pid"], process.get("started"))

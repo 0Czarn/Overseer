@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 
-from . import __version__, deficit, demo, equipment_changes, gamefiles
+from . import __version__, deficit, demo, equipment_changes, gamefiles, modifiers
 from . import focus as focus_mod
 from .applog import RingBufferHandler
 from .integration import GameIntegration, NullIntegration
@@ -171,7 +171,10 @@ class DebuggerService:
         owners = (summary or {}).get("owners") or {}
         ruling = (summary or {}).get("ruling") or {}
         header = ((summary or {}).get("analysis") or {}).get("header") or {}
-        players = {p["tag"]: p.get("name") for p in header.get("players") or [] if p.get("tag")}
+        players: dict[str, str] = {}
+        for p in header.get("players") or []:  # co-op: several players can share one country
+            if p.get("tag"):
+                players[p["tag"]] = ", ".join(filter(None, [players.get(p["tag"]), p.get("name") or "unknown"]))
         items = []
         for tag in tags or sorted(owners):
             party = ruling.get(tag)
@@ -338,6 +341,37 @@ class DebuggerService:
             "event": event, "read_at": live["read_at"],
         }}
 
+    def live_session(self) -> dict:
+        """Countries that exist in the running game (own at least one state, game memory) and its players.
+
+        Players: the local player's country from memory; the account name from the newest save that lists it.
+        Other players of a multiplayer session are not read from memory yet (not verified in multiplayer)."""
+        if self.live is None:
+            raise NotFound("Live game access is disabled")
+        live = self.live.session()
+        # names as in the country list (ideology-specific from the newest save's ruling party)
+        names = {c["tag"]: c["name"] for c in self.countries()["data"]}
+        account = None
+        picked = self._pick_save(None)
+        if picked is not None:
+            try:
+                header = self.saves.analyse(picked[0]).get("header") or {}
+            except SaveFormatError:
+                header = {}
+            account = next((p.get("name") for p in header.get("players") or []
+                            if p.get("tag") == header.get("player_tag")), None)
+        players = [{"tag": tag, "name": account, "local": True, "name_source": "save" if account else None}
+                   for tag in live["players"][:1]]
+        countries = [{"tag": tag, "name": names.get(tag, tag), "states": n,
+                      "player": account if live["players"][:1] == [tag] else None}
+                     for tag, n in live["states"].items() if n > 0]
+        countries.sort(key=lambda c: -c["states"])
+        mode = live["game_mode"]
+        note = (f"{len(countries)} countries own states in the running game (game memory, "
+                f"{(live['process'] or {}).get('version')}).")
+        return envelope(LIVE, {"game_mode": mode, "players": players, "countries": countries,
+                               "other_players_readable": False, "read_at": live["read_at"]}, note)
+
     def live_stockpile(self, tag: str | None = None) -> dict:
         """Live stockpile (game memory) with archetype / equipment type from the newest save's variant table."""
         if self.live is None:
@@ -500,6 +534,49 @@ class DebuggerService:
         else:
             match = items[0]
         return directory / match["name"], {"is_latest": match["name"] == items[0]["name"]}
+
+    def stability(self, tag: str) -> dict:
+        """Stability and war support as the game shows them: base + every modifier with its source.
+
+        Modifiers come from the newest save (ideas, party popularity, leader, advisors, dynamic modifiers) and the
+        game files; the base value from game memory when the game runs (it changes instantly), else from the save."""
+        tag = tag.upper()
+        install = self._install_path()
+        picked = self._pick_save(None)
+        if install is None or picked is None:
+            return envelope(UNAVAILABLE, None, "Needs the game installation and a save")
+        path = picked[0]
+        try:
+            state = self.saves.politics(path, tag)
+        except SaveFormatError as exc:
+            return envelope(UNAVAILABLE, {"file": path.name, "error": {"code": exc.code, "message": str(exc)}},
+                            str(exc))
+        analysis = state.pop("analysis")
+        userdata = (self.detect().get("userdata") or {}).get("path")
+        mods = gamefiles.enabled_mods(Path(userdata)) if userdata else []
+        defs = modifiers.definitions(tuple(str(r) for r in [install, *mods]))
+        names = focus_mod.loc_names(install, modifiers.loc_keys(state, defs))
+        base_source = {}
+        for field in modifiers.KEYS:
+            base_source[field] = "save"
+            if self.live is not None:
+                try:
+                    state[field] = self.live.read(field, tag)["value"]
+                    base_source[field] = "live"
+                except Exception:  # game not running / other version: the save value stays
+                    pass
+        result = modifiers.breakdown(state, defs, names)
+        for field in modifiers.KEYS:
+            result[field]["base_source"] = base_source[field]
+        game = self.detect()
+        return envelope(SAVE, {
+            "tag": tag, **result, "file": analysis["file"],
+            "in_game_date": (analysis.get("header") or {}).get("date"),
+            "freshness": save_freshness(analysis["file"]["mtime"], game),
+            "not_read": ["core coastal states protection", "at war", "foreign propaganda", "occupation resistance",
+                         "bombing / casualties / sunk convoys"] + [f"faction rule {r} (condition)"
+                                                                  for r in result["unchecked_rules"]],
+        }, f"Modifiers from {analysis['file']['name']} and the game files.")
 
     def country_save_values(self, tag: str, name: str | None) -> dict:
         """Real Country Editor values read from a save (snapshot). Never presented as live."""

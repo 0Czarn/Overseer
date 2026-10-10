@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 from .. import focus
-from . import binary, binvalues, countries, equipment, fields, states, text
+from . import binary, binvalues, countries, equipment, fields, politics, states, text
 
 SAVE_SUFFIX = ".hoi4"
 SNIFF_BYTES = 16
@@ -59,9 +59,9 @@ def analyse_bytes(data: bytes) -> dict:
 
 
 def header_with_width(data: bytes, width: int) -> dict:
-    found = binary.Parser(data, width).top_level(fields.HEADER_KEYS)
+    found = binary.Parser(data, width).top_level(fields.HEADER_KEYS, until=fields.HEADER_END)
     header = fields.extract_header(found)
-    missing = [fields.FIELDS[k].key for k in fields.HEADER_KEYS if k not in found]
+    missing = [fields.FIELDS[k].key for k in fields.HEADER_KEYS - {fields.MULTIPLAYER} if k not in found]
     return {"format": "binary", "float_width": width, "header": header, "missing_fields": sorted(missing)}
 
 
@@ -264,6 +264,29 @@ class SaveAnalyzer:
         if block is None:
             raise binary.SaveFormatError("country_missing", f"Country {tag} does not exist in this save")
         return {"analysis": result, **focus.save_state(block)}
+
+    def politics(self, path: Path, tag: str) -> dict:
+        """Ideas, party popularity, leader, advisors and dynamic modifiers of `tag` (all existing countries are
+        read in one pass and cached for the newest save)."""
+        result = self.analyse(path)
+        if result["error"]:
+            raise binary.SaveFormatError(result["error"]["code"], result["error"]["message"])
+        with self._lock:
+            cached = getattr(self, "_politics", {}).get(result["copy"])
+        if cached is None:
+            with self._parse_lock:
+                with self._lock:
+                    cached = getattr(self, "_politics", {}).get(result["copy"])
+                if cached is None:
+                    data = Path(result["copy"]).read_bytes()
+                    owners = self._country_list_locked(result)["owners"]
+                    cached = politics.read(data, result["format"], result.get("float_width"),
+                                           (result.get("header") or {}).get("version"), set(owners) | {tag})
+                    with self._lock:
+                        self._politics = {result["copy"]: cached}  # keep only the newest
+        if tag not in cached:
+            raise binary.SaveFormatError("country_missing", f"Country {tag} does not exist in this save")
+        return {"analysis": result, **cached[tag]}
 
     def country_values(self, path: Path, tag: str) -> dict:
         """Country Editor values for `tag` from the cached copy of a save (text, or binary 1.19.3)."""

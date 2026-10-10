@@ -353,3 +353,73 @@ textarea.input { resize: vertical; width: 100%; }
 body[data-loading="1"] .view-loading { display: block; opacity: 0; animation: view-loading-in 0.2s ease 0.3s forwards; }
 body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s; }
 @keyframes view-loading-in { to { opacity: 1; } }
+
+/* Tabs */
+.tab-strip { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 14px; flex-wrap: wrap; }
+.tab {
+  background: transparent; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0;
+  color: var(--text-muted); padding: 7px 14px; font: inherit; font-weight: 600; cursor: pointer; margin-bottom: -1px;
+}
+.tab:hover { color: var(--text); }
+.tab[aria-selected="true"] { color: var(--accent); border-color: var(--border); background: var(--bg-elev); border-bottom: 1px solid var(--bg-elev); }
+.tabs-sub > .tab-strip .tab { padding: 5px 12px; font-size: 13px; }
+.tab-panel[hidden] { display: none; }
+.session-mp { color: var(--info); font-weight: 700; }
+.session-sp { color: var(--ok); font-weight: 700; }
+
+/* Country Editor live panel - styled after the HOI4 interface (dark olive panels, brass trim, beige text) */
+.hoi-panel {
+  --hoi-bg: #1d2019; --hoi-bg-2: #262a20; --hoi-trim: #6b5d3a; --hoi-trim-hi: #a8925a; --hoi-text: #e4d9b8;
+  --hoi-muted: #9a9077; --hoi-pos: #8fd16a; --hoi-neg: #e5675d;
+  background: linear-gradient(180deg, var(--hoi-bg-2), var(--hoi-bg)); color: var(--hoi-text);
+  border: 1px solid var(--hoi-trim); border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4);
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; min-width: 0;
+}
+.hoi-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--hoi-trim); padding-bottom: 6px; }
+.hoi-head-title, .hoi-title { text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; color: var(--hoi-trim-hi); font-size: 12px; }
+.hoi-status { font-size: 11px; letter-spacing: 0.05em; }
+.hoi-status-on { color: var(--hoi-pos); }
+.hoi-status-off { color: var(--hoi-muted); }
+.hoi-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 120px), 1fr)); gap: 6px; }
+.hoi-chip { background: rgba(0, 0, 0, 0.35); border: 1px solid #3c3826; border-radius: 3px; padding: 4px 8px;
+  display: flex; flex-direction: column; min-width: 0; }
+.hoi-chip-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--hoi-muted); }
+.hoi-chip-value { font-weight: 700; font-variant-numeric: tabular-nums; }
+.hoi-gauges { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 10px; }
+.hoi-gauge { background: rgba(0, 0, 0, 0.3); border: 1px solid #3c3826; border-radius: 3px; padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.hoi-gauge-head { display: flex; justify-content: space-between; align-items: baseline; }
+.hoi-gauge-value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.hoi-bar { height: 8px; background: #0e100c; border: 1px solid #3c3826; border-radius: 2px; overflow: hidden; }
+.hoi-bar-fill { height: 100%; width: 0; transition: width 0.3s; }
+.hoi-stability .hoi-bar-fill { background: linear-gradient(90deg, #8a6d2c, #d7b25a); }
+.hoi-war_support .hoi-bar-fill { background: linear-gradient(90deg, #7a2f26, #c9533f); }
+.hoi-tooltip { background: #11130f; border: 1px solid #3c3826; border-radius: 2px; padding: 6px 8px; font-size: 12.5px; }
+.hoi-line { display: flex; justify-content: space-between; gap: 10px; padding: 1px 0; }
+.hoi-line > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.hoi-line-base { color: var(--hoi-text); border-bottom: 1px dotted #3c3826; padding-bottom: 3px; margin-bottom: 2px; }
+.hoi-line-total { border-top: 1px solid var(--hoi-trim); margin-top: 3px; padding-top: 3px; font-weight: 700; }
+.hoi-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hoi-pos { color: var(--hoi-pos); }
+.hoi-neg { color: var(--hoi-neg); }
+.hoi-src { color: var(--hoi-muted); font-size: 11px; }
+.hoi-note { color: var(--hoi-muted); font-size: 11px; }
+.hoi-edit { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--hoi-muted); }
+.hoi-input { width: 72px; }
+.hoi-source { font-size: 12px; color: var(--hoi-muted); display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.hoi-advanced summary { cursor: pointer; color: var(--hoi-trim-hi); font-size: 12px; }
+.hoi-advanced[open] summary { margin-bottom: 8px; }
+.hoi-panel .muted { color: var(--hoi-muted); }
+.hoi-head-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hoi-toggle { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--hoi-text); cursor: pointer; }
+.hoi-toggle input { accent-color: var(--hoi-trim-hi); }
+.hoi-chip-edit, .hoi-panel .hoi-edit { display: none; }
+.hoi-editing .hoi-chip-edit { display: flex; gap: 3px; margin-top: 3px; }
+.hoi-editing .hoi-edit { display: flex; }
+.hoi-chip-input { min-width: 0; flex: 1; width: 100%; background: #0e100c; color: var(--hoi-text); border: 1px solid #4a4430;
+  border-radius: 2px; padding: 2px 4px; font: inherit; font-size: 12px; }
+.hoi-chip-input:focus { outline: 1px solid var(--hoi-trim-hi); }
+.hoi-chip-btn { background: #4a3f24; color: var(--hoi-text); border: 1px solid var(--hoi-trim); border-radius: 2px;
+  font: inherit; font-size: 11px; padding: 0 6px; cursor: pointer; }
+.hoi-chip-btn:hover { background: #5d4f2c; }

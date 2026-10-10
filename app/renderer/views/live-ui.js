@@ -4,7 +4,7 @@ import { h, card, keyValues, notice, scopeBadge, toast } from '../lib/dom.js';
 import { PERCENT_FIELDS, classifyLive, formatLiveValue, toValueUnits } from '../lib/live.js';
 
 const FIELD = 'political_power';
-const FIELD_LABELS = {
+export const FIELD_LABELS = {
   political_power: 'Political Power', stability: 'Stability (base value)', war_support: 'War Support (base value)',
   command_power: 'Command Power', fuel: 'Fuel', manpower: 'Manpower',
   army_experience: 'Army XP', navy_experience: 'Navy XP', air_experience: 'Air XP',
@@ -57,7 +57,7 @@ const OP_KIND = { confirmed: 'info', mismatch: 'warn', expired: 'warn', error: '
 
 /** Verified PP change: the app prepares a documented console command, the tester enters it, and the
  *  result is verified by re-reading the calibrated memory location. The app never writes game memory. */
-function changeSection(ctx, enabled) {
+export function changeSection(ctx, enabled) {
   // The backend refuses fields without a confirmed location or a verified command unit, with the reason.
   const fieldSel = h('select', { class: 'input input-small', 'aria-label': 'Field' },
     Object.entries(FIELD_LABELS).map(([k, label]) => h('option', { value: k }, label)));
@@ -138,13 +138,13 @@ const DIRECT_FIELDS = ['stability', 'war_support', 'political_power', 'command_p
   'army_experience', 'navy_experience', 'air_experience'];
 const DIRECT_PREF = 'hoi4dbg.directWrite';
 
-function directEnabled() {
+export function directEnabled() {
   try { return localStorage.getItem(DIRECT_PREF) === '1'; } catch { return false; }
 }
 
 /** LOCAL direct memory write (opt-in, single player): sets the value immediately, no console. The backend
  *  refuses it with more than one human player (it would desynchronise a multiplayer game). */
-function directSection(ctx, tag, getValues) {
+export function directSection(ctx, tag, getValues) {
   const fieldSel = h('select', { class: 'input input-small', 'aria-label': 'Field' },
     DIRECT_FIELDS.map((k) => h('option', { value: k }, FIELD_LABELS[k])));
   const value = h('input', { class: 'input input-small', type: 'number', step: 'any', 'aria-label': 'New value' });

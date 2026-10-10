@@ -25,6 +25,9 @@ COUNTRY_TABLE = (0x332F260, 0x310)
 # player). CORRECTION (same day): after the console command `fow` (fog of war off) all 99 existing countries had 0
 # - it is a visibility flag, not an AI flag. It identifies the player only when exactly one country has 0.
 PLAYER_FLAG = (0xFA0, 0x1C0)
+# int32 at country + 0x484: number of states the country owns (0 = does not exist). 2026-10-10: equal to the
+# owner count of the save for 439/439 tags (99 existing, 340 not), next best location 437/439.
+OWNED_STATES = 0x484
 
 # field -> (offsets inside the country object: all but the last are pointer hops, encoding)
 FIELDS: dict[str, tuple[tuple[int, ...], str]] = {
@@ -93,6 +96,23 @@ def player_tags(memory, module_base: int, tags: list[str]) -> list[str]:
             humans.append(tag)
     # sanity: nearly all countries are AI; anything else means the layout does not match
     return humans if readable and len(humans) <= max(8, readable // 10) else []
+
+
+def owned_states(memory, module_base: int, tags: list[str]) -> dict[str, int]:
+    """{tag: number of owned states} for every tag of the country table ({} when it is not readable)."""
+    table = _ptr(memory, module_base + COUNTRY_TABLE[0])
+    array = _ptr(memory, table + COUNTRY_TABLE[1]) if table else None
+    data = memory.read(array + 8, 8 * len(tags)) if array else None
+    if not data:
+        return {}
+    out = {}
+    for i, tag in enumerate(tags):
+        country = struct.unpack_from("<Q", data, 8 * i)[0]
+        raw = memory.read(country + OWNED_STATES, 4) if 0x10000 <= country < 0x7FFF_FFFF_FFFF else None
+        if raw:
+            out[tag] = struct.unpack("<i", raw)[0]
+    # sanity: counts are small and non-negative; otherwise the layout does not match
+    return out if out and all(0 <= n <= 5000 for n in out.values()) else {}
 
 
 # Plausible ranges for direct (local) writes; the game itself clamps some of them.

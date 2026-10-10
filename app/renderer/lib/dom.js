@@ -109,3 +109,24 @@ export function toast(message, kind = 'info') {
   host.append(el);
   setTimeout(() => el.remove(), 4000);
 }
+
+/**
+ * Tab strip with panels. items: [{ id, label, panel: Node }]. Inactive panels stay in the DOM (hidden),
+ * so their state survives switching. onChange(id) is called after a switch.
+ */
+export function tabs(items, active, onChange, { cls = '' } = {}) {
+  const current = items.some((t) => t.id === active) ? active : items[0].id;
+  const buttons = items.map((t) => h('button', {
+    class: 'tab', role: 'tab', type: 'button', 'aria-selected': String(t.id === current), dataset: { tab: t.id },
+    onClick: () => show(t.id),
+  }, t.label));
+  const panels = items.map((t) => h('div', { class: 'tab-panel', role: 'tabpanel', dataset: { panel: t.id }, hidden: t.id !== current }, t.panel));
+  function show(id) {
+    items.forEach((t, i) => {
+      buttons[i].setAttribute('aria-selected', String(t.id === id));
+      panels[i].hidden = t.id !== id;
+    });
+    onChange?.(id);
+  }
+  return h('div', { class: `tabs ${cls}`.trim() }, h('div', { class: 'tab-strip', role: 'tablist' }, buttons), panels);
+}
