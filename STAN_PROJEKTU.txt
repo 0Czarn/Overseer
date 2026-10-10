@@ -22,10 +22,26 @@ ZROBIONE
 [x] Krok B  Automatyczne mapowanie pól zapisu na pamięć (wszystkie państwa naraz)
 [x] Krok C  Gracz rozpoznawany z pamięci gry (przy włączonej mgle wojny; inaczej ostatni
             pewny wynik / zapis) - patrz sprostowanie w docs/PROGRESS.md
+[x] Country Editor: panel "Leadership" (portret i cechy przywódcy, partia rządząca, ideologia, frakcja z logo,
+            wykres kołowy popularności partii w kolorach ideologii; szczegóły po najechaniu)
+[x] Country Editor: panel "National spirits" (ikony z gry DDS->PNG, modyfikatory i opis po najechaniu;
+            idee kategorii "country" + modyfikatory dynamiczne z wartościami z zapisu)
+[x] Country Editor: Laws & Government (pobór, handel, gospodarka, 3 doradców), Research & Production
+            (5 firm + teoretyk), Military Staff (szefowie armii/floty/lotnictwa + 3 high command) - ikony
+            i portrety z gry, modyfikatory i cechy po najechaniu, puste sloty z "+"
+            + MIO: kafelek projektanta (czołgi/okręty/lotnictwo/sprzęt) z licznikiem, klik rozwija listę MIO;
+              po najechaniu poziom, fundusze, polityka, odblokowane cechy i aktualne premie
+              (definicje z include/override/remove; cechy z zapisu - token 0x38a4 sprawdzony na SOV 1942)
 [x] Country Editor: panel "Live game memory" w stylu HOI4 (kompaktowy pasek wartości na żywo)
             + stabilność i poparcie wojny JAK W GRZE: baza (pamięć) + modyfikatory z rozpisaniem
               (popularność partii, idee/prawa, przywódca, doradcy, modyfikatory dynamiczne, reguły frakcji
-              np. "Declaring Country is Considered Major", napięcie światowe x0.4, Pride of the Fleet)
+              np. "Declaring Country is Considered Major", napięcie światowe x0.4, Pride of the Fleet,
+              balance of power: aktywny zakres np. FIN "Low Trust" -5%/-5% + jego modyfikator,
+              budynki-landmarki kontrolowane przez państwo np. RAJ Taj Mahal +5%,
+              duchy armii (lista idei), doktryny: subdoktryny + odblokowane nagrody np. guerilla warfare,
+              party_popularity_stability_factor podnosi mnożnik popularności: GER 40% x (15%+10% Kerrl) = 10%)
+            + "In game ... Match": różnica do wartości z gry zapamiętana jako modyfikator "UNKNOWN"
+              (wartości końcowej gra nie trzyma w pamięci pod stałym adresem - sprawdzone 2026-10-10)
             + edycja na żywo: baza ST/WS oraz PP, CP, paliwo, XP armii/floty/lotnictwa (przełącznik
               "Edit live values", lokalny zapis do pamięci, tylko singleplayer)
             ZSRR stabilność 43,2% = gra 43% (sprawdzone z tooltipem); poparcie wojny 36,9% - do potwierdzenia

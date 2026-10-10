@@ -72,6 +72,18 @@ function runSmoke(win, outDir, quit) {
               value: g.querySelector('.hoi-gauge-value').textContent,
               lines: g.querySelectorAll('.hoi-lines .hoi-line').length }))`);
             if (info.gauges.length !== 2) result.failures.push(`${size.name}/country-editor: stability/war support gauges missing`);
+            await waitFor(wc, `!document.querySelector('.spirit-row .muted')?.textContent.startsWith('Reading')`, 20000);
+            info.spirits = await wc.executeJavaScript(`document.querySelectorAll('.hoi-panel:not(.gov-panel) .spirit-row .spirit').length`);
+            if (!info.spirits) result.failures.push(`${size.name}/country-editor: no national spirits shown`);
+            await waitFor(wc, `![...document.querySelectorAll('.gov-row .muted')].some((e) => e.textContent.startsWith('Reading'))`, 20000);
+            info.government = await wc.executeJavaScript(`[...document.querySelectorAll('.gov-row')].map((r) => r.querySelectorAll('.spirit').length)`);
+            if (info.government.length !== 3 || info.government.some((n) => n < 6)) result.failures.push(`${size.name}/country-editor: government slots ${info.government}`);
+            info.mios = await wc.executeJavaScript(`(() => { const t = document.querySelector('.mio-slot'); if (!t) return -1;
+              t.click(); const n = document.querySelectorAll('.mio-list:not([hidden]) .mio').length; t.click(); return n; })()`);
+            if (info.mios === 0) result.failures.push(`${size.name}/country-editor: MIO list did not open`);
+            await waitFor(wc, `!!document.querySelector('.ov-body .pie, .ov-body .notice')`, 20000);
+            info.pieSlices = await wc.executeJavaScript(`document.querySelectorAll('.ov-body .pie-slice').length`);
+            if (!info.pieSlices) result.failures.push(`${size.name}/country-editor: no party popularity pie`);
             info.editableChips = await wc.executeJavaScript(`document.querySelectorAll('.hoi-chip .hoi-chip-input').length`);
             if (info.editableChips !== 6) result.failures.push(`${size.name}/country-editor: ${info.editableChips}/6 editable live values`);
           }

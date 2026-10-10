@@ -22,6 +22,19 @@ TOKENS = {
     # top level (located by content in SOV_1936_03_12_01.hoi4: faction blocks hold GFX_faction_logo_*, the threat
     # block holds the world tension events; 4.815 there = the +1.92 % war support the game showed, x 0.4)
     "faction": 0x2A7D, "members": 0x2AA6, "rule_status": 0x4C65, "rules": 0x317B, "threat": 0x2BBD,
+    # balance of power (aligned with 11.hoi4 / 2-1.hoi4: FIN_power_balance value -0.48 in both)
+    "power_balance": 0x4DDF, "power_balances": 0x4DDB, "template": 0x4C1A,
+    # doctrines (aligned with 11.hoi4 / 2-1.hoi4): doctrine = { countries = { { folder = { { grand_doctrine
+    # tracks = { { sub_doctrine rewards mastery } } } } country = TAG } } }
+    "doctrine": 0x35F9, "folder": 0x2E61, "grand_doctrine": 0x4187, "tracks": 0x4184, "rewards": 0x4182,
+    "sub_doctrine": 0x418A,
+    # MIOs (country production.industrial_organisations; GER block aligned with 11.hoi4). The unlocked traits
+    # (0x38a4 = { 0x2e8e = trait }) and the active policy (0x28fc) were identified in SOV_1942_06_10_22.hoi4: a
+    # size-10 MIO lists exactly 10 such traits; text names of these three keys are not known yet.
+    "production": 0x2FB4, "industrial_organisations": 0x4ADA, "size": 0x002F, "funds": 0x4AD9, "icon": 0x00B5,
+    "research_bonus": 0x3161, "mio_unlocked_trait": 0x38A4, "mio_trait": 0x2E8E, "mio_policy": 0x28FC,
+    "long_name": 0x34EB,   # party long name (SOV_communism_party_russian_long in the SOV 1936 save)
+    "portraits": 0x4C29, "civilian": 0x4B26, "army": 0x289D, "navy": 0x289E, "small": 0x30D7, "large": 0x4C28,
 }
 NAMES = {**binvalues.NAMES, **{v: k for k, v in TOKENS.items()}}
 TEXT_TOP_KEY = re.compile(rb"\n[a-z_]+=")
@@ -57,26 +70,89 @@ def characters_of(manager: list, tag: str) -> dict[str, dict]:
             advisors = [{"slot": text.get(a, "slot"), "idea_token": text.get(a, "idea_token"),
                          "traits": [t for t in (text.get(a, "traits") or []) if isinstance(t, str)]}
                         for k, a in (text.get(ch, "advisors") or []) if k == "advisor" and isinstance(a, list)]
+            portraits: dict[str, dict] = {}
+            for kind, body in (text.get(ch, "portraits") or []):
+                if isinstance(body, list):
+                    for size, sprite in body:
+                        if isinstance(sprite, str):
+                            portraits.setdefault(kind, {})[size] = sprite
             out[_char_id(text.get(ch, "id"))] = {
-                "token": text.get(ch, "token"), "name": text.get(ch, "name"),
+                "token": text.get(ch, "token"), "name": text.get(ch, "name"), "portraits": portraits,
                 "leader_traits": leader_traits, "advisors": advisors}
     return out
 
 
-def world(factions: list[list], threat: list | None) -> dict:
+def doctrines_of(doctrine: list | None) -> dict[str, list[dict]]:
+    """{tag: [{"id": grand doctrine or subdoctrine, "rewards": unlocked rewards}]} from the top-level doctrine block."""
+    out = {}
+    for entry in text.get(doctrine or [], "countries") or []:
+        tag = text.get(entry, "country") if isinstance(entry, list) else None
+        if not isinstance(tag, str):
+            continue
+        items = []
+        for folder in text.get(entry, "folder") or []:
+            if not isinstance(folder, list):
+                continue
+            if isinstance(text.get(folder, "grand_doctrine"), str):
+                items.append({"id": text.get(folder, "grand_doctrine"), "rewards": 0})
+            for track in text.get(folder, "tracks") or []:
+                sub = text.get(track, "sub_doctrine") if isinstance(track, list) else None
+                if isinstance(sub, str):
+                    items.append({"id": sub, "rewards": int(_float(text.get(track, "rewards")) or 0)})
+        out[tag] = items
+    return out
+
+
+def world(factions: list[list], threat: list | None, power_balance: list | None = None,
+          doctrine: list | None = None) -> dict:
     """{"factions": [{"members", "rules"}], "tension": world tension in %} from the top-level blocks.
     Tension = sum of the current value (first number) of every threat entry."""
     out = []
     for f in factions:
         members = [m for m in (text.get(f, "members") or []) if isinstance(m, str)]
         rules = [r for r in (text.get(text.get(f, "rule_status") or [], "rules") or []) if isinstance(r, str)]
-        out.append({"members": members, "rules": rules})
+        out.append({"members": members, "rules": rules,
+                    **{k: text.get(f, k) if isinstance(text.get(f, k), str) else None for k in ("template", "icon", "name")}})
     tension = 0.0
     for entry in threat or []:
         body = entry[1] if isinstance(entry, tuple) else entry
         first = next((v for k, v in body if isinstance(v, str)), None) if isinstance(body, list) else None
         tension += _float(first) or 0.0
-    return {"factions": out, "tension": min(100.0, tension)}
+    balances = []
+    for entry in text.get(power_balance or [], "power_balances") or []:
+        if isinstance(entry, list):
+            balances.append({"id": text.get(entry, "template"), "value": _float(text.get(entry, "value")),
+                             "countries": [c for c in (text.get(entry, "countries") or []) if isinstance(c, str)],
+                             "modifier": text.get(entry, "modifier") if isinstance(text.get(entry, "modifier"), str) else None})
+    return {"factions": out, "tension": min(100.0, tension), "power_balances": balances,
+            "doctrines": doctrines_of(doctrine)}
+
+
+def _unlocked_traits(org: list, size: int) -> list[str]:
+    """Trait tokens of `{ <key> = { <key> = trait } }` entries. Binary saves: the known token; text saves (key names
+    unknown): the key that repeats `size` times (another such list holds traits that are not unlocked)."""
+    groups: dict[str, list[str]] = {}
+    for k, v in org:
+        if isinstance(v, list) and len(v) == 1 and isinstance(v[0], tuple) and isinstance(v[0][1], str) \
+                and isinstance(k, str) and k not in ("id", "allowed_policies", "history", "variables", "flags"):
+            groups.setdefault(k, []).append(v[0][1])
+    if "mio_unlocked_trait" in groups:
+        return groups["mio_unlocked_trait"]
+    return next((g for g in groups.values() if len(g) == size), [])
+
+
+def mios_of(block: list) -> list[dict]:
+    out = []
+    for mio_id, org in text.get(text.get(block, "production") or [], "industrial_organisations") or []:
+        if not isinstance(org, list) or not isinstance(mio_id, str):
+            continue
+        size = int(_float(text.get(org, "size")) or 0)
+        policy = text.get(org, "mio_policy")
+        out.append({"id": mio_id, "size": size, "funds": _float(text.get(org, "funds")),
+                    "research_bonus": _float(text.get(org, "research_bonus")),
+                    "icon": text.get(org, "icon") if isinstance(text.get(org, "icon"), str) else None,
+                    "policy": policy if isinstance(policy, str) else None, "traits": _unlocked_traits(org, size)})
+    return out
 
 
 def summary(block: list, manager: list | None, tag: str, world_state: dict | None = None) -> dict:
@@ -85,12 +161,16 @@ def summary(block: list, manager: list | None, tag: str, world_state: dict | Non
     ruling = text.get(politics, "ruling_party")
     parties = text.get(politics, "parties") or []
     popularity = {k: float(text.get(v, "popularity") or 0) for k, v in parties if isinstance(v, list)}
-    leader_id = None
+    leader_id, leader_ideology = None, None
     leaders = text.get(text.get(parties, ruling) or [], "country_leader") or []
     for entry in leaders:  # { { ideology=... character={ id=.. } } }: the first one rules
         if isinstance(entry, list):
             leader_id = _char_id(text.get(entry, "character"))
+            leader_ideology = text.get(entry, "ideology") if isinstance(text.get(entry, "ideology"), str) else None
             break
+    party_names = {k: {"name": text.get(v, "name") if isinstance(text.get(v, "name"), str) else None,
+                       "long_name": text.get(v, "long_name") if isinstance(text.get(v, "long_name"), str) else None}
+                   for k, v in parties if isinstance(v, list)}
     advisors = []
     for entry in text.get(text.get(block, "characters") or [], "appointed_advisors") or []:
         if isinstance(entry, list):
@@ -102,12 +182,16 @@ def summary(block: list, manager: list | None, tag: str, world_state: dict | Non
         "tag": tag, "stability": _float(text.get(block, "stability")), "war_support": _float(text.get(block, "war_support")),
         "ideas": [i for i in (text.get(politics, "ideas") or []) if isinstance(i, str)],
         "ruling_party": ruling, "popularity": popularity, "leader": leader_id, "advisors": advisors,
+        "leader_ideology": leader_ideology, "party_names": party_names,
         "dynamic_modifiers": dynamic, "characters": characters_of(manager or [], tag),
         "major": text.get(block, "major") == "yes",
+        "mios": mios_of(block),
         "pride_of_the_fleet": text.get(block, "pride_of_the_fleet") is not None,
         "faction": next(({**f, "leader": f["members"][0] == tag} for f in (world_state or {}).get("factions", [])
                          if tag in f["members"]), None),
         "tension": (world_state or {}).get("tension"),
+        "doctrines": (world_state or {}).get("doctrines", {}).get(tag, []),
+        "power_balances": [b for b in (world_state or {}).get("power_balances", []) if tag in b["countries"]],
     }
 
 
@@ -133,7 +217,8 @@ def _text_top(data: bytes, key: str) -> list:
 
 def read_text(data: bytes, tags: set[str]) -> dict[str, dict]:
     manager = next(iter(_text_top(data, "character_manager")), None)
-    state = world(_text_top(data, "faction"), next(iter(_text_top(data, "threat")), None))
+    state = world(_text_top(data, "faction"), next(iter(_text_top(data, "threat")), None),
+                  next(iter(_text_top(data, "power_balance")), None), next(iter(_text_top(data, "doctrine")), None))
     out = {}
     for tag in tags:
         block = text.country_block(data, tag)
@@ -148,7 +233,7 @@ def read_binary(data: bytes, tags: set[str], float_width: int, version: str | No
                                      f"(this save: {version or 'unknown'}). Use a text save (-force_text_save).")
     blocks: dict[str, list] = {}
     manager = None
-    factions, threat = [], None
+    factions, threat, balance, doctrine = [], None, None, None
     p = binary.Parser(data, float_width)
     while p.peek() is not None:
         key = p._u16()
@@ -157,13 +242,18 @@ def read_binary(data: bytes, tags: set[str], float_width: int, version: str | No
         if key == TOKENS["character_manager"] and p.peek() == binary.OPEN:
             p._u16()
             manager = _named(p.block([200_000_000]))
-        elif key in (TOKENS["faction"], TOKENS["threat"]) and p.peek() == binary.OPEN:
+        elif key in (TOKENS["faction"], TOKENS["threat"], TOKENS["power_balance"], TOKENS["doctrine"]) \
+                and p.peek() == binary.OPEN:
             p._u16()
             value = _named(p.block([5_000_000]))
             if key == TOKENS["faction"]:
                 factions.append(value)
-            else:
+            elif key == TOKENS["threat"]:
                 threat = value
+            elif key == TOKENS["doctrine"]:
+                doctrine = value
+            else:
+                balance = value
         elif key == binvalues.TOKENS["countries"] and p.peek() == binary.OPEN:
             p._u16()
             while p.peek() not in (None, binary.CLOSE):
@@ -178,7 +268,7 @@ def read_binary(data: bytes, tags: set[str], float_width: int, version: str | No
             p._u16()  # closing brace of countries
         else:
             p.skip_value()
-    state = world(factions, threat)
+    state = world(factions, threat, balance, doctrine)
     return {tag: summary(block, manager, tag, state) for tag, block in blocks.items()}
 
 

@@ -68,6 +68,22 @@ function chip(ctx, tag, field) {
   };
 }
 
+// Difference between what the game shows and base + known modifiers, per country and field. It is kept as an
+// extra modifier ("UNKNOWN"), so later base changes are still followed live. Stored in this browser only.
+const UNKNOWN_PREF = 'hoi4dbg.unknownModifier';
+
+function loadUnknown(tag, field) {
+  try { return JSON.parse(localStorage.getItem(UNKNOWN_PREF) || '{}')[`${tag}:${field}`] ?? null; } catch { return null; }
+}
+
+function saveUnknown(tag, field, entry) {
+  try {
+    const all = JSON.parse(localStorage.getItem(UNKNOWN_PREF) || '{}');
+    if (entry) all[`${tag}:${field}`] = entry; else delete all[`${tag}:${field}`];
+    localStorage.setItem(UNKNOWN_PREF, JSON.stringify(all));
+  } catch { /* preference only */ }
+}
+
 /** One gauge (stability or war support). Built once; update() only changes text, so the input keeps focus. */
 function gauge(ctx, tag, field) {
   const big = h('div', { class: 'hoi-gauge-value' }, '—');
@@ -79,9 +95,32 @@ function gauge(ctx, tag, field) {
   const clampNote = h('div', { class: 'hoi-note' });
   const input = h('input', { class: 'input input-small hoi-input', type: 'number', step: '1', min: '0', max: '100',
     'aria-label': `New base ${GAUGES[field]} in percent` });
+  const unknownLine = h('div', { class: 'hoi-line hoi-line-unknown' });
+  const gameInput = h('input', { class: 'input input-small hoi-input', type: 'number', step: '0.1', min: '0', max: '100',
+    'aria-label': `${GAUGES[field]} shown in game, percent` });
   let base = null;
   let breakdown = null;
   let filled = false;
+  let unknown = loadUnknown(tag, field);   // { value, at }
+
+  const match = () => {
+    const shown = Number(gameInput.value) / 100;
+    if (gameInput.value === '' || !Number.isFinite(shown) || shown < 0 || shown > 1) {
+      toast('Enter the value the game shows (0-100 %)', 'error');
+      return;
+    }
+    if (!Number.isFinite(base) || breakdown?.modifiers === undefined) {
+      toast('Base value and modifiers must be loaded first', 'error');
+      return;
+    }
+    const diff = +(shown - (base + breakdown.modifiers)).toFixed(4);
+    unknown = Math.abs(diff) < 0.0005 ? null : { value: diff, at: new Date().toISOString() };
+    saveUnknown(tag, field, unknown);
+    gameInput.value = '';
+    toast(unknown ? `UNKNOWN ${pct(diff, true)} added to ${GAUGES[field]}` : 'Already matches the game - nothing unknown', 'ok');
+    render();
+  };
+  gameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') match(); });
 
   const set = async () => {
     const value = Number(input.value) / 100;
@@ -98,13 +137,28 @@ function gauge(ctx, tag, field) {
     h('div', { class: 'hoi-tooltip' },
       h('div', { class: 'hoi-line hoi-line-base' }, h('span', null, 'Base value ', baseSrc), baseCell),
       lines,
+      unknownLine,
       h('div', { class: 'hoi-line hoi-line-total' }, h('span', null, 'Total'), totalCell),
       clampNote),
+    h('div', { class: 'hoi-match', title: 'Type what the game shows: the difference to the known modifiers is kept as "UNKNOWN"' },
+      h('span', null, 'In game'), gameInput, h('span', { class: 'muted' }, '%'),
+      h('button', { class: 'btn btn-small', onClick: match }, 'Match')),
     h('div', { class: 'hoi-edit' }, h('span', null, 'Set base'), input, h('span', { class: 'muted' }, '%'),
       h('button', { class: 'btn btn-small btn-primary', onClick: set }, 'Set')));
 
   const render = () => {
-    const mods = breakdown?.modifiers ?? null;
+    const mods = breakdown ? breakdown.modifiers + (unknown?.value ?? 0) : null;
+    unknownLine.hidden = !unknown;
+    if (unknown) {
+      unknownLine.replaceChildren(
+        h('span', { title: `Not identified by the app; matched with the game ${new Date(unknown.at).toLocaleString()}` },
+          'UNKNOWN ', h('button', { class: 'hoi-x', type: 'button', title: 'Remove', onClick: () => {
+            unknown = null;
+            saveUnknown(tag, field, null);
+            render();
+          } }, '✕')),
+        h('span', { class: `hoi-num ${unknown.value > 0 ? 'hoi-pos' : 'hoi-neg'}` }, pct(unknown.value, true)));
+    }
     const total = Number.isFinite(base) && mods !== null ? clamp01(base + mods) : null;
     big.textContent = pct(total ?? base);
     big.title = total === null ? 'Modifiers not loaded - base value only' : '';

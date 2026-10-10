@@ -423,3 +423,80 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
 .hoi-chip-btn { background: #4a3f24; color: var(--hoi-text); border: 1px solid var(--hoi-trim); border-radius: 2px;
   font: inherit; font-size: 11px; padding: 0 6px; cursor: pointer; }
 .hoi-chip-btn:hover { background: #5d4f2c; }
+.hoi-line-unknown { color: #e0b341; font-style: italic; }
+.hoi-line-unknown[hidden] { display: none; }
+.hoi-x { background: none; border: none; color: var(--hoi-muted); cursor: pointer; font-size: 11px; padding: 0 2px; }
+.hoi-x:hover { color: var(--hoi-neg); }
+.hoi-match { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--hoi-muted); }
+
+/* National spirits (Country Editor) */
+.spirit-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.spirit { position: relative; outline: none; }
+.spirit-icon { width: 54px; height: 58px; object-fit: contain; display: block; border: 1px solid #3c3826; border-radius: 3px;
+  background: rgba(0, 0, 0, 0.35); }
+.spirit:hover .spirit-icon, .spirit:focus .spirit-icon { border-color: var(--hoi-trim-hi); }
+.spirit-noicon { display: grid; place-items: center; color: var(--hoi-muted); }
+.spirit-tip { display: none; position: absolute; z-index: 50; top: calc(100% + 6px); left: 0; width: max-content;
+  max-width: min(340px, 80vw); background: #11130f; border: 1px solid var(--hoi-trim); border-radius: 3px; padding: 8px 10px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6); font-size: 12.5px; color: var(--hoi-text); }
+.spirit:hover .spirit-tip, .spirit:focus .spirit-tip { display: block; }
+.spirit-tip-name { font-weight: 700; color: var(--hoi-trim-hi); margin-bottom: 4px; }
+.spirit-tip-mods { border-top: 1px solid #3c3826; padding-top: 4px; }
+.spirit-tip-custom { color: var(--hoi-text); white-space: pre-line; margin-top: 3px; }
+.spirit-tip-desc { color: var(--hoi-muted); font-style: italic; margin-top: 6px; white-space: pre-line; }
+.spirit-tip-kind { color: var(--hoi-muted); font-size: 11px; margin-top: 4px; }
+
+/* Laws & Government / Research & Production / Military Staff (Country Editor) */
+.gov-section { display: flex; flex-direction: column; gap: 6px; }
+.gov-bar { display: flex; align-items: center; gap: 10px; padding: 5px 10px; font-weight: 700; color: var(--hoi-text);
+  background: linear-gradient(90deg, #3b3322, #26231a 60%, rgba(38, 35, 26, 0)); border-top: 1px solid #5a4d30;
+  border-bottom: 1px solid #14130e; border-radius: 2px; }
+.gov-icon { width: 22px; height: 22px; fill: #c9a55a; flex: none; }
+.gov-row { padding: 2px 6px 4px; gap: 10px; }
+.spirit-round { border-radius: 50%; border: 2px solid #5a5236; box-shadow: 0 0 0 2px #14130e; width: 56px; height: 56px; }
+.spirit-slot { display: grid; place-items: center; background: linear-gradient(160deg, #2a2b27, #121310);
+  border: 1px solid #44412f; }
+.spirit-plus { color: #6fbf4f; font-size: 22px; font-weight: 700; line-height: 1; }
+.spirit-empty-slot:hover .spirit-slot, .spirit-empty-slot:focus .spirit-slot { border-color: var(--hoi-trim-hi); }
+.spirit-tip-traits { color: #e0c070; margin-bottom: 4px; white-space: pre-line; }
+
+/* MIOs (Research & Production) */
+.mio-slot { cursor: pointer; }
+.mio-slot[aria-expanded="true"] .spirit-icon { border-color: var(--hoi-trim-hi); box-shadow: 0 0 0 2px #14130e, 0 0 8px rgba(201, 165, 90, 0.6); }
+.mio-count, .mio-level { position: absolute; right: -4px; bottom: -4px; min-width: 18px; height: 18px; padding: 0 4px;
+  border-radius: 9px; background: #2f2a1c; border: 1px solid var(--hoi-trim-hi); color: var(--hoi-text);
+  font-size: 11px; font-weight: 700; line-height: 16px; text-align: center; }
+.mio-level { background: #1f3a1f; border-color: #6fbf4f; }
+.mio-list { margin: 2px 6px 6px; padding: 8px; background: rgba(0, 0, 0, 0.3); border: 1px solid #3c3826; border-radius: 3px; }
+.mio-list[hidden] { display: none; }
+.mio-list-title { color: var(--hoi-trim-hi); font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.mio-group { color: var(--hoi-trim-hi); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px; }
+
+/* Government overview (Country Editor) */
+.ov-body { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.ov-leader { flex: none; }
+.ov-portrait { width: 105px; height: 140px; object-fit: cover; display: block; border: 2px solid #5a4d30; border-radius: 3px;
+  box-shadow: 0 0 0 1px #0b0c09, 0 4px 10px rgba(0, 0, 0, 0.5); background: #11130f; }
+.ov-leader:hover .ov-portrait, .ov-leader:focus .ov-portrait { border-color: var(--hoi-trim-hi); }
+.ov-info { flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.ov-leader-name { font-size: 18px; font-weight: 700; color: var(--hoi-text); }
+.ov-line { font-size: 13px; overflow-wrap: anywhere; }
+.swatch { display: inline-block; width: 11px; height: 11px; border: 1px solid #000; vertical-align: -1px; font-style: normal; }
+.ov-faction { display: inline-flex; align-items: center; gap: 10px; align-self: flex-start; margin-top: 4px; padding: 6px 14px 6px 8px;
+  background: linear-gradient(180deg, #3a2a24, #23191a); border: 1px solid #5a4036; border-radius: 6px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06); }
+.ov-faction-icon { width: 34px; height: 34px; object-fit: contain; }
+.ov-faction-name { font-weight: 700; font-size: 15px; color: #f0e6cc; }
+.ov-faction-none { background: rgba(0, 0, 0, 0.25); border-color: #3c3826; }
+.pie-block { flex: 0 1 auto; display: flex; gap: 10px; align-items: center; min-width: 0; }
+.pie-wrap { position: relative; outline: none; }
+.pie { width: 96px; height: 96px; display: block; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6)); }
+.pie-ring { fill: #1a1b17; stroke: #5a5236; stroke-width: 2; }
+.pie-slice { stroke: #0b0c09; stroke-width: 0.6; cursor: pointer; transition: opacity 0.15s; }
+.pie-slice:hover { opacity: 0.8; }
+.pie-gloss { fill: none; stroke: rgba(0, 0, 0, 0.55); stroke-width: 1.5; pointer-events: none; }
+.pie-wrap .pie-tip { top: calc(100% + 6px); }
+.pie-wrap:hover .pie-tip, .pie-wrap:focus .pie-tip { display: block; }
+.pie-legend { display: flex; flex-direction: column; gap: 2px; font-size: 13px; min-width: 0; }
+.pie-row { display: flex; align-items: center; gap: 6px; padding: 2px 8px 2px 4px; border-radius: 2px; white-space: nowrap; }
+.pie-row-ruling { background: linear-gradient(90deg, rgba(201, 165, 90, 0.35), rgba(201, 165, 90, 0.08)); font-weight: 700; }

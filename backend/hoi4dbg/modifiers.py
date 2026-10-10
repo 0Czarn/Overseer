@@ -5,12 +5,19 @@ Sources (game files + enabled mods, later folders override):
 - country leader and advisor traits: common/country_leader (keys directly in the trait or in `modifier`)
 - dynamic modifiers: common/dynamic_modifiers; the save stores their evaluated values in the order of the
   modifier keys of the definition (`enable`, `icon`, `remove_trigger`, blocks are not modifiers)
-- ruling party popularity: defines BASE_STABILITY_PARTY_POPULARITY_FACTOR x popularity
+- ruling party popularity: popularity x (defines BASE_STABILITY_PARTY_POPULARITY_FACTOR + every
+  party_popularity_stability_factor of the other sources)
+- doctrines: grand doctrine and subdoctrine modifiers + the first `rewards` rewards of each slotted subdoctrine
+  (common/doctrines; the save keeps sub_doctrine and the number of unlocked rewards per track)
 - world tension (war support): defines WAR_SUPPORT_TENSION_IMPACT x tension (2026-10-10: 0.4 x 4.815 % = the
   +1.92 % the game showed for SOV)
 - faction rules of the country's faction: common/factions/rules (`modifier`, applied when `trigger` holds;
   e.g. war_declaration_rule_major_only "Declaring Country is Considered Major" -5 % / -5 % for SOV)
 - static modifiers the save marks: pride_of_the_fleet_country (common/modifiers)
+- buildings with country modifiers (landmarks, common/buildings `country_modifiers`): for the controller of the
+  province holding them, if listed in `enable_for_controllers` (e.g. Taj Mahal: RAJ +5 % stability)
+- balance of power: the range of common/bop that holds the save's value (e.g. FIN -0.48 -> FIN_low_trust_range
+  -0.6..-0.1: -5 % / -5 %) and the balance's active modifier (common/modifiers)
 The total is clamped to 0..100 % like the game (MIN/MAX_STABILITY, MIN/MAX_WAR_SUPPORT).
 """
 
@@ -23,6 +30,9 @@ from pathlib import Path
 from .saves import text
 
 KEYS = {"stability": "stability_factor", "war_support": "war_support_factor"}
+# raises the ruling-party term: popularity x (BASE_STABILITY_PARTY_POPULARITY_FACTOR + sum of this modifier)
+# (GER: 40 % x (0.15 + 0.10 from an advisor) = the +10 % the game showed)
+POPULARITY_KEY = "party_popularity_stability_factor"
 NOT_MODIFIERS = {"enable", "icon", "remove_trigger", "attacker_modifier", "valid_relation_trigger", "allowed",
                  "visible", "available", "cancel", "on_add", "on_remove", "ai_will_do", "random", "sprite",
                  "ideology", "type", "picture", "name", "cost", "removal_cost", "level", "allowed_civil_war",
@@ -30,7 +40,7 @@ NOT_MODIFIERS = {"enable", "icon", "remove_trigger", "attacker_modifier", "valid
                  "can_be_fired", "triggered_modifier", "targeted_modifier", "equipment_bonus", "research_bonus",
                  "rule", "traits", "do_effect", "mutually_exclusive", "non_shared_modifier", "gui_order",
                  "specialist_advisor_trait", "expert_advisor_trait", "genius_advisor_trait", "parent", "command_cap",
-                 "power_balance_modifier"}
+                 "power_balance_modifier", "custom_modifier_tooltip", "hidden_modifier"}
 DEFINE_RE = r"^\s*{}\s*=\s*(-?[0-9.]+)"
 
 
@@ -61,20 +71,34 @@ def definitions(roots: tuple[str, ...]) -> dict:
     """{"ideas": {id: {key: v}}, "traits": {id: {key: v}}, "dynamic": {id: [keys in order]}, "defines": {...}}."""
     ideas: dict[str, dict] = {}
     idea_names: dict[str, str] = {}   # idea -> localisation key (`name = ...`, else the idea id)
+    idea_meta: dict[str, dict] = {}   # idea -> {"category", "law", "picture", "tooltips"}
+    dynamic_icons: dict[str, str] = {}
     traits: dict[str, dict] = {}
     dynamic: dict[str, list] = {}
     static: dict[str, dict] = {}
     rules: dict[str, dict] = {}       # faction rule -> {"mods", "trigger"}
+    bop: dict[str, list] = {}         # balance of power -> [{"id", "min", "max", "mods", "side"}]
+    buildings: dict[str, dict] = {}   # building -> {"controllers": [tags] or None (any), "mods"}
+    doctrines: dict[str, dict] = {}   # grand doctrine / subdoctrine -> {"mods", "rewards": [(name, mods)]}
     defines: dict[str, float] = {}
     for root in map(Path, roots):
         for path in sorted((root / "common" / "ideas").glob("*.txt")):
             for key, groups in _parse(path):
                 if key != "ideas" or not isinstance(groups, list):
                     continue
-                for _cat, entries in (g for g in groups if isinstance(g, tuple)):
+                for cat, entries in (g for g in groups if isinstance(g, tuple)):
+                    law = isinstance(entries, list) and text.get(entries, "law") == "yes"
                     for idea, body in (e for e in entries if isinstance(e, tuple)) if isinstance(entries, list) else []:
                         if isinstance(body, list):
-                            ideas[idea] = _numbers(text.get(body, "modifier"))
+                            mod = text.get(body, "modifier")
+                            ideas[idea] = _numbers(mod)
+                            picture = text.get(body, "picture")
+                            idea_meta[idea] = {
+                                "category": cat, "law": law, "picture": picture if isinstance(picture, str) else None,
+                                "traits": [t for t in (text.get(body, "traits") or []) if isinstance(t, str)]
+                                if isinstance(text.get(body, "traits"), list) else [],
+                                "tooltips": [v for k, v in (mod if isinstance(mod, list) else [])
+                                             if k == "custom_modifier_tooltip" and isinstance(v, str)]}
                             idea_names[idea] = text.get(body, "name") if isinstance(text.get(body, "name"), str) else idea
         for path in sorted((root / "common" / "country_leader").glob("*.txt")):
             for key, entries in _parse(path):
@@ -87,6 +111,8 @@ def definitions(roots: tuple[str, ...]) -> dict:
         for path in sorted((root / "common" / "dynamic_modifiers").glob("*.txt")):
             for name, body in (e for e in _parse(path) if isinstance(e, tuple)):
                 if isinstance(body, list):
+                    if isinstance(text.get(body, "icon"), str):
+                        dynamic_icons[name] = text.get(body, "icon")
                     dynamic[name] = [k for k, v in (i for i in body if isinstance(i, tuple))
                                      if isinstance(k, str) and isinstance(v, str) and k not in NOT_MODIFIERS]
         for path in sorted((root / "common" / "modifiers").glob("*.txt")):
@@ -97,6 +123,28 @@ def definitions(roots: tuple[str, ...]) -> dict:
             for name, body in (e for e in _parse(path) if isinstance(e, tuple)):
                 if isinstance(body, list):
                     rules[name] = {"mods": _numbers(text.get(body, "modifier")), "trigger": text.get(body, "trigger")}
+        for path in sorted((root / "common" / "buildings").glob("*.txt")):
+            for key, entries in _parse(path):
+                if key != "buildings" or not isinstance(entries, list):
+                    continue
+                for name, body in (e for e in entries if isinstance(e, tuple)):
+                    cm = text.get(body, "country_modifiers") if isinstance(body, list) else None
+                    if isinstance(cm, list):
+                        tags = text.get(cm, "enable_for_controllers")
+                        buildings[name] = {"controllers": [t for t in tags if isinstance(t, str)] if isinstance(tags, list) else None,
+                                           "mods": _numbers(text.get(cm, "modifiers"))}
+        for path in sorted((root / "common" / "doctrines").rglob("*.txt")):
+            for name, body in (e for e in _parse(path) if isinstance(e, tuple)):
+                if isinstance(body, list):
+                    rewards = text.get(body, "rewards")
+                    doctrines[name] = {
+                        "mods": {k: v for k, v in _numbers(body).items() if k not in NOT_MODIFIERS},
+                        "rewards": [(r, _numbers(m)) for r, m in (i for i in rewards or [] if isinstance(i, tuple))]
+                        if isinstance(rewards, list) else []}
+        for path in sorted((root / "common" / "bop").glob("*.txt")):
+            for name, body in (e for e in _parse(path) if isinstance(e, tuple)):
+                if isinstance(body, list):
+                    bop[name] = _bop_ranges(body)
         for path in sorted((root / "common" / "defines").glob("*.lua")):
             src = path.read_text(encoding="utf-8-sig", errors="replace")
             for name in ("BASE_STABILITY_PARTY_POPULARITY_FACTOR", "MIN_STABILITY", "MAX_STABILITY",
@@ -104,8 +152,32 @@ def definitions(roots: tuple[str, ...]) -> dict:
                 m = re.search(DEFINE_RE.format(name), src, re.M)
                 if m:
                     defines[name] = float(m.group(1))
-    return {"ideas": ideas, "idea_names": idea_names, "traits": traits, "dynamic": dynamic, "static": static,
-            "rules": rules, "defines": defines}
+    return {"ideas": ideas, "idea_names": idea_names, "idea_meta": idea_meta, "dynamic_icons": dynamic_icons, "traits": traits, "dynamic": dynamic, "static": static,
+            "rules": rules, "bop": bop, "buildings": buildings, "doctrines": doctrines, "defines": defines}
+
+
+def _bop_ranges(body: list) -> list[dict]:
+    """Ranges of a balance of power: the central `range`s and the `range`s inside each `side`."""
+    out = []
+    def add(block, side):
+        for key, r in (i for i in block if isinstance(i, tuple)):
+            if key == "range" and isinstance(r, list):
+                lo, hi = _numbers(r).get("min"), _numbers(r).get("max")
+                if lo is not None and hi is not None:
+                    out.append({"id": text.get(r, "id"), "min": lo, "max": hi, "side": side,
+                                "mods": _numbers(text.get(r, "modifier"))})
+    add(body, None)
+    for key, side in (i for i in body if isinstance(i, tuple)):
+        if key == "side" and isinstance(side, list):
+            add(side, text.get(side, "id"))
+    return out
+
+
+def bop_range(ranges: list[dict], value: float) -> dict | None:
+    """Active range: the one strictly containing the value, else (on a border) the first one including it."""
+    inside = [r for r in ranges if r["min"] < value < r["max"]]
+    border = [r for r in ranges if r["min"] <= value <= r["max"]]
+    return (inside or border or [None])[0]
 
 
 def trigger_holds(trigger, state: dict) -> bool | None:
@@ -143,6 +215,12 @@ def loc_keys(state: dict, defs: dict) -> set[str]:
     keys.update(d["id"] for d in state.get("dynamic_modifiers") or [])
     keys.update((state.get("faction") or {}).get("rules", []))
     keys.add("pride_of_the_fleet_country")
+    keys.update(state.get("buildings") or [])
+    for d in state.get("doctrines") or []:
+        keys.update(filter(None, [d["id"], *[r for r, _ in (defs["doctrines"].get(d["id"]) or {}).get("rewards", [])]]))
+    for b in state.get("power_balances") or []:
+        keys.update(filter(None, [b["id"], b.get("modifier")]))
+        keys.update(r["id"] for r in defs["bop"].get(b["id"], []) if r["id"])
     return keys
 
 
@@ -153,11 +231,6 @@ def breakdown(state: dict, defs: dict, names: dict[str, str] | None = None) -> d
     chars = state.get("characters") or {}
     sources: list[tuple[str, str, str, dict]] = []   # (kind, id, label, {key: value})
 
-    popularity = (state.get("popularity") or {}).get(state.get("ruling_party"))
-    factor = defs["defines"].get("BASE_STABILITY_PARTY_POPULARITY_FACTOR", 0.15)
-    if popularity:
-        sources.append(("party", state["ruling_party"], f"Ruling party popularity ({popularity:g}%)",
-                        {KEYS["stability"]: factor * popularity / 100}))
     for idea in state.get("ideas") or []:
         key = defs["idea_names"].get(idea, idea)
         sources.append(("idea", idea, names.get(key, names.get(idea, idea)), defs["ideas"].get(idea, {})))
@@ -202,6 +275,18 @@ def breakdown(state: dict, defs: dict, names: dict[str, str] | None = None) -> d
         sources.append(("static", "pride_of_the_fleet_country",
                         names.get("pride_of_the_fleet_country", "Has Pride of The Fleet"),
                         defs["static"].get("pride_of_the_fleet_country", {})))
+    for building in state.get("buildings") or []:
+        d = defs["buildings"].get(building)
+        if d and (d["controllers"] is None or state.get("tag") in d["controllers"]):
+            sources.append(("building", building, names.get(building, building), d["mods"]))
+    for b in state.get("power_balances") or []:
+        r = bop_range(defs["bop"].get(b["id"], []), b["value"]) if b["value"] is not None else None
+        title = names.get(b["id"], b["id"])
+        if r:
+            sources.append(("bop", r["id"], f"{names.get(r['id'], r['id'])} (balance of power {b['value']:+.2f})", r["mods"]))
+        if b.get("modifier"):
+            sources.append(("bop", b["modifier"], f"{names.get(b['modifier'], b['modifier'])} ({title})",
+                            defs["static"].get(b["modifier"], {})))
     unchecked = []
     for rule in (state.get("faction") or {}).get("rules", []):
         d = defs["rules"].get(rule)
@@ -212,6 +297,26 @@ def breakdown(state: dict, defs: dict, names: dict[str, str] | None = None) -> d
             sources.append(("faction", rule, names.get(rule, rule), d["mods"]))
         elif holds is None:
             unchecked.append(names.get(rule, rule))
+
+    for d in state.get("doctrines") or []:
+        definition = defs["doctrines"].get(d["id"])
+        if not definition:
+            continue
+        label = names.get(d["id"], d["id"])
+        if definition["mods"]:
+            sources.append(("doctrine", d["id"], label, definition["mods"]))
+        for reward, mods in definition["rewards"][:d.get("rewards") or 0]:
+            sources.append(("doctrine", reward, f"{label}: {names.get(reward, reward)}", mods))
+
+    popularity = (state.get("popularity") or {}).get(state.get("ruling_party"))
+    if popularity:
+        base_factor = defs["defines"].get("BASE_STABILITY_PARTY_POPULARITY_FACTOR", 0.15)
+        extra = [(label, mods[POPULARITY_KEY]) for _k, _i, label, mods in sources if mods.get(POPULARITY_KEY)]
+        factor = base_factor + sum(v for _, v in extra)
+        detail = "".join(f", {v * 100:+g}% from {label}" for label, v in extra)
+        sources.insert(0, ("party", state["ruling_party"],
+                           f"Ruling party popularity ({popularity:g}% x {factor * 100:g}%{detail})",
+                           {KEYS["stability"]: factor * popularity / 100}))
 
     out = {"unchecked_rules": unchecked}
     for field, key in KEYS.items():
@@ -225,4 +330,35 @@ def breakdown(state: dict, defs: dict, names: dict[str, str] | None = None) -> d
         out[field] = {"base": base, "parts": parts, "modifiers": total_mods,
                       "total": None if raw is None else min(hi, max(lo, raw)),
                       "clamped": raw is not None and not lo <= raw <= hi}
+    return out
+
+
+# The game's "National Spirits" list: ideas of this category (laws, advisors, companies and military spirits have
+# their own categories and panels) + dynamic modifiers.
+SPIRIT_CATEGORY = "country"
+
+
+def spirits(state: dict, defs: dict) -> list[dict]:
+    """National spirits as the game lists them: ideas of the `country` category and dynamic modifiers.
+    [{kind, id, name_key, icon (sprite), modifiers: {key: value}, tooltips: [loc keys]}]"""
+    out = []
+    for idea in state.get("ideas") or []:
+        meta = defs["idea_meta"].get(idea) or {}
+        if meta.get("category") != SPIRIT_CATEGORY:
+            continue
+        out.append({"kind": "idea", "id": idea, "name_key": defs["idea_names"].get(idea, idea),
+                    "icon": f"GFX_idea_{meta.get('picture') or idea}",
+                    "modifiers": defs["ideas"].get(idea, {}), "tooltips": meta.get("tooltips", [])})
+    for dm in state.get("dynamic_modifiers") or []:
+        if not dm.get("enabled") or dm["id"] not in defs["dynamic"]:
+            continue
+        mods = {}
+        for k, v in zip(defs["dynamic"][dm["id"]], dm["values"]):
+            try:
+                if float(v):
+                    mods[k] = float(v)
+            except ValueError:
+                pass
+        out.append({"kind": "dynamic", "id": dm["id"], "name_key": dm["id"], "icon": defs["dynamic_icons"].get(dm["id"]),
+                    "modifiers": mods, "tooltips": []})
     return out

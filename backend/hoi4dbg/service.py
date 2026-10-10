@@ -8,11 +8,14 @@ import json
 from pathlib import Path
 import logging
 import platform
+import re
 import sys
 import threading
 import time
 
-from . import __version__, deficit, demo, equipment_changes, gamefiles, modifiers
+from . import __version__, deficit, demo, equipment_changes, gamefiles, gfx, modifiers
+from . import government as government_mod
+from . import mio as mio_mod
 from . import focus as focus_mod
 from .applog import RingBufferHandler
 from .integration import GameIntegration, NullIntegration
@@ -99,6 +102,20 @@ def save_freshness(save_mtime: float, game: dict, now: float | None = None) -> d
     else:
         category, label = "previous_session", "From an EARLIER session - NOT the current game state"
     return {"category": category, "label": label, "age_s": age_s, "is_live": False}
+
+
+LOC_REF = re.compile(r"\$([A-Za-z0-9_.]+)(?:\|[^$]*)?\$")
+
+
+def clean_loc(value: str, names: dict[str, str], depth: int = 3) -> str:
+    """Game localisation -> plain text: $KEY$ references resolved, colour codes (§X ... §!), icons (£x)
+    and scripted expressions ([Root.GetName]) removed; \\n kept as line breaks."""
+    for _ in range(depth):
+        value = LOC_REF.sub(lambda m: names.get(m.group(1), ""), value)
+    value = re.sub(r"§[A-Za-z!]", "", value)
+    value = re.sub(r"£[A-Za-z0-9_|]+", "", value)
+    value = re.sub(r"\[[^\]]*\]", "", value)
+    return re.sub(r"[ \t]+", " ", value.replace("\\n", "\n")).strip()
 
 
 class DebuggerService:
@@ -535,6 +552,214 @@ class DebuggerService:
             match = items[0]
         return directory / match["name"], {"is_latest": match["name"] == items[0]["name"]}
 
+    def _controlled_buildings(self, path: Path, install: Path, tag: str) -> list[str]:
+        """Province buildings in provinces `tag` controls (province controller, else the state owner)."""
+        try:
+            save = self.saves.states(path)
+        except SaveFormatError:
+            return []
+        state_of = {prov: sid for sid, d in gamefiles.state_definitions(install).items() for prov in d["provinces"]}
+        out = []
+        for prov, info in save["provinces"].items():
+            owner = (save["states"].get(state_of.get(int(prov))) or {}).get("owner")
+            if (info.get("controller") or owner) == tag:
+                out.extend(b for b, level in (info.get("buildings") or {}).items() if level)
+        return sorted(set(out))
+
+    def _game_roots(self, install: Path) -> tuple[str, ...]:
+        userdata = (self.detect().get("userdata") or {}).get("path")
+        mods = gamefiles.enabled_mods(Path(userdata)) if userdata else []
+        return tuple(str(r) for r in [install, *mods])
+
+    def spirits(self, tag: str) -> dict:
+        """National spirits of `tag` (newest save) with icon, name, description and every modifier."""
+        tag = tag.upper()
+        install = self._install_path()
+        picked = self._pick_save(None)
+        if install is None or picked is None:
+            return envelope(UNAVAILABLE, None, "Needs the game installation and a save")
+        try:
+            state = self.saves.politics(picked[0], tag)
+        except SaveFormatError as exc:
+            return envelope(UNAVAILABLE, None, str(exc))
+        analysis = state.pop("analysis")
+        roots = self._game_roots(install)
+        defs = modifiers.definitions(roots)
+        out = self._present(modifiers.spirits(state, defs), install, roots)
+        return envelope(SAVE, {"tag": tag, "spirits": out, "file": analysis["file"],
+                               "in_game_date": (analysis.get("header") or {}).get("date")},
+                        f"National spirits from {analysis['file']['name']}; icons and texts from the game files.")
+
+    def government(self, tag: str) -> dict:
+        """Laws & Government, Research & Production, Military Staff of `tag` (newest save), one entry per slot."""
+        tag = tag.upper()
+        install = self._install_path()
+        picked = self._pick_save(None)
+        if install is None or picked is None:
+            return envelope(UNAVAILABLE, None, "Needs the game installation and a save")
+        try:
+            state = self.saves.politics(picked[0], tag)
+        except SaveFormatError as exc:
+            return envelope(UNAVAILABLE, None, str(exc))
+        analysis = state.pop("analysis")
+        roots = self._game_roots(install)
+        defs = modifiers.definitions(roots)
+        groups = government_mod.sections(state, defs)
+        flat = [it for items in groups.values() for it in items]
+        shown = iter(self._present(flat, install, roots))
+        data = {name: [next(shown) for _ in items] for name, items in groups.items()}
+        data["mios"] = self._mios(state, tag, install, roots)
+        return envelope(SAVE, {"tag": tag, **data, "file": analysis["file"],
+                               "in_game_date": (analysis.get("header") or {}).get("date")},
+                        f"Laws, companies and advisors from {analysis['file']['name']}.")
+
+    def overview(self, tag: str) -> dict:
+        """Who rules `tag`: leader (portrait, sub-ideology, traits), ruling party, faction, party popularities."""
+        tag = tag.upper()
+        install = self._install_path()
+        picked = self._pick_save(None)
+        if install is None or picked is None:
+            return envelope(UNAVAILABLE, None, "Needs the game installation and a save")
+        try:
+            state = self.saves.politics(picked[0], tag)
+        except SaveFormatError as exc:
+            return envelope(UNAVAILABLE, None, str(exc))
+        analysis = state.pop("analysis")
+        roots = self._game_roots(install)
+        defs = modifiers.definitions(roots)
+        ideo = government_mod.ideologies(roots)
+        parties = state.get("party_names") or {}
+        names_needed = set(parties) | {f"{i}_noun" for i in parties} | {state.get("leader_ideology") or ""}
+        for ideology, p in parties.items():
+            names_needed.update(filter(None, [p["name"], p["long_name"], f"{tag}_{ideology}_party",
+                                              f"{tag}_{ideology}_party_long"]))
+        faction = state.get("faction")
+        template = (ideo["factions"].get((faction or {}).get("template") or "") or {})
+        names_needed.update(filter(None, [(faction or {}).get("name"), template.get("name")]))
+        leader = (state.get("characters") or {}).get(state.get("leader") or "")
+        names_needed.update(filter(None, [leader and leader["name"], leader and leader["token"],
+                                          *((leader or {}).get("leader_traits") or [])]))
+        names = focus_mod.loc_names(install, names_needed)
+        refs = {r for v in names.values() for r in LOC_REF.findall(v)}
+        names.update(focus_mod.loc_names(install, refs - set(names)))
+        loc = lambda *keys: next((clean_loc(names[k], names) for k in keys if k and names.get(k)), None)  # noqa: E731
+        sprites = gfx.sprites(roots)
+        icon = lambda sprite: gfx.icon_data_uri(sprites[sprite]) if sprite and sprite in sprites else None  # noqa: E731
+        party_list = []
+        for ideology, popularity in sorted((state.get("popularity") or {}).items(), key=lambda x: -x[1]):
+            p = parties.get(ideology) or {}
+            party_list.append({
+                "ideology": ideology, "ideology_name": loc(f"{ideology}_noun", ideology) or ideology,
+                "name": loc(p.get("name"), f"{tag}_{ideology}_party", ideology) or ideology,
+                "long_name": loc(p.get("long_name"), f"{tag}_{ideology}_party_long"),
+                "popularity": popularity, "ruling": ideology == state.get("ruling_party"),
+                "color": "#%02x%02x%02x" % ideo["colors"].get(ideology, (128, 128, 128))})
+        leader_out = None
+        if leader:
+            portrait = next((leader["portraits"].get(k, {}).get(s) for k in ("civilian", "army", "navy")
+                             for s in ("large", "small") if leader["portraits"].get(k, {}).get(s)), None)
+            leader_out = {
+                "name": loc(leader["name"], leader["token"]) or leader["name"], "portrait": icon(portrait),
+                "ideology": state.get("leader_ideology"), "ideology_name": loc(state.get("leader_ideology")),
+                "traits": [{"name": loc(t) or t, "modifiers": [
+                    {"key": k, "label": k.replace("_", " ").capitalize(), "value": v}
+                    for k, v in defs["traits"].get(t, {}).items()]} for t in leader["leader_traits"]]}
+            # proper modifier labels
+            labels = focus_mod.loc_names(install, {f"MODIFIER_{m['key'].upper()}" for t in leader_out["traits"]
+                                                   for m in t["modifiers"]})
+            for t in leader_out["traits"]:
+                for m in t["modifiers"]:
+                    m["label"] = clean_loc(labels.get(f"MODIFIER_{m['key'].upper()}", ""), names) or m["label"]
+        faction_out = None
+        if faction:
+            faction_out = {"name": loc(faction.get("name"), template.get("name")) or template.get("name") or "Faction",
+                           "icon": icon(faction.get("icon") or template.get("icon")), "members": faction["members"],
+                           "leader": faction["members"][0] if faction["members"] else None}
+        return envelope(SAVE, {"tag": tag, "leader": leader_out, "parties": party_list, "faction": faction_out,
+                               "ruling_party": state.get("ruling_party"), "file": analysis["file"],
+                               "in_game_date": (analysis.get("header") or {}).get("date")},
+                        f"Government from {analysis['file']['name']}.")
+
+    def _mios(self, state: dict, tag: str, install: Path, roots: tuple[str, ...]) -> dict[str, list[dict]]:
+        """{design slot: [MIO for display]} - level, funds, policy, unlocked traits and current bonuses."""
+        defs = mio_mod.definitions(roots)
+        items = [s for s in (mio_mod.summary(m, defs) for m in state.get("mios") or []) if s]
+        def name_keys(it):
+            n = it["name_key"]
+            return [k for k in (f"{tag}_{n}" if n else None, n, f"{tag}_{it['id']}", it["id"]) if k]
+        def trait_keys(it, t):
+            n = t.get("name")
+            return [k for k in (f"{tag}_{n}" if n else None, n, f"{tag}_{it['id']}_{t['token']}",
+                                f"{it['id']}_{t['token']}", t["token"]) if k]
+        stat_keys = lambda kind, stat: (  # noqa: E731
+            [f"STAT_{p}_{stat.upper()}" for p in ("ARMY", "COMMON", "NAVY", "AIR")] if kind == "equipment_bonus"
+            else [f"BONUS_{stat.upper()}"] if kind == "production_bonus" else [f"MODIFIER_{stat.upper()}"])
+        keys = {"MODIFIER_MIO_RESEARCH_BONUS"}
+        for it in items:
+            keys.update(name_keys(it))
+            keys.update(k for t in it["traits"] + ([it["initial_trait"]] if it["initial_trait"] else []) for k in trait_keys(it, t))
+            keys.add(it["policy"] or "")
+            keys.update(k for kind, stats in it["bonuses"].items() for s in stats for k in stat_keys(kind, s))
+        names = focus_mod.loc_names(install, keys)
+        refs = {r for v in names.values() for r in LOC_REF.findall(v)}
+        names.update(focus_mod.loc_names(install, refs - set(names)))
+        def loc(cands, fallback):
+            for k in cands:
+                v = clean_loc(names[k], names).rstrip(": ").strip() if k in names else ""
+                if v and "$" not in v:
+                    return v
+            return fallback.replace("_", " ").capitalize()
+        sprites = gfx.sprites(roots)
+        groups = {"equipment_bonus": "Equipment", "production_bonus": "Production", "organization_modifier": "Organization"}
+        out: dict[str, list[dict]] = {c: [] for c in mio_mod.CATEGORIES}
+        for it in sorted(items, key=lambda i: (-(i["size"] or 0), i["id"])):
+            texture = sprites.get(it["icon"] or "")
+            out[it["category"]].append({
+                "id": it["id"], "name": loc(name_keys(it), it["id"].removesuffix("_organization")),
+                "icon": gfx.icon_data_uri(texture) if texture else None, "size": it["size"], "funds": it["funds"],
+                "research_bonus": it["research_bonus"],
+                "policy": loc([it["policy"]], it["policy"]) if it["policy"] else None,
+                "initial_trait": loc(trait_keys(it, it["initial_trait"]), it["initial_trait"]["token"] or "initial trait")
+                if it["initial_trait"] else None,
+                "traits": [loc(trait_keys(it, t), t["token"]) for t in it["traits"]],
+                "bonuses": [{"group": groups[kind], "entries": [
+                    {"key": stat, "label": "Research bonus" if stat == "military_industrial_organization_research_bonus"
+                     else loc(stat_keys(kind, stat), stat), "value": v} for stat, v in stats.items() if v]}
+                    for kind, stats in it["bonuses"].items() if any(stats.values())],
+            })
+        return out
+
+    def _present(self, items: list[dict], install: Path, roots: tuple[str, ...]) -> list[dict]:
+        """Localised names, descriptions, modifier labels, trait names and icons (data: URIs) for display."""
+        keys = set()
+        for it in items:
+            keys.update(filter(None, [it["name_key"], it.get("alt_name_key"), it.get("slot"),
+                                      f"{it['name_key']}_desc", f"{it['id']}_desc", *it["tooltips"], *it.get("traits", [])]))
+            keys.update(k for m in it["modifiers"] for k in (f"MODIFIER_{m.upper()}", m))
+        names = focus_mod.loc_names(install, keys)
+        refs = {r for v in names.values() for r in LOC_REF.findall(v)}
+        names.update(focus_mod.loc_names(install, refs - set(names)))
+        clean = lambda value: clean_loc(value, names) if value else value  # noqa: E731
+        sprites = gfx.sprites(roots)
+        out = []
+        for it in items:
+            texture = sprites.get(it["icon"] or "")
+            if texture is None and it["icon"] and it["icon"].lower().endswith((".dds", ".png")):
+                texture = next((str(Path(r) / it["icon"]) for r in reversed(roots) if (Path(r) / it["icon"]).exists()), None)
+            name = clean(names.get(it["name_key"] or "") or names.get(it.get("alt_name_key") or ""))
+            out.append({
+                "kind": it["kind"], "id": it["id"], "slot": it.get("slot"), "slot_label": it.get("slot_label"),
+                "name": name or (it["name_key"] or "").split("_", 1)[-1].replace("_", " ").title() or None,
+                "traits": [clean(names.get(t)) or t for t in it.get("traits", [])],
+                "description": clean(names.get(f"{it['name_key']}_desc") or names.get(f"{it['id']}_desc"))
+                if it["name_key"] else None,
+                "icon": gfx.icon_data_uri(texture) if texture else None,
+                "modifiers": [{"key": k, "label": clean(names.get(f"MODIFIER_{k.upper()}") or names.get(k))
+                               or k.replace("_", " ").capitalize(), "value": v} for k, v in it["modifiers"].items()],
+                "tooltips": [clean(names.get(t)) or t for t in it["tooltips"]],
+            })
+        return out
+
     def stability(self, tag: str) -> dict:
         """Stability and war support as the game shows them: base + every modifier with its source.
 
@@ -552,6 +777,7 @@ class DebuggerService:
             return envelope(UNAVAILABLE, {"file": path.name, "error": {"code": exc.code, "message": str(exc)}},
                             str(exc))
         analysis = state.pop("analysis")
+        state["buildings"] = self._controlled_buildings(path, install, tag)
         userdata = (self.detect().get("userdata") or {}).get("path")
         mods = gamefiles.enabled_mods(Path(userdata)) if userdata else []
         defs = modifiers.definitions(tuple(str(r) for r in [install, *mods]))

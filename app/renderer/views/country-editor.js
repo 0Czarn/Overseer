@@ -2,6 +2,8 @@ import { h, card, demoBanner, notice, scopeBadge, sourceBadge, toast, viewHeader
 import { formatAge, formatValue, freshnessInfo } from '../lib/format.js';
 import { ppCommand, verifyChange } from '../lib/verify.js';
 import { countryLivePanel } from './country-live.js';
+import { governmentPanel, spiritsPanel } from './spirits.js';
+import { overviewPanel } from './overview.js';
 import { countryPicker, tagChip } from './shared.js';
 
 const STATUS_NOTE = { read: null, absent: 'not in save', unmapped: 'not mapped yet' };
@@ -126,7 +128,7 @@ export default {
     );
     // Live values for any country (game country table); verified console changes only for the player country.
     const live = countryLivePanel(ctx, tag, { isPlayer });
-    root.append(live.el);
+    root.append(overviewPanel(ctx, tag), spiritsPanel(ctx, tag), live.el, governmentPanel(ctx, tag));
     if (fromSave) {
       root.append(
         snapshotBanner(saved.data),
