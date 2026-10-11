@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aheadText, progressText, slotSummary, speedText } from '../renderer/views/research.js';
+import { aheadText, bonusText, progressText, slotSummary, speedText } from '../renderer/views/research.js';
 
 test('research speed bonus as the game shows it', () => {
   assert.equal(speedText(1.13), '+13%');
@@ -27,4 +27,10 @@ test('ahead of time penalty shown apart from the slot speed', () => {
   assert.equal(speedText(s.base_speed), '+13%');
   assert.equal(aheadText(s), '2.3 years ahead of time: -82% speed');
   assert.equal(aheadText({ speed: 1.13, base_speed: 1.13, ahead_years: null }), '');
+});
+
+test('limited research bonus text', () => {
+  assert.equal(bonusText({ bonus: 0.5, uses: 1, categories: ['motorized_equipment'],
+    category_labels: ['Motorization Research Speed'] }), '+50% · Motorization Research Speed · 1 use left');
+  assert.equal(bonusText({ bonus: 1, uses: 2, categories: ['industry'], category_labels: [] }), '+100% · industry · 2 uses left');
 });

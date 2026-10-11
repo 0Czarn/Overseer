@@ -1017,3 +1017,25 @@ class IdeaPointerTests(unittest.TestCase):
         mem.put(root + pointers.GAME_DATE, "i", 12345)
         with self.assertRaises(pointers.PointerError):
             pointers.read_date(mem, module_base)
+
+    def test_read_limited_bonuses(self):
+        mem = FakeMemory(0x4000)
+        country, status, array, bonus, cats, cat = (BASE + 0x100, BASE + 0x400, BASE + 0x600, BASE + 0x800,
+                                                    BASE + 0xA00, BASE + 0xC00)
+        mem.put(country + pointers.TECHNOLOGY_STATUS, "Q", status)
+        for at, data, n in ((status + pointers.LIMITED_BONUSES, array, 1), (bonus + pointers.BONUS["categories"], cats, 1)):
+            mem.put(at, "Q", data)
+            mem.put(at + 8, "i", n)
+            mem.put(at + 12, "i", n)
+        mem.put(array, "Q", bonus)
+        mem.put(cats, "Q", cat)
+        mem.put(bonus + pointers.BONUS["uses"], "i", 1)
+        mem.put(bonus + pointers.BONUS["id"], "i", 1)
+        mem.put(bonus + pointers.BONUS["bonus"], "q", 50000)
+        self._string(mem, bonus + pointers.BONUS["name"], "SUBDOCTRINE_MOBILE_INFANTRY")
+        self._string(mem, cat, "motorized_equipment")
+        self.assertEqual(pointers.read_limited_bonuses(mem, country), [
+            {"id": 1, "name": "SUBDOCTRINE_MOBILE_INFANTRY", "bonus": 0.5, "uses": 1, "categories": ["motorized_equipment"]}])
+        mem.put(bonus + pointers.BONUS["uses"], "i", -3)   # negative uses: wrong layout
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_limited_bonuses(mem, country)

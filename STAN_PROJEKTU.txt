@@ -102,6 +102,10 @@ ZROBIONE
                 401 i 383 dni = gra w obu pomiarach. Bez slotu bez kary szybkość bazowa jest zgadywana -> "~".
                 Data gry na żywo: [hoi4.exe+0x332F260]+0x468, int32 godzin = (rok+5000)*8760 + dzień*24 + godz.
                 UI: szybkość slotu bez kary (+13%) + osobny dopisek "2.3 years ahead of time: -82% speed".
+[x] RESEARCH: "Limited bonuses" (jednorazowe premie do badań, 2026-10-11): CTechnologyStatus+0xE8 = tablica
+            CLimitedUseTechBonus (+0x8 użycia, +0x10 nazwa, +0x30 id, +0x50 kategorie, +0x70 premia fixed64/1e5);
+            zgodne z zapisem (technology.limited_use_bonus) dla SOV (1) i GER (2). Kategorie nazwane jak w grze
+            ("<kategoria>_research", np. Motorization Research Speed). Lista pod slotami w kafelku Research slots.
 [x] Nagłówki kafelków jak w Live game memory: zielone "game memory · read HH:MM:SS" (szczegóły w podpowiedzi),
             bez gry "save <plik> · read HH:MM:SS"
 [x] Country Editor: panel "Leadership" (portret i cechy przywódcy, partia rządząca, ideologia, frakcja z logo,

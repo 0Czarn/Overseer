@@ -811,11 +811,12 @@ class DebuggerService:
         picked = self._pick_save(None)
         if install is None:
             return envelope(UNAVAILABLE, None, "Needs the game installation")
-        slots, analysis, live, live_date = None, None, False, None
+        slots, analysis, live, live_date, bonuses = None, None, False, None, None
         if self.live is not None:
             try:
                 found = self.live.research(tag)
                 slots, live_date, live = found["slots"], found.get("date"), True
+                bonuses = found.get("bonuses")
             except Exception:  # live data is optional: the save is the fallback
                 slots = None
         if picked is not None:
@@ -824,6 +825,7 @@ class DebuggerService:
                 analysis = state.pop("analysis")
                 if slots is None:
                     slots = state.get("research") or []
+                    bonuses = state.get("research_bonuses") or []
             except SaveFormatError as exc:
                 if slots is None:
                     return envelope(UNAVAILABLE, None, str(exc))
@@ -842,7 +844,9 @@ class DebuggerService:
         plain = [s["speed"] for s in slots if s["technology"] and s.get("speed")
                  and not ahead_years(techs.get(s["technology"]), today)]
         country_speed = max(plain) if plain else None
-        names = focus_mod.loc_names(install, ids)
+        bonuses = bonuses or []
+        names = focus_mod.loc_names(install, ids | {b["name"] for b in bonuses if b["name"]}
+                                    | {k for b in bonuses for c in b["categories"] for k in (c, f"{c}_research")})
         sprites = gfx.sprites(roots)
         out = []
         for s in slots:
@@ -851,7 +855,13 @@ class DebuggerService:
             out.append({**s, "name": clean_loc(names[tech], names) if tech and names.get(tech) else tech,
                         "icon": gfx.icon_data_uri(sprite) if sprite else None,
                         **research_progress(s, techs.get(tech or ""), defines, today, country_speed)})
-        data = {"tag": tag, "slots": out, "research_source": "live" if live else "save"}
+        loc = lambda key: clean_loc(names[key], names) if key and names.get(key) else key  # noqa: E731
+        data = {"tag": tag, "slots": out, "research_source": "live" if live else "save",
+                # categories as the game names research bonuses: "<category>_research" (Motorization Research Speed)
+                "bonuses": [{**b, "label": loc(b["name"]),
+                             "category_labels": [loc(f"{c}_research") if names.get(f"{c}_research") else loc(c)
+                                                 for c in b["categories"]]}
+                            for b in sorted(bonuses, key=lambda b: b["id"])]}
         if analysis:
             data.update({"file": analysis["file"], "in_game_date": (analysis.get("header") or {}).get("date")})
         return envelope(SAVE, data, "Research from game memory." if live else "Research from the newest save.")

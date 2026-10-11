@@ -40,6 +40,15 @@ class ResearchSaveTests(unittest.TestCase):
             {"slot": 3, **empty}])
         self.assertEqual(politics.research_of([]), [])
 
+    def test_limited_bonuses_of(self):
+        block = text.parse("""technology={ slots={ empty={ points=30 } }
+            limited_use_bonus={ bonus=0.5 uses=1 id=1 name="SUBDOCTRINE_MOBILE_INFANTRY" category=motorized_equipment }
+            limited_use_bonus={ bonus=1 uses=1 id=2 name="GER_the_four_year_plan" category=industry } }""")
+        self.assertEqual(politics.limited_bonuses_of(block), [
+            {"id": 1, "name": "SUBDOCTRINE_MOBILE_INFANTRY", "bonus": 0.5, "uses": 1, "categories": ["motorized_equipment"]},
+            {"id": 2, "name": "GER_the_four_year_plan", "bonus": 1.0, "uses": 1, "categories": ["industry"]}])
+        self.assertEqual(politics.limited_bonuses_of([]), [])
+
     def test_progress_like_the_game(self):
         # the user's game 1936.9.21 (day 263): excavation1 18.7 % / 146 days, interwar_artillery 24 % / 111 days,
         # antiair1 (start 1939, 2.28 years ahead) 5.5 % / 401 days

@@ -474,6 +474,35 @@ TECHNOLOGY_POINTS = 0x198
 TECHNOLOGY_BONUS = 0x190
 
 
+# Limited (one-time) research bonuses (2026-10-11, SOV 1 and GER 2 bonuses, equal to the save's
+# technology.limited_use_bonus blocks): CTechnologyStatus + 0xe8 = array of CLimitedUseTechBonus* (read_array);
+# bonus + 0x8 = uses left (int32), + 0x10 = name (std::string, localisation key), + 0x30 = id (int32), + 0x50 =
+# categories (array of pointers to std::string names, int32 size + 0x5c), + 0x70 = bonus (fixed64 / 100000, 0.5 =
+# +50 % research speed).
+LIMITED_BONUSES = 0xE8
+BONUS = {"uses": 0x8, "name": 0x10, "id": 0x30, "categories": 0x50, "bonus": 0x70}
+
+
+def read_limited_bonuses(memory, country: int) -> list[dict]:
+    """[{"id", "name", "bonus", "uses", "categories": [..]}] - one-time research bonuses of a country object."""
+    status = _ptr(memory, country + TECHNOLOGY_STATUS)
+    if status is None:
+        raise PointerError("no_research", "The country's technology status is not readable")
+    out = []
+    for item in read_array(memory, status + LIMITED_BONUSES, 200):
+        raw = memory.read(item, 0x78) if item else None
+        if raw is None:
+            raise PointerError("unreadable", "A research bonus is not readable")
+        uses, bonus_id = struct.unpack_from("<i", raw, BONUS["uses"])[0], struct.unpack_from("<i", raw, BONUS["id"])[0]
+        bonus = struct.unpack_from("<q", raw, BONUS["bonus"])[0] / 100000
+        categories = [_msvc_string(memory, c) for c in read_array(memory, item + BONUS["categories"], 50) if c]
+        name = _msvc_string(memory, item + BONUS["name"])
+        if not 0 <= uses <= 1000 or not 0 <= bonus <= 100 or not name or None in categories:
+            raise PointerError("implausible", "Research bonus out of range - layout does not match")
+        out.append({"id": bonus_id, "name": name, "bonus": bonus, "uses": uses, "categories": categories})
+    return out
+
+
 def read_date(memory, module_base: int) -> dict:
     """{"year", "day" (0-based day of the year), "hour"} of the running game."""
     table = _ptr(memory, module_base + COUNTRY_TABLE[0])

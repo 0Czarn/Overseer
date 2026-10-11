@@ -53,6 +53,24 @@ function slotRow(s) {
     h('span', { class: 'research-speed', title: 'Research speed bonus of this slot' }, speed));
 }
 
+/** "+50% · Motorization Research Speed · 1 use left" for a limited (one-time) research bonus. */
+export function bonusText(b) {
+  const pct = Math.round(b.bonus * 1000) / 10;
+  const cats = (b.category_labels?.length ? b.category_labels : b.categories).join(', ');
+  return `+${pct}% · ${cats} · ${b.uses} use${b.uses === 1 ? '' : 's'} left`;
+}
+
+function bonusList(bonuses) {
+  if (!bonuses) return null;
+  return h('div', { class: 'research-bonuses' },
+    h('h3', { class: 'research-subhead' }, `Limited bonuses: ${bonuses.length}`),
+    bonuses.length
+      ? h('ul', { class: 'research-bonus-list' }, bonuses.map((b) => h('li', { class: 'research-bonus' },
+        h('span', { class: 'research-bonus-name' }, b.label || b.name),
+        h('span', { class: 'research-bonus-info', title: `${b.name} · ${b.categories.join(', ')}` }, bonusText(b)))))
+      : h('p', { class: 'muted' }, 'No one-time research bonuses available.'));
+}
+
 /** Research slots tile (refreshable). Returns { el, refresh, stop }. */
 export function researchPanel(ctx, tag) {
   return livePanel(ctx, {
@@ -66,7 +84,8 @@ export function researchPanel(ctx, tag) {
       }
       body.replaceChildren(
         h('p', { class: 'muted research-summary' }, slotSummary(slots)),
-        h('div', { class: 'research-slots' }, slots.map(slotRow)));
+        h('div', { class: 'research-slots' }, slots.map(slotRow)),
+        bonusList(res.data.bonuses));
     },
   });
 }

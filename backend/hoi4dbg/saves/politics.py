@@ -220,6 +220,7 @@ def summary(block: list, manager: list | None, tag: str, world_state: dict | Non
         "casualties_penalty": _float(text.get(block, "heroes_dying_war_support_penalty")) or 0.0,
         "wars": wars_of(block, tag),
         "research": research_of(block),
+        "research_bonuses": limited_bonuses_of(block),
         "faction": next(({**f, "leader": f["members"][0] == tag} for f in (world_state or {}).get("factions", [])
                          if tag in f["members"]), None),
         "tension": (world_state or {}).get("tension"),
@@ -243,6 +244,18 @@ def research_of(block: list) -> list[dict]:
         entry = text.get(known, key)
         out.append({"slot": i, "technology": key, "speed": _float(text.get(body, "points_factor")) if isinstance(body, list) else None,
                     "points": (_float(text.get(entry, "research_points")) or 0.0) if isinstance(entry, list) else 0.0})
+    return out
+
+
+def limited_bonuses_of(block: list) -> list[dict]:
+    """[{"id", "name", "bonus", "uses", "categories"}] from technology.limited_use_bonus blocks of a text save."""
+    out = []
+    for key, b in text.get(block, "technology") or []:
+        if key != "limited_use_bonus" or not isinstance(b, list):
+            continue
+        out.append({"id": int(_float(text.get(b, "id")) or 0), "name": text.get(b, "name"),
+                    "bonus": _float(text.get(b, "bonus")) or 0.0, "uses": int(_float(text.get(b, "uses")) or 0),
+                    "categories": [v for k, v in b if k == "category" and isinstance(v, str)]})
     return out
 
 
