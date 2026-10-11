@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aheadText, bonusText, progressText, slotSummary, speedText } from '../renderer/views/research.js';
+import { aheadText, bonusText, progressText, slotSummary, speedText, usableText } from '../renderer/views/research.js';
 
 test('research speed bonus as the game shows it', () => {
   assert.equal(speedText(1.13), '+13%');
@@ -33,4 +33,12 @@ test('limited research bonus text', () => {
   assert.equal(bonusText({ bonus: 0.5, uses: 1, categories: ['motorized_equipment'],
     category_labels: ['Motorization Research Speed'] }), '+50% · Motorization Research Speed · 1 use left');
   assert.equal(bonusText({ bonus: 1, uses: 2, categories: ['industry'], category_labels: [] }), '+100% · industry · 2 uses left');
+});
+
+test('technologies a bonus can be used on, ahead-of-time ones marked', () => {
+  const usable = [{ name: 'Field Hospital I', start_year: 1936 }, { name: 'Basic Armored Car', start_year: 1940 },
+    { name: 'Excavation I', start_year: null }];
+  assert.equal(usableText(usable, 1936), 'Field Hospital I, Basic Armored Car (1940, ahead of time), Excavation I');
+  assert.equal(usableText([], 1936), 'No technology of these categories can be researched now');
+  assert.equal(usableText(null, 1936), '');
 });

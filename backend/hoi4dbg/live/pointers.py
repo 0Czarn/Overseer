@@ -503,6 +503,25 @@ def read_limited_bonuses(memory, country: int) -> list[dict]:
     return out
 
 
+# Researched technologies (2026-10-11): CTechnologyStatus + 0x40 = array of CTechnology* (read_array), 52 for SOV
+# in 1936, without the ones in progress; name through TECHNOLOGY_TEMPLATE as for the research slots.
+RESEARCHED = 0x40
+
+
+def read_researched(memory, country: int) -> list[str]:
+    status = _ptr(memory, country + TECHNOLOGY_STATUS)
+    if status is None:
+        raise PointerError("no_research", "The country's technology status is not readable")
+    out = []
+    for tech in read_array(memory, status + RESEARCHED, 2000):
+        template = _ptr(memory, tech + TECHNOLOGY_TEMPLATE) if tech else None
+        name = _msvc_string(memory, template + TEMPLATE_ID) if template else None
+        if not name or not re.fullmatch(r"[A-Za-z0-9_.\-]+", name):
+            raise PointerError("implausible", "A researched technology has no readable id - layout does not match")
+        out.append(name)
+    return out
+
+
 def read_date(memory, module_base: int) -> dict:
     """{"year", "day" (0-based day of the year), "hour"} of the running game."""
     table = _ptr(memory, module_base + COUNTRY_TABLE[0])

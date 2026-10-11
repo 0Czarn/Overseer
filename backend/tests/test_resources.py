@@ -49,6 +49,23 @@ class ResearchSaveTests(unittest.TestCase):
             {"id": 2, "name": "GER_the_four_year_plan", "bonus": 1.0, "uses": 1, "categories": ["industry"]}])
         self.assertEqual(politics.limited_bonuses_of([]), [])
 
+    def test_usable_for(self):
+        from hoi4dbg.service import usable_for
+        techs = {
+            "tech_trucks": {"categories": ["motorized_equipment"], "parents": [], "in_tree": True},
+            "motorised_infantry": {"categories": ["motorized_equipment"], "parents": ["tech_trucks"], "in_tree": True},
+            "mechanised_infantry": {"categories": ["motorized_equipment"], "parents": ["motorised_infantry"], "in_tree": True},
+            "AST_war_carriers_tech": {"categories": ["motorized_equipment"], "parents": [], "in_tree": False},
+            "field_a": {"categories": ["motorized_equipment"], "parents": [], "in_tree": True, "excludes": ["field_b"]},
+            "field_b": {"categories": ["motorized_equipment"], "parents": [], "in_tree": True},
+            "needs_x": {"categories": ["motorized_equipment"], "parents": [], "in_tree": True, "needs": ["x"]},
+            "industry_tech": {"categories": ["industry"], "parents": [], "in_tree": True},
+        }
+        bonus = {"categories": ["motorized_equipment"]}
+        self.assertEqual(usable_for(bonus, techs, {"tech_trucks", "field_b"}, {"motorised_infantry"}), [])
+        self.assertEqual(usable_for(bonus, techs, {"tech_trucks", "motorised_infantry"}, set()),
+                         ["field_a", "field_b", "mechanised_infantry"])
+
     def test_progress_like_the_game(self):
         # the user's game 1936.9.21 (day 263): excavation1 18.7 % / 146 days, interwar_artillery 24 % / 111 days,
         # antiair1 (start 1939, 2.28 years ahead) 5.5 % / 401 days

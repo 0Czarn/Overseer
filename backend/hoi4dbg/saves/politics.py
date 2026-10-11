@@ -221,6 +221,7 @@ def summary(block: list, manager: list | None, tag: str, world_state: dict | Non
         "wars": wars_of(block, tag),
         "research": research_of(block),
         "research_bonuses": limited_bonuses_of(block),
+        "researched": researched_of(block),
         "faction": next(({**f, "leader": f["members"][0] == tag} for f in (world_state or {}).get("factions", [])
                          if tag in f["members"]), None),
         "tension": (world_state or {}).get("tension"),
@@ -245,6 +246,12 @@ def research_of(block: list) -> list[dict]:
         out.append({"slot": i, "technology": key, "speed": _float(text.get(body, "points_factor")) if isinstance(body, list) else None,
                     "points": (_float(text.get(entry, "research_points")) or 0.0) if isinstance(entry, list) else 0.0})
     return out
+
+
+def researched_of(block: list) -> list[str]:
+    """Researched technologies (technology.technologies entries with a level; in-progress ones have none)."""
+    known = text.get(text.get(block, "technology") or [], "technologies") or []
+    return [k for k, v in known if isinstance(v, list) and text.get(v, "level") is not None]
 
 
 def limited_bonuses_of(block: list) -> list[dict]:

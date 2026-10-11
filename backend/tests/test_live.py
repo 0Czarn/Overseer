@@ -1039,3 +1039,15 @@ class IdeaPointerTests(unittest.TestCase):
         mem.put(bonus + pointers.BONUS["uses"], "i", -3)   # negative uses: wrong layout
         with self.assertRaises(pointers.PointerError):
             pointers.read_limited_bonuses(mem, country)
+
+    def test_read_researched(self):
+        mem = FakeMemory(0x4000)
+        country, status, array, tech, template = BASE + 0x100, BASE + 0x400, BASE + 0x600, BASE + 0x800, BASE + 0xC00
+        mem.put(country + pointers.TECHNOLOGY_STATUS, "Q", status)
+        mem.put(status + pointers.RESEARCHED, "Q", array)
+        mem.put(status + pointers.RESEARCHED + 8, "i", 1)
+        mem.put(status + pointers.RESEARCHED + 12, "i", 1)
+        mem.put(array, "Q", tech)
+        mem.put(tech + pointers.TECHNOLOGY_TEMPLATE, "Q", template)
+        self._string(mem, template + pointers.TEMPLATE_ID, "tech_trucks")
+        self.assertEqual(pointers.read_researched(mem, country), ["tech_trucks"])

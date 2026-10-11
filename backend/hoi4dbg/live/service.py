@@ -514,10 +514,11 @@ class LiveService:
         if not pointers.supported(process.get("version")):
             raise LiveError("unsupported_version", "Live research reading is only verified for 1.19.3.0.c01a")
         key = (process["pid"], process.get("started"))
-        slots, date, bonuses = self._with_country(process, tag, lambda mem, c: (
+        slots, date, bonuses, researched = self._with_country(process, tag, lambda mem, c: (
             pointers.read_research(mem, c), pointers.read_date(mem, self._module_base[key]),
-            pointers.read_limited_bonuses(mem, c)))
-        return {"slots": slots, "date": date, "bonuses": bonuses, "tag": tag, "read_at": self._clock()}
+            pointers.read_limited_bonuses(mem, c), pointers.read_researched(mem, c)))
+        return {"slots": slots, "date": date, "bonuses": bonuses, "researched": researched, "tag": tag,
+                "read_at": self._clock()}
 
     def advisors(self, tag: str) -> dict:
         """Live hired advisors and staff of `tag`: [{"slot", "id": character id}] (game memory)."""

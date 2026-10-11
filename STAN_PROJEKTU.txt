@@ -106,6 +106,12 @@ ZROBIONE
             CLimitedUseTechBonus (+0x8 użycia, +0x10 nazwa, +0x30 id, +0x50 kategorie, +0x70 premia fixed64/1e5);
             zgodne z zapisem (technology.limited_use_bonus) dla SOV (1) i GER (2). Kategorie nazwane jak w grze
             ("<kategoria>_research", np. Motorization Research Speed). Lista pod slotami w kafelku Research slots.
+            + "Can be used for": technologie, na które premię można teraz wykorzystać - z kategorii premii,
+              niezbadane i nie w toku, zbadany choć jeden poprzednik (leads_to_tech) i wszystkie dependencies, brak
+              zbadanej XOR; pominięte technologie bez folderu w drzewku lub z warunkiem allow (ukryte / innych
+              państw). Lista zbadanych z pamięci (CTechnologyStatus+0x40, 52 dla SOV) lub z zapisu. Technologie z
+              przyszłych lat oznaczone "(rok, ahead of time)". Reguła "choć jeden poprzednik" - założenie, niesprawdzone
+              na przypadku z dwoma poprzednikami.
 [x] Nagłówki kafelków jak w Live game memory: zielone "game memory · read HH:MM:SS" (szczegóły w podpowiedzi),
             bez gry "save <plik> · read HH:MM:SS"
 [x] Country Editor: panel "Leadership" (portret i cechy przywódcy, partia rządząca, ideologia, frakcja z logo,

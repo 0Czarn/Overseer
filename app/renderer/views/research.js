@@ -60,14 +60,24 @@ export function bonusText(b) {
   return `+${pct}% · ${cats} · ${b.uses} use${b.uses === 1 ? '' : 's'} left`;
 }
 
-function bonusList(bonuses) {
+/** "Field Hospital I, Basic Armored Car (1940, ahead of time)" - technologies a bonus can be used on now. */
+export function usableText(usable, year) {
+  if (!usable) return '';
+  if (!usable.length) return 'No technology of these categories can be researched now';
+  return usable.map((t) => (year && t.start_year > year ? `${t.name} (${t.start_year}, ahead of time)` : t.name)).join(', ');
+}
+
+function bonusList(bonuses, year) {
   if (!bonuses) return null;
   return h('div', { class: 'research-bonuses' },
     h('h3', { class: 'research-subhead' }, `Limited bonuses: ${bonuses.length}`),
     bonuses.length
       ? h('ul', { class: 'research-bonus-list' }, bonuses.map((b) => h('li', { class: 'research-bonus' },
         h('span', { class: 'research-bonus-name' }, b.label || b.name),
-        h('span', { class: 'research-bonus-info', title: `${b.name} · ${b.categories.join(', ')}` }, bonusText(b)))))
+        h('span', { class: 'research-bonus-info', title: `${b.name} · ${b.categories.join(', ')}` }, bonusText(b)),
+        b.usable ? h('span', { class: 'research-bonus-usable', title: 'From the technology tree: researched predecessors, '
+          + 'no exclusive technology researched; country-only technologies are left out' },
+        h('b', null, 'Can be used for: '), usableText(b.usable, year)) : null)))
       : h('p', { class: 'muted' }, 'No one-time research bonuses available.'));
 }
 
@@ -85,7 +95,7 @@ export function researchPanel(ctx, tag) {
       body.replaceChildren(
         h('p', { class: 'muted research-summary' }, slotSummary(slots)),
         h('div', { class: 'research-slots' }, slots.map(slotRow)),
-        bonusList(res.data.bonuses));
+        bonusList(res.data.bonuses, res.data.game_year));
     },
   });
 }

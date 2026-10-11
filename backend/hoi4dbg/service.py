@@ -125,6 +125,24 @@ def resource_order(roots: tuple[str, ...]) -> dict[str, dict]:
     return out
 
 
+def usable_for(bonus: dict, techs: dict, researched: set[str], in_progress: set[str]) -> list[str]:
+    """Technologies a one-time bonus can be used on now: in one of its categories, not researched nor in progress,
+    every dependency and at least one technology leading to it researched (none = a root), no XOR one researched,
+    in a tree folder and without an `allow` condition (country-only or hidden technologies). Sorted by start year,
+    then id."""
+    cats = set(bonus.get("categories") or [])
+    out = []
+    for tid, t in techs.items():
+        if tid in researched or tid in in_progress or not t.get("in_tree") or not cats & set(t.get("categories") or []):
+            continue
+        if t.get("parents") and not researched & set(t["parents"]):
+            continue
+        if not set(t.get("needs") or []) <= researched or researched & set(t.get("excludes") or []):
+            continue
+        out.append(tid)
+    return sorted(out, key=lambda tid: (techs[tid].get("start_year") or 0, tid))
+
+
 MONTH_START = (0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334)   # the game has no leap years
 
 
@@ -775,7 +793,9 @@ class DebuggerService:
     @staticmethod
     @functools.lru_cache(maxsize=2)
     def _technologies(roots: tuple[str, ...]) -> tuple[dict, dict]:
-        """({id: {"cost": research_cost, "start_year"}}, defines) from common/technologies and the defines."""
+        """({id: {"cost", "start_year", "categories", "parents", "needs", "excludes"}}, defines) from
+        common/technologies and the defines. parents = technologies whose path leads here, needs = dependencies,
+        excludes = XOR."""
         techs: dict[str, dict] = {}
         defines = {"BASE_TECH_COST": 110.0, "BASE_YEAR_AHEAD_PENALTY_FACTOR": 2.0}
         for root in map(Path, roots):
@@ -790,9 +810,22 @@ class DebuggerService:
                             continue
                         cost = text_mod.get(body, "research_cost")
                         year = text_mod.get(body, "start_year")
+                        cats = text_mod.get(body, "categories")
+                        deps = text_mod.get(body, "dependencies")
+                        xor = text_mod.get(body, "XOR")
                         try:
-                            techs[tid] = {"cost": float(cost) if cost is not None else None,
-                                          "start_year": int(float(year)) if year is not None else None}
+                            techs[tid] = {
+                                "cost": float(cost) if cost is not None else None,
+                                "start_year": int(float(year)) if year is not None else None,
+                                "categories": [c for c in cats if isinstance(c, str)] if isinstance(cats, list) else [],
+                                "leads_to": [text_mod.get(p, "leads_to_tech") for k, p in body
+                                             if k == "path" and isinstance(p, list)
+                                             and isinstance(text_mod.get(p, "leads_to_tech"), str)],
+                                "needs": [k for k, _v in deps if isinstance(k, str)] if isinstance(deps, list) else [],
+                                "excludes": [x for x in xor if isinstance(x, str)] if isinstance(xor, list) else [],
+                                # shown in a tree folder and not limited to some countries by a script condition
+                                "in_tree": text_mod.get(body, "folder") is not None
+                                and text_mod.get(body, "allow") is None}
                         except (TypeError, ValueError):
                             continue
             for path in sorted((root / "common" / "defines").glob("*.lua")):
@@ -801,6 +834,11 @@ class DebuggerService:
                     m = re.search(rf"^\s*{name}\s*=\s*(-?[0-9.]+)", src, re.M)
                     if m:
                         defines[name] = float(m.group(1))
+        for tid, t in techs.items():
+            t.setdefault("parents", [])
+            for child in t["leads_to"]:
+                if child in techs:
+                    techs[child].setdefault("parents", []).append(tid)
         return techs, defines
 
     def research(self, tag: str) -> dict:
@@ -811,12 +849,12 @@ class DebuggerService:
         picked = self._pick_save(None)
         if install is None:
             return envelope(UNAVAILABLE, None, "Needs the game installation")
-        slots, analysis, live, live_date, bonuses = None, None, False, None, None
+        slots, analysis, live, live_date, bonuses, researched = None, None, False, None, None, None
         if self.live is not None:
             try:
                 found = self.live.research(tag)
                 slots, live_date, live = found["slots"], found.get("date"), True
-                bonuses = found.get("bonuses")
+                bonuses, researched = found.get("bonuses"), found.get("researched")
             except Exception:  # live data is optional: the save is the fallback
                 slots = None
         if picked is not None:
@@ -826,6 +864,8 @@ class DebuggerService:
                 if slots is None:
                     slots = state.get("research") or []
                     bonuses = state.get("research_bonuses") or []
+                if researched is None:
+                    researched = state.get("researched")
             except SaveFormatError as exc:
                 if slots is None:
                     return envelope(UNAVAILABLE, None, str(exc))
@@ -855,12 +895,21 @@ class DebuggerService:
             out.append({**s, "name": clean_loc(names[tech], names) if tech and names.get(tech) else tech,
                         "icon": gfx.icon_data_uri(sprite) if sprite else None,
                         **research_progress(s, techs.get(tech or ""), defines, today, country_speed)})
-        loc = lambda key: clean_loc(names[key], names) if key and names.get(key) else key  # noqa: E731
+        usable = {b["id"]: usable_for(b, techs, set(researched or []), ids) for b in bonuses} if researched else {}
+        names.update(focus_mod.loc_names(install, {t for u in usable.values() for t in u} - set(names)))
+        refs = {r for v in names.values() for r in LOC_REF.findall(v)} - set(names)   # "$armored_car_equipment_1$"
+        names.update(focus_mod.loc_names(install, refs))
+        loc = lambda key: (clean_loc(names[key], names) if key and names.get(key) else None) or key  # noqa: E731
         data = {"tag": tag, "slots": out, "research_source": "live" if live else "save",
+                "game_year": int(today) if today is not None else None,
                 # categories as the game names research bonuses: "<category>_research" (Motorization Research Speed)
                 "bonuses": [{**b, "label": loc(b["name"]),
                              "category_labels": [loc(f"{c}_research") if names.get(f"{c}_research") else loc(c)
-                                                 for c in b["categories"]]}
+                                                 for c in b["categories"]],
+                             "usable": [{"id": t, "name": loc(t) if names.get(t) else t.replace("_", " ").capitalize(),
+                                         "start_year": techs[t].get("start_year")}
+                                        for t in usable.get(b["id"], [])]
+                             if researched else None}
                             for b in sorted(bonuses, key=lambda b: b["id"])]}
         if analysis:
             data.update({"file": analysis["file"], "in_game_date": (analysis.get("header") or {}).get("date")})
