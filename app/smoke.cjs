@@ -5,7 +5,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const TABS = ['dashboard', 'countries', 'country-editor', 'state-editor', 'focus', 'equipment', 'tools',
+const TABS = ['dashboard', 'countries', 'country-editor', 'research', 'state-editor', 'focus', 'equipment', 'tools',
   'intel', 'logs'];
 const SIZES = [{ name: 'wide', width: 1320, height: 860 }, { name: 'narrow', width: 480, height: 820 }];
 
@@ -90,6 +90,13 @@ function runSmoke(win, outDir, quit) {
             if (!info.resources) result.failures.push(`${size.name}/country-editor: no resources`);
             info.editableChips = await wc.executeJavaScript(`document.querySelectorAll('.hoi-chip .hoi-chip-input').length`);
             if (info.editableChips !== 6) result.failures.push(`${size.name}/country-editor: ${info.editableChips}/6 editable live values`);
+          }
+          if (tab === 'research') {
+            await waitFor(wc, `!!document.querySelector('.research-slot, .live-panel-body .notice')`, 20000);
+            info.researchSlots = await wc.executeJavaScript(`document.querySelectorAll('.research-slot').length`);
+            info.researchSwitch = await wc.executeJavaScript(`document.querySelectorAll('.hoi-mode').length`);
+            if (!info.researchSlots) result.failures.push(`${size.name}/research: no research slots shown`);
+            if (info.researchSwitch !== 1) result.failures.push(`${size.name}/research: Live/On refresh switch missing`);
           }
           const image = await wc.capturePage();
           const file = path.join(outDir, `${size.name}-${tab}.png`);

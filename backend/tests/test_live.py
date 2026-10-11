@@ -980,3 +980,40 @@ class IdeaPointerTests(unittest.TestCase):
         mem.put(country + pointers.PENALTIES["bombing_penalty"], "q", 5 * 32768)   # +500 %: wrong layout
         with self.assertRaises(pointers.PointerError):
             pointers.read_penalties(mem, country)
+
+    def test_read_research(self):
+        mem = FakeMemory(0x4000)
+        country, status, array = BASE + 0x100, BASE + 0x400, BASE + 0x600
+        slots, tech, template = [BASE + 0x800, BASE + 0x900], BASE + 0x1000, BASE + 0x1400
+        mem.put(country + pointers.TECHNOLOGY_STATUS, "Q", status)
+        mem.put(status + pointers.RESEARCH_SLOTS, "Q", array)
+        mem.put(status + pointers.RESEARCH_SLOTS + 8, "i", 2)
+        mem.put(status + pointers.RESEARCH_SLOTS + 12, "i", 2)
+        for i, s in enumerate(slots):
+            mem.put(array + 8 * i, "Q", s)
+        mem.put(slots[0] + pointers.SLOT_TECHNOLOGY, "Q", tech)
+        mem.put(slots[0] + pointers.SLOT_SPEED, "q", 113000)
+        mem.put(slots[1] + pointers.SLOT_SPEED, "q", 100000)
+        mem.put(tech + pointers.TECHNOLOGY_TEMPLATE, "Q", template)
+        mem.put(tech + pointers.TECHNOLOGY_POINTS, "q", 4128000)   # 41.28 points, as in the user's save
+        mem.put(tech + pointers.TECHNOLOGY_BONUS, "q", 10000)      # +0.1 per day
+        self._string(mem, template + pointers.TEMPLATE_ID, "excavation1")
+        self.assertEqual(pointers.read_research(mem, country), [
+            {"slot": 1, "technology": "excavation1", "speed": 1.13, "points": 41.28, "bonus": 0.1},
+            {"slot": 2, "technology": None, "speed": 1.0, "points": None, "bonus": None}])
+        mem.put(slots[1] + pointers.SLOT_SPEED, "q", -5 * 100000)   # negative speed: wrong layout
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_research(mem, country)
+
+    def test_read_date(self):
+        mem = FakeMemory(0x4000)
+        static = 0x400_0000
+        mem.regions_data[static] = bytearray(0x100)
+        module_base = static - pointers.COUNTRY_TABLE[0]
+        root = BASE + 0x100
+        mem.put(static, "Q", root)
+        mem.put(root + pointers.GAME_DATE, "i", (5000 + 1936) * 8760 + 263 * 24)   # 1936.9.21 in the user's game
+        self.assertEqual(pointers.read_date(mem, module_base), {"year": 1936, "day": 263, "hour": 0})
+        mem.put(root + pointers.GAME_DATE, "i", 12345)
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_date(mem, module_base)

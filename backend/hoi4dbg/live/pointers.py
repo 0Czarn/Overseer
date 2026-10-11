@@ -452,6 +452,71 @@ def read_penalties(memory, country: int) -> dict[str, float]:
     return out
 
 
+# Research (2026-10-11, SOV: 3 slots, the user started excavation1 and interwar_artillery in slots 1 and 2):
+# [country + 0xf60] = CTechnologyStatus; its array + 0xa0 (read_array) = CResearchSlot*, one per research slot;
+# slot + 0x18 = CTechnology being researched or 0 (empty), slot + 0x38 = research points per day of the slot
+# (fixed64 / 100000; 1.13 for SOV, already divided by the ahead-of-time penalty: 0.20327 for antiair1 2.28 years
+# ahead = 1.13 / (1 + 2 x 2.2795)); [CTechnology + 0x160] = CTechnologyTemplate whose std::string + 0x10 is the id;
+# CTechnology + 0x198 = research points collected, + 0x190 = extra daily points of this technology (both fixed64 /
+# 100000; 2026-10-11 'Badania po 5 dniach': 41.28 / 0.1 for excavation1, 40.68 / 0 for interwar_artillery - the
+# save's research_points, and (cost - points) / (speed + extra) gave the 146 / 111 days the game showed).
+# Current game date (2026-10-11): int32 at [hoi4.exe + COUNTRY_TABLE[0]] + 0x468 = hours, (year + 5000) x 8760 +
+# day of year x 24 + hour (365-day years); 1936 day 263 while the user's save said 1936.9.21, and the ahead-of-time
+# penalty of antiair1 (start 1939) computed from it matched the slot speed above.
+GAME_DATE = 0x468
+TECHNOLOGY_STATUS = 0xF60
+RESEARCH_SLOTS = 0xA0
+SLOT_TECHNOLOGY = 0x18
+SLOT_SPEED = 0x38
+TECHNOLOGY_TEMPLATE = 0x160
+TEMPLATE_ID = 0x10
+TECHNOLOGY_POINTS = 0x198
+TECHNOLOGY_BONUS = 0x190
+
+
+def read_date(memory, module_base: int) -> dict:
+    """{"year", "day" (0-based day of the year), "hour"} of the running game."""
+    table = _ptr(memory, module_base + COUNTRY_TABLE[0])
+    raw = memory.read(table + GAME_DATE, 4) if table else None
+    if raw is None:
+        raise PointerError("unreadable", "The game date is not readable")
+    hours = struct.unpack("<i", raw)[0]
+    year, rest = divmod(hours, 8760)
+    if not 1000 <= year - 5000 <= 9999:
+        raise PointerError("implausible", "Game date out of range - layout does not match")
+    return {"year": year - 5000, "day": rest // 24, "hour": rest % 24}
+
+
+def read_research(memory, country: int) -> list[dict]:
+    """[{"slot": 1.., "technology": id or None, "speed": factor, "points", "bonus"}] - one entry per research slot
+    (points = research points collected, bonus = extra points per day of that technology; None when empty)."""
+    status = _ptr(memory, country + TECHNOLOGY_STATUS)
+    if status is None:
+        raise PointerError("no_research", "The country's technology status is not readable")
+    out = []
+    for i, slot in enumerate(read_array(memory, status + RESEARCH_SLOTS, 20), start=1):
+        raw = memory.read(slot + SLOT_TECHNOLOGY, 0x28) if slot else None
+        if raw is None:
+            raise PointerError("unreadable", "A research slot is not readable")
+        tech, speed = struct.unpack_from("<Q", raw, 0)[0], struct.unpack_from("<q", raw, SLOT_SPEED - SLOT_TECHNOLOGY)[0]
+        name, points, bonus = None, None, None
+        if tech:
+            extra = memory.read(tech + TECHNOLOGY_BONUS, 16)
+            if extra is None:
+                raise PointerError("unreadable", "A researched technology is not readable")
+            bonus, points = (v / 100000 for v in struct.unpack("<qq", extra))
+            if not 0 <= points <= 100_000 or not -10 <= bonus <= 100:
+                raise PointerError("implausible", "Research progress out of range - layout does not match")
+            template = _ptr(memory, tech + TECHNOLOGY_TEMPLATE)
+            name = _msvc_string(memory, template + TEMPLATE_ID) if template else None
+            if not name or not re.fullmatch(r"[A-Za-z0-9_.\-]+", name):
+                raise PointerError("implausible", "A researched technology has no readable id - layout does not match")
+        if not 0 <= speed / 100000 <= 100:
+            raise PointerError("implausible", "Research speed out of range - layout does not match")
+        out.append({"slot": i, "technology": name, "speed": speed / 100000, "points": points, "bonus": bonus})
+    return out
+
+
 # Plausible ranges for direct (local) writes; the game itself clamps some of them.
 WRITE_RANGES = {"stability": (0.0, 1.0), "war_support": (0.0, 1.0), "political_power": (-10_000.0, 100_000.0),
                 "command_power": (0.0, 10_000.0), "fuel": (0.0, 100_000_000.0), "army_experience": (0.0, 100_000.0),

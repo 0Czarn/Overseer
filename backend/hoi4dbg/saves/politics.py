@@ -219,12 +219,31 @@ def summary(block: list, manager: list | None, tag: str, world_state: dict | Non
         "bombing_penalty": _float(text.get(block, "being_bombed_support_penalty")) or 0.0,
         "casualties_penalty": _float(text.get(block, "heroes_dying_war_support_penalty")) or 0.0,
         "wars": wars_of(block, tag),
+        "research": research_of(block),
         "faction": next(({**f, "leader": f["members"][0] == tag} for f in (world_state or {}).get("factions", [])
                          if tag in f["members"]), None),
         "tension": (world_state or {}).get("tension"),
         "doctrines": (world_state or {}).get("doctrines", {}).get(tag, []),
         "power_balances": [b for b in (world_state or {}).get("power_balances", []) if tag in b["countries"]],
     }
+
+
+def research_of(block: list) -> list[dict]:
+    """[{"slot", "technology" or None, "speed", "points"}] from technology.slots of a text save (`empty = {
+    points = 30 }` for an empty slot, `<technology id> = { points_factor = 1.13 }` while researching; the points
+    collected are technologies.<id>.research_points)."""
+    tech = text.get(block, "technology") or []
+    slots = text.get(tech, "slots") or []
+    known = text.get(tech, "technologies") or []
+    out = []
+    for i, (key, body) in enumerate((e for e in slots if isinstance(e, tuple)), start=1):
+        if key == "empty":
+            out.append({"slot": i, "technology": None, "speed": None, "points": None})
+            continue
+        entry = text.get(known, key)
+        out.append({"slot": i, "technology": key, "speed": _float(text.get(body, "points_factor")) if isinstance(body, list) else None,
+                    "points": (_float(text.get(entry, "research_points")) or 0.0) if isinstance(entry, list) else 0.0})
+    return out
 
 
 def wars_of(block: list, tag: str) -> list[dict]:

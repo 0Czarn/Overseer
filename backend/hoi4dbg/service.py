@@ -7,6 +7,7 @@ import datetime as dt
 import json
 from pathlib import Path
 import logging
+import math
 import functools
 import platform
 import re
@@ -121,6 +122,62 @@ def resource_order(roots: tuple[str, ...]) -> dict[str, dict]:
                     frame = text_mod.get(body, "icon_frame") if isinstance(body, list) else None
                     if frame is not None:
                         out[name] = {"frame": int(float(frame))}
+    return out
+
+
+MONTH_START = (0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334)   # the game has no leap years
+
+
+def ahead_years(tech: dict | None, today: float | None) -> float:
+    """Years a technology is researched before its start year (0 when not ahead or unknown)."""
+    if not tech or not tech.get("start_year") or today is None:
+        return 0.0
+    return max(0.0, tech["start_year"] - today)
+
+
+def research_progress(slot: dict, tech: dict | None, defines: dict, today: float | None,
+                      country_speed: float | None = None) -> dict:
+    """{"cost", "progress" (0..1), "days_left", "ahead_years", "base_speed", "estimate"} of a research slot.
+
+    Checked against the game (2026-10-11): cost = BASE_TECH_COST x research_cost (220 excavation1, 165
+    interwar_artillery, 110 antiair1 - no ahead-of-time increase); researching ahead of time divides the daily
+    points instead: speed = base / (1 + BASE_YEAR_AHEAD_PENALTY_FACTOR x years ahead). The slot speed read keeps
+    the penalty of the day the research started (0.20327 for antiair1 both on day 263 and day 281), so the base is
+    `country_speed` = the speed of a slot researching without penalty. The game's estimate lets the penalty shrink
+    day by day, evaluated 2 days ahead: 401 and 383 days for antiair1 on days 263 and 281.5, both equal to the game.
+    Without a penalty (cost - points) / (speed + technology bonus), rounded up (146, 111).
+    `today` = game date in years (1936.72 = day 263 of 1936)."""
+    empty = {"cost": None, "progress": None, "days_left": None, "ahead_years": None, "base_speed": slot.get("speed"),
+             "estimate": False}
+    if not slot.get("technology") or not tech or tech.get("cost") is None:
+        return empty
+    factor = defines["BASE_YEAR_AHEAD_PENALTY_FACTOR"]
+    ahead = ahead_years(tech, today)
+    speed, bonus = slot.get("speed"), slot.get("bonus")
+    guessed = ahead > 0 and not country_speed
+    if not ahead:
+        base = speed
+    else:   # without a penalty-free slot to compare with: today's penalty (the start day's is not known)
+        base = country_speed or (speed * (1 + factor * ahead) if speed is not None else None)
+    cost = defines["BASE_TECH_COST"] * tech["cost"]
+    out = {**empty, "cost": cost, "ahead_years": ahead or None, "base_speed": base,
+           # from a save the technology's own daily bonus is not known
+           "estimate": guessed or bonus is None}
+    points = slot.get("points")
+    if points is None or base is None or cost <= 0:
+        return out
+    out["progress"] = min(1.0, points / cost)
+    daily = base + (bonus or 0)
+    if daily <= 0:
+        return out
+    if not ahead:
+        out["days_left"] = math.ceil(round(max(0.0, cost - points) / daily, 6))
+        return out
+    days, done = 0, points
+    while done < cost and days < 36500:
+        done += daily / (1 + factor * max(0.0, ahead - (days + 2) / 365))
+        days += 1
+    out["days_left"] = days
     return out
 
 
@@ -714,6 +771,90 @@ class DebuggerService:
         except Exception:  # live data is optional: the save values stay
             return False
         return True
+
+    @staticmethod
+    @functools.lru_cache(maxsize=2)
+    def _technologies(roots: tuple[str, ...]) -> tuple[dict, dict]:
+        """({id: {"cost": research_cost, "start_year"}}, defines) from common/technologies and the defines."""
+        techs: dict[str, dict] = {}
+        defines = {"BASE_TECH_COST": 110.0, "BASE_YEAR_AHEAD_PENALTY_FACTOR": 2.0}
+        for root in map(Path, roots):
+            for path in sorted((root / "common" / "technologies").glob("*.txt")):
+                try:
+                    items = text_mod.parse(re.sub(r"#[^\n]*", "", path.read_text(encoding="utf-8-sig", errors="replace")))
+                except Exception:
+                    continue
+                for block in (v for k, v in (i for i in items if isinstance(i, tuple)) if k == "technologies"):
+                    for tid, body in (i for i in block if isinstance(i, tuple)) if isinstance(block, list) else []:
+                        if not isinstance(body, list):
+                            continue
+                        cost = text_mod.get(body, "research_cost")
+                        year = text_mod.get(body, "start_year")
+                        try:
+                            techs[tid] = {"cost": float(cost) if cost is not None else None,
+                                          "start_year": int(float(year)) if year is not None else None}
+                        except (TypeError, ValueError):
+                            continue
+            for path in sorted((root / "common" / "defines").glob("*.lua")):
+                src = path.read_text(encoding="utf-8-sig", errors="replace")
+                for name in defines:
+                    m = re.search(rf"^\s*{name}\s*=\s*(-?[0-9.]+)", src, re.M)
+                    if m:
+                        defines[name] = float(m.group(1))
+        return techs, defines
+
+    def research(self, tag: str) -> dict:
+        """Research slots of `tag` and what each one researches: game memory while the game runs, else the newest
+        save; names and icons from the game files."""
+        tag = tag.upper()
+        install = self._install_path()
+        picked = self._pick_save(None)
+        if install is None:
+            return envelope(UNAVAILABLE, None, "Needs the game installation")
+        slots, analysis, live, live_date = None, None, False, None
+        if self.live is not None:
+            try:
+                found = self.live.research(tag)
+                slots, live_date, live = found["slots"], found.get("date"), True
+            except Exception:  # live data is optional: the save is the fallback
+                slots = None
+        if picked is not None:
+            try:
+                state = self.saves.politics(picked[0], tag)
+                analysis = state.pop("analysis")
+                if slots is None:
+                    slots = state.get("research") or []
+            except SaveFormatError as exc:
+                if slots is None:
+                    return envelope(UNAVAILABLE, None, str(exc))
+        if slots is None:
+            return envelope(UNAVAILABLE, None, "Needs the running game or a save")
+        roots = self._game_roots(install)
+        techs, defines = self._technologies(tuple(str(r) for r in roots))
+        date = (analysis.get("header") or {}).get("date") if analysis else None
+        today = None
+        if live_date:
+            today = live_date["year"] + live_date["day"] / 365
+        elif isinstance(date, dict) and date.get("year"):
+            today = date["year"] + (MONTH_START[(date.get("month") or 1) - 1] + (date.get("day") or 1) - 1) / 365
+        ids = {s["technology"] for s in slots if s["technology"]}
+        # research speed of the country: a slot researching without ahead-of-time penalty shows it
+        plain = [s["speed"] for s in slots if s["technology"] and s.get("speed")
+                 and not ahead_years(techs.get(s["technology"]), today)]
+        country_speed = max(plain) if plain else None
+        names = focus_mod.loc_names(install, ids)
+        sprites = gfx.sprites(roots)
+        out = []
+        for s in slots:
+            tech = s["technology"]
+            sprite = sprites.get(f"GFX_{tech}_medium") if tech else None
+            out.append({**s, "name": clean_loc(names[tech], names) if tech and names.get(tech) else tech,
+                        "icon": gfx.icon_data_uri(sprite) if sprite else None,
+                        **research_progress(s, techs.get(tech or ""), defines, today, country_speed)})
+        data = {"tag": tag, "slots": out, "research_source": "live" if live else "save"}
+        if analysis:
+            data.update({"file": analysis["file"], "in_game_date": (analysis.get("header") or {}).get("date")})
+        return envelope(SAVE, data, "Research from game memory." if live else "Research from the newest save.")
 
     def _live_resources(self, tag: str, order: list[str]) -> dict | None:
         """Live resources and trade deals of `tag`, or None (game not running, other version, ...)."""

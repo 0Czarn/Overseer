@@ -81,6 +81,27 @@ ZROBIONE
             Wojny zostają z zapisu (nowa wojna widoczna po autozapisie). Flaga "kto zaczął" w pamięci nieznaleziona.
             Do zrobienia: źródło -19,75%, propaganda, ochrona wybrzeża, napadane konwoje,
             attaché, zatopiony Pride of the Fleet.
+[x] ZAKŁADKA RESEARCH (2026-10-11, nowa, na życzenie użytkownika): wybór państwa + kafelek "Research slots"
+            [Live | On refresh]: liczba slotów, co bada każdy slot (nazwa, ikona z gry, id), premia szybkości slotu.
+            Pamięć: [country+0xF60] = CTechnologyStatus, tablica +0xA0 = CResearchSlot (+0x18 CTechnology lub 0,
+            +0x38 mnożnik szybkości fixed64/1e5); [CTechnology+0x160] = szablon, id technologii = string +0x10.
+            Sprawdzone: użytkownik zaczął excavation1 i interwar_artillery -> odczytane. Bez gry: zapis tekstowy
+            (technology.slots, "empty" = pusty slot). Uwaga: w tej grze AI prawie nic nie bada (1012/1015 slotów
+            pustych w zapisie, potwierdzone w pamięci) - to stan gry, nie błąd odczytu.
+            [x] postęp badania (2026-10-11, zapisy użytkownika 'badania' i 'Badania po 5 dniach'): CTechnology+0x198
+                zebrane punkty, +0x190 dodatkowe punkty/dzień technologii (fixed64/1e5). Koszt = BASE_TECH_COST (110)
+                x research_cost; dni = (koszt - punkty) / (szybkość slotu + premia), w górę. Zgodne z grą:
+                excavation1 18,7% / 146 dni, interwar_artillery 24% / 111 dni. Z zapisu premia technologii nieznana
+                -> dni "~" (np. 159 zamiast 146).
+            [x] POPRAWKA (zgłoszenie użytkownika: antiair1 2,28 roku przed czasem, gra 5,5% / 401 dni, aplikacja
+                pokazywała 0,7% / 3579 dni i -79,7% szybkości): kara za badanie przed czasem NIE podnosi kosztu,
+                tylko dzieli szybkość: 1 + 2 x lata przed czasem; pole slotu +0x38 to szybkość już po karze.
+                DRUGA POPRAWKA (po kilkunastu dniach gra 8,9% / 383 dni, aplikacja się rozjeżdżała): szybkość slotu
+                zostaje z dnia rozpoczęcia badania (0,20327 i w dniu 263, i 281), więc szybkość bazową biorę ze
+                slotu bez kary (1,13); prognoza gry zmniejsza karę dzień po dniu, liczona z datą +2 dni. Wynik
+                401 i 383 dni = gra w obu pomiarach. Bez slotu bez kary szybkość bazowa jest zgadywana -> "~".
+                Data gry na żywo: [hoi4.exe+0x332F260]+0x468, int32 godzin = (rok+5000)*8760 + dzień*24 + godz.
+                UI: szybkość slotu bez kary (+13%) + osobny dopisek "2.3 years ahead of time: -82% speed".
 [x] Nagłówki kafelków jak w Live game memory: zielone "game memory · read HH:MM:SS" (szczegóły w podpowiedzi),
             bez gry "save <plik> · read HH:MM:SS"
 [x] Country Editor: panel "Leadership" (portret i cechy przywódcy, partia rządząca, ideologia, frakcja z logo,
