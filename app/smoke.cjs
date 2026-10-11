@@ -96,7 +96,15 @@ function runSmoke(win, outDir, quit) {
             info.researchSlots = await wc.executeJavaScript(`document.querySelectorAll('.research-slot').length`);
             info.researchSwitch = await wc.executeJavaScript(`document.querySelectorAll('.hoi-mode').length`);
             if (!info.researchSlots) result.failures.push(`${size.name}/research: no research slots shown`);
-            if (info.researchSwitch !== 1) result.failures.push(`${size.name}/research: Live/On refresh switch missing`);
+            if (info.researchSwitch !== 2) result.failures.push(`${size.name}/research: ${info.researchSwitch}/2 Live/On refresh switches`);
+            await waitFor(wc, `!!document.querySelector('.research-tab')`, 20000);
+            info.researchTabs = await wc.executeJavaScript(`document.querySelectorAll('.research-tab').length`);
+            if (!info.researchTabs) result.failures.push(`${size.name}/research: no research tabs shown`);
+            info.researchTabImages = await wc.executeJavaScript(`[...document.querySelectorAll('.research-tab')].filter((b) => b.style.backgroundImage).length`);
+            if (info.researchTabImages !== info.researchTabs) result.failures.push(`${size.name}/research: ${info.researchTabImages}/${info.researchTabs} tabs with the game image`);
+            await wc.executeJavaScript(`document.querySelector('.research-tab-strip').scrollIntoView()`);
+            wc.invalidate();
+            await sleep(1200);
           }
           const image = await wc.capturePage();
           const file = path.join(outDir, `${size.name}-${tab}.png`);

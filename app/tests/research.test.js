@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aheadText, bonusText, progressText, slotSummary, speedText, usableText } from '../renderer/views/research.js';
+import { aheadText, bonusText, pickTab, progressText, slotSummary, speedText, usableText } from '../renderer/views/research.js';
 
 test('research speed bonus as the game shows it', () => {
   assert.equal(speedText(1.13), '+13%');
@@ -41,4 +41,11 @@ test('technologies a bonus can be used on, ahead-of-time ones marked', () => {
   assert.equal(usableText(usable, 1936), 'Field Hospital I, Basic Armored Car (1940, ahead of time), Excavation I');
   assert.equal(usableText([], 1936), 'No technology of these categories can be researched now');
   assert.equal(usableText(null, 1936), '');
+});
+
+test('selected research tab: remembered one if present, else the first', () => {
+  const tabs = [{ id: 'infantry_folder' }, { id: 'support_folder' }];
+  assert.equal(pickTab(tabs, 'support_folder'), 'support_folder');
+  assert.equal(pickTab(tabs, 'armour_folder'), 'infantry_folder');   // tab of a DLC no longer owned
+  assert.equal(pickTab([], null), null);
 });

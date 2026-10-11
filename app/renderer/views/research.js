@@ -100,6 +100,68 @@ export function researchPanel(ctx, tag) {
   });
 }
 
+const TAB_KEY = 'hoi4dbg.researchTab';
+
+/** Remembered research tab, or the first one when it is not among `tabs`. */
+export function pickTab(tabs, remembered) {
+  return tabs.find((t) => t.id === remembered)?.id ?? tabs[0]?.id ?? null;
+}
+
+function readTab() {
+  try { return localStorage.getItem(TAB_KEY); } catch { return null; }
+}
+
+function writeTab(id) {
+  try { localStorage.setItem(TAB_KEY, id); } catch { /* preference only */ }
+}
+
+const CONDITION = { always: '', dlc: 'shown because of an owned DLC',
+  unknown: 'condition of a mod not checked - may be hidden in game' };
+
+/** Research tabs tile (refreshable): the research screen's tab strip with the game's tab images. */
+export function researchTabsPanel(ctx) {
+  let selected = readTab();
+  return livePanel(ctx, {
+    title: 'Research tabs', url: '/api/research/tabs', unavailable: 'Research tabs',
+    render(body, res) {
+      const tabs = res.data?.tabs;
+      if (!tabs?.length) {
+        body.replaceChildren(notice('warn', `Research tabs unavailable: ${res.note}`));
+        return;
+      }
+      selected = pickTab(tabs, selected);
+      const info = h('div', { class: 'research-tab-info' });
+      const showInfo = () => {
+        const t = tabs.find((x) => x.id === selected);
+        info.replaceChildren(...[h('strong', null, t.name), h('span', { class: 'muted' }, ` · ${t.technologies} technologies`),
+          t.condition === 'unknown' ? h('span', { class: 'muted' }, ` · ${CONDITION.unknown}`) : null].filter(Boolean));
+      };
+      const buttons = tabs.map((t) => {
+        const b = h('button', {
+          type: 'button', class: `research-tab ${t.image ? '' : 'research-tab-text'}`, 'data-tab': t.id,
+          title: [t.name, `${t.technologies} technologies`, CONDITION[t.condition]].filter(Boolean).join(' · '),
+          'aria-label': t.name, style: t.image ? { backgroundImage: `url(${t.image})` } : {},
+        }, t.image ? null : t.name);
+        b.addEventListener('click', () => {
+          selected = t.id;
+          writeTab(t.id);
+          buttons.forEach((x) => {
+            x.classList.toggle('research-tab-on', x.dataset.tab === selected);
+            x.setAttribute('aria-pressed', x.dataset.tab === selected ? 'true' : 'false');
+          });
+          showInfo();
+        });
+        b.classList.toggle('research-tab-on', t.id === selected);
+        b.setAttribute('aria-pressed', t.id === selected ? 'true' : 'false');
+        return b;
+      });
+      showInfo();
+      body.replaceChildren(h('div', { class: 'research-tab-strip', role: 'group', 'aria-label': 'Research tabs' }, buttons),
+        info, h('p', { class: 'muted research-summary' }, res.note));
+    },
+  });
+}
+
 export default {
   id: 'research',
   title: 'Research',
@@ -107,11 +169,11 @@ export default {
   async render(root, ctx) {
     const tag = ctx.state.selectedCountry;
     const picker = await countryPicker(ctx);
-    const tile = researchPanel(ctx, tag);
+    const tiles = [researchPanel(ctx, tag), researchTabsPanel(ctx)];
     root.append(
       viewHeader('Research', 'Research slots of the selected country and what each one researches.', picker),
       h('div', { class: 'country-head research-head' }, tagChip(tag, 'tag-chip-lg')),
-      tile.el);
-    return () => tile.stop();
+      ...tiles.map((t) => t.el));
+    return () => tiles.forEach((t) => t.stop());
   },
 };

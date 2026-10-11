@@ -19,6 +19,7 @@ from . import __version__, deficit, demo, equipment_changes, gamefiles, gfx, mod
 from . import government as government_mod
 from . import mio as mio_mod
 from . import focus as focus_mod
+from . import techtree
 from .applog import RingBufferHandler
 from .integration import GameIntegration, NullIntegration
 from .reports import ReportError, ReportStore
@@ -825,7 +826,11 @@ class DebuggerService:
                                 "excludes": [x for x in xor if isinstance(x, str)] if isinstance(xor, list) else [],
                                 # shown in a tree folder and not limited to some countries by a script condition
                                 "in_tree": text_mod.get(body, "folder") is not None
-                                and text_mod.get(body, "allow") is None}
+                                and text_mod.get(body, "allow") is None,
+                                # a technology can sit in several tabs (one folder block each)
+                                "folders": [text_mod.get(f, "name") for k, f in body
+                                            if k == "folder" and isinstance(f, list)
+                                            and isinstance(text_mod.get(f, "name"), str)]}
                         except (TypeError, ValueError):
                             continue
             for path in sorted((root / "common" / "defines").glob("*.lua")):
@@ -840,6 +845,32 @@ class DebuggerService:
                 if child in techs:
                     techs[child].setdefault("parents", []).append(tid)
         return techs, defines
+
+    def research_tabs(self) -> dict:
+        """Tabs of the research screen (technology folders) for the installed game, enabled mods and owned DLCs,
+        with the number of technologies in each tab."""
+        install = self._install_path()
+        if install is None:
+            return envelope(UNAVAILABLE, None, "Needs the game installation")
+        userdata = (self.detect().get("userdata") or {}).get("path")
+        roots = tuple(str(r) for r in self._game_roots(install))
+        dlcs = techtree.owned_dlcs(install, Path(userdata) if userdata else None)
+        techs, _defines = self._technologies(roots)
+        counts: dict[str, int] = {}
+        for t in techs.values():
+            for folder in t.get("folders") or []:
+                counts[folder] = counts.get(folder, 0) + 1
+        tabs = techtree.research_tabs(roots, dlcs, counts)
+        names = focus_mod.loc_names(install, {t["id"] for t in tabs})
+        names.update(focus_mod.loc_names(install, {r for v in names.values() for r in LOC_REF.findall(v)} - set(names)))
+        sprites = gfx.sprites(roots)
+        for t in tabs:
+            t["name"] = clean_loc(names[t["id"]], names) if names.get(t["id"]) else t["id"]
+            t.pop("x", None)
+            texture = sprites.get(t.pop("sprite") or "")
+            t["image"] = gfx.icon_data_uri(texture) if texture else None
+        return envelope(SAVE, {"tabs": tabs, "dlcs": sorted(dlcs), "mods": len(roots) - 1},
+                        f"{len(tabs)} research tabs from the game files, {len(roots) - 1} mod(s), {len(dlcs)} DLC(s).")
 
     def research(self, tag: str) -> dict:
         """Research slots of `tag` and what each one researches: game memory while the game runs, else the newest

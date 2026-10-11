@@ -112,6 +112,17 @@ ZROBIONE
               państw). Lista zbadanych z pamięci (CTechnologyStatus+0x40, 52 dla SOV) lub z zapisu. Technologie z
               przyszłych lat oznaczone "(rok, ahead of time)". Reguła "choć jeden poprzednik" - założenie, niesprawdzone
               na przypadku z dwoma poprzednikami.
+[x] RESEARCH: kafelek "Research tabs" (2026-10-11): zakładki ekranu badań wykryte automatycznie z
+            common/technology_tags (gra + włączone mody), warunki available rozstrzygane wg posiadanych DLC
+            (dlc/*/*.dlc minus disabled_dlcs z dlc_load.json); pominięte foldery doktryn (osobny ekran od 1.19)
+            i ledger=hidden; warunki modów inne niż has_dlc -> zakładka pokazana z "?". U użytkownika 9 zakładek
+            (Army: Infantry, Support Companies, Armor, Artillery; Air; Navy: Naval, Naval support; Civilian:
+            Industry, Engineering) z liczbą technologii zgodną z pamięcią gry (CTechnologyFolder, np. 43/42/28).
+            Wygląd jak w grze (obrazek użytkownika Research_zakladki.png): karty z grafik gry - przyciski
+            <folder>_tab z interface/countrytechtreeview.gui (quadTextureSprite, 2 klatki: wybrana / zwykła,
+            91x61), kolejność wg pozycji x przycisku (Infantry ... Naval, Naval support, Air, Engineering,
+            Industry); kliknięcie wybiera kartę (zapamiętana), pod paskiem nazwa i liczba technologii.
+            [ ] następnie: technologie w zakładce + graficzne drzewko (folder.position x/y w plikach technologii)
 [x] Nagłówki kafelków jak w Live game memory: zielone "game memory · read HH:MM:SS" (szczegóły w podpowiedzi),
             bez gry "save <plik> · read HH:MM:SS"
 [x] Country Editor: panel "Leadership" (portret i cechy przywódcy, partia rządząca, ideologia, frakcja z logo,
