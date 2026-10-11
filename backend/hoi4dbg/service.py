@@ -744,6 +744,17 @@ class DebuggerService:
                 "leader": faction["members"][0] == tag}
         return True
 
+    def _live_penalties(self, tag: str, state: dict) -> bool:
+        """Replaces the bombing / casualties war support penalties in `state` with the live ones of `tag`."""
+        if self.live is None:
+            return False
+        try:
+            live = self.live.penalties(tag)
+            state.update({k: live[k] for k in ("bombing_penalty", "casualties_penalty")})
+        except Exception:  # live data is optional: the save values stay
+            return False
+        return True
+
     def _live_doctrines(self, tag: str, state: dict, defs: dict, everyone: dict) -> bool:
         """Replaces state["doctrines"] with the live ones of `tag`. A name key shared by variants (e.g. x and
         x_no_lar) resolves to the variant this game uses in the save, else the first defined; unlocked rewards stay
@@ -950,6 +961,7 @@ class DebuggerService:
         defs = modifiers.definitions(tuple(str(r) for r in [install, *mods]))
         self._live_leadership(tag, tuple(str(r) for r in [install, *mods]), state)
         live_doctrines = self._live_doctrines(tag, state, defs, everyone)
+        live_penalties = self._live_penalties(tag, state)
         names = focus_mod.loc_names(install, modifiers.loc_keys(state, defs))
         base_source = {}
         for field in modifiers.KEYS:
@@ -967,7 +979,8 @@ class DebuggerService:
         return envelope(SAVE, {
             "tag": tag, **result, "ideas_source": "live" if live_ideas else "save",
             "advisors_source": "live" if live_advisors else "save",
-            "doctrines_source": "live" if live_doctrines else "save", "file": analysis["file"],
+            "doctrines_source": "live" if live_doctrines else "save",
+            "penalties_source": "live" if live_penalties else "save", "file": analysis["file"],
             "in_game_date": (analysis.get("header") or {}).get("date"),
             "freshness": save_freshness(analysis["file"]["mtime"], game),
             "not_read": ["core coastal states protection", "foreign propaganda", "convoys raided", "attache sent",

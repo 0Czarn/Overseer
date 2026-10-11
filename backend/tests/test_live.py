@@ -968,3 +968,15 @@ class IdeaPointerTests(unittest.TestCase):
                          ["GRAND_DOCTRINE_MASS_ASSAULT", "SUBDOCTRINE_HUMAN_WAVES"])
         with self.assertRaises(pointers.PointerError):   # entry of another slot: wrong layout
             pointers.read_doctrines(mem, module_base, tags, "ENG")
+
+    def test_read_penalties(self):
+        mem = FakeMemory(0x4000)
+        country = BASE + 0x100
+        mem.put(country + pointers.PENALTIES["bombing_penalty"], "q", -2676)     # 'po pauzie 2': -0.08166 in the save
+        mem.put(country + pointers.PENALTIES["casualties_penalty"], "q", -973)   # -0.02969
+        out = pointers.read_penalties(mem, country)
+        self.assertAlmostEqual(out["bombing_penalty"], -0.08166, delta=1e-5)   # the save cuts to 5 decimals
+        self.assertAlmostEqual(out["casualties_penalty"], -0.02969, delta=1e-5)
+        mem.put(country + pointers.PENALTIES["bombing_penalty"], "q", 5 * 32768)   # +500 %: wrong layout
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_penalties(mem, country)

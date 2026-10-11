@@ -71,7 +71,9 @@ ZROBIONE
             Offensive/Defensive war (definicje WAR_SUPPORT_OFFNSIVE/DEFENSIVE_WAR), "War Support" =
             war_support_during_war -0,3 x (1 - poparcie wojny), Enemy bombing = being_bombed_support_penalty,
             Combat Casualties = heroes_dying_war_support_penalty - z zapisu tekstowego (tokeny binarne nieznane).
-            Do zrobienia: źródło -19,75%, wojny i kary na żywo, propaganda, ochrona wybrzeża, napadane konwoje,
+            KARY NA ŻYWO (2026-10-11, przed/po tydzień wojny): country+0x14C8 bombardowania, +0x14D0 straty, fixed64
+            /32768; zgodne z 2 zapisami użytkownika (ZSRR i Polska) do 5. cyfry, 0 dla państw w pokoju.
+            Do zrobienia: źródło -19,75%, wojny na żywo, propaganda, ochrona wybrzeża, napadane konwoje,
             attaché, zatopiony Pride of the Fleet.
 [x] Nagłówki kafelków jak w Live game memory: zielone "game memory · read HH:MM:SS" (szczegóły w podpowiedzi),
             bez gry "save <plik> · read HH:MM:SS"

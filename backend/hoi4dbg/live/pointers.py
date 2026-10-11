@@ -434,6 +434,24 @@ def read_doctrines(memory, module_base: int, tags: list[str], tag: str) -> list[
     return out
 
 
+# War support penalties that build up weekly (2026-10-11, before/after one game week at war, SOV vs POL):
+# fixed64 / 32768 at country + 0x14c8 (enemy bombing) and + 0x14d0 (combat casualties); equal to the save's
+# being_bombed_support_penalty / heroes_dying_war_support_penalty to the 5th decimal in 2 saves (SOV and POL),
+# 0 for the 96 countries at peace.
+PENALTIES = {"bombing_penalty": 0x14C8, "casualties_penalty": 0x14D0}
+
+
+def read_penalties(memory, country: int) -> dict[str, float]:
+    """{"bombing_penalty", "casualties_penalty"}: war support penalties as fractions (negative or 0)."""
+    raw = memory.read(country + PENALTIES["bombing_penalty"], 16)
+    if not raw:
+        raise PointerError("unreadable", "War support penalties are not readable")
+    out = dict(zip(PENALTIES, (v / 32768 for v in struct.unpack("<qq", raw))))
+    if any(not -1.0 <= v <= 0.0 for v in out.values()):
+        raise PointerError("implausible", "War support penalties out of range - layout does not match")
+    return out
+
+
 # Plausible ranges for direct (local) writes; the game itself clamps some of them.
 WRITE_RANGES = {"stability": (0.0, 1.0), "war_support": (0.0, 1.0), "political_power": (-10_000.0, 100_000.0),
                 "command_power": (0.0, 10_000.0), "fuel": (0.0, 100_000_000.0), "army_experience": (0.0, 100_000.0),

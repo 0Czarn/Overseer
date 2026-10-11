@@ -229,7 +229,7 @@ export function countryLivePanel(ctx, tag, { isPlayer = false } = {}) {
       });
       sourceLine.replaceChildren(
         h('span', null, d.ideas_source === 'live'
-          ? `Spirits, laws${d.advisors_source === 'live' ? ', advisors' : ''}${d.doctrines_source === 'live' ? ', doctrines' : ''} LIVE; other modifiers from ` : 'Modifiers from ',
+          ? `Spirits, laws${d.advisors_source === 'live' ? ', advisors' : ''}${d.doctrines_source === 'live' ? ', doctrines' : ''}${d.penalties_source === 'live' ? ', bombing, casualties' : ''} LIVE; other modifiers from ` : 'Modifiers from ',
           d.file.name, d.in_game_date ? ` (${d.in_game_date.text})` : '',
           d.freshness?.category === 'current_session' ? '' : ' - an older session: save again if the leader changed. '),
         h('span', { class: 'muted' }, ` Not read yet: ${d.not_read.join(', ')}. `));

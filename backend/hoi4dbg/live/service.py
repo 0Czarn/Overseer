@@ -501,6 +501,13 @@ class LiveService:
             mem, self._module_base[key], self._tags[process.get("install") or ""], tag))
         return {"names": names, "tag": tag, "read_at": self._clock()}
 
+    def penalties(self, tag: str) -> dict:
+        """Live war support penalties of `tag` from enemy bombing and combat casualties (game memory)."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Live penalty reading is only verified for 1.19.3.0.c01a")
+        return {**self._with_country(process, tag, pointers.read_penalties), "tag": tag, "read_at": self._clock()}
+
     def advisors(self, tag: str) -> dict:
         """Live hired advisors and staff of `tag`: [{"slot", "id": character id}] (game memory)."""
         process = self._process()
