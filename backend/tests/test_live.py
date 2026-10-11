@@ -869,3 +869,19 @@ class IdeaPointerTests(unittest.TestCase):
         mem.put(pol + pointers.IDEAS + 12, "i", 9)   # more than the capacity: wrong layout
         with self.assertRaises(pointers.PointerError):
             pointers.read_ideas(mem, country)
+
+    def test_read_advisors(self):
+        mem = FakeMemory(0x4000)
+        country, chars, array, adv, ch = BASE + 0x100, BASE + 0x400, BASE + 0x600, BASE + 0x1000, BASE + 0x1800
+        mem.put(country + pointers.COUNTRY_CHARACTERS, "Q", chars)
+        mem.put(chars + pointers.HIRED_ADVISORS, "Q", array)
+        mem.put(chars + pointers.HIRED_ADVISORS + 8, "i", 2)    # capacity
+        mem.put(chars + pointers.HIRED_ADVISORS + 12, "i", 1)   # size
+        mem.put(array, "Q", adv)
+        mem.put(adv + pointers.ADVISOR_CHARACTER, "Q", ch)
+        self._string(mem, adv + pointers.ADVISOR_SLOT, "political_advisor")
+        mem.put(ch + pointers.CHARACTER_ID, "i", 4432)
+        self.assertEqual(pointers.read_advisors(mem, country), [{"slot": "political_advisor", "id": "4432"}])
+        self._string(mem, adv + pointers.ADVISOR_SLOT, "\x01\x02garbage")
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_advisors(mem, country)

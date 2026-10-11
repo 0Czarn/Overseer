@@ -116,7 +116,8 @@ function sectionIcon(name) {
 export function governmentPanel(ctx, tag) {
   return livePanel(ctx, {
     title: 'Government & staff', cls: 'gov-panel', url: `/api/countries/${encodeURIComponent(tag)}/government`,
-    describe: (res) => saveSource(res, res.data?.ideas_source === 'live' ? ['laws, companies'] : []),
+    describe: (res) => saveSource(res, [res.data?.ideas_source === 'live' && 'laws, companies',
+      res.data?.advisors_source === 'live' && 'advisors, staff'].filter(Boolean)),
     unavailable: 'Government & staff',
     render(body, res) {
       if (!res.data?.laws) {

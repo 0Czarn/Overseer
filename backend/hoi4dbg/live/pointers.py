@@ -214,6 +214,33 @@ def read_ideas(memory, country: int) -> list[str]:
     return out
 
 
+# Advisors (2026-10-11, 98/99 countries equal to the save; TUR had hired one in the game day after it):
+# [country + 0xff0] = CCountryCharacters; its array + 0x58 (read_array) = hired advisors (CAdvisor*, political
+# advisors, theorists, chiefs of staff and high command alike); CAdvisor + 0x80 = slot (std::string),
+# [CAdvisor + 0x10] = CCharacter whose int32 + 0xc is the character id of the save.
+COUNTRY_CHARACTERS = 0xFF0
+HIRED_ADVISORS = 0x58
+ADVISOR_CHARACTER = 0x10
+ADVISOR_SLOT = 0x80
+CHARACTER_ID = 0xC
+
+
+def read_advisors(memory, country: int) -> list[dict]:
+    """Hired advisors of a country object: [{"slot", "id": character id as in the save}]."""
+    chars = _ptr(memory, country + COUNTRY_CHARACTERS)
+    if chars is None:
+        raise PointerError("no_characters", "The country's characters object is not readable")
+    out = []
+    for adv in read_array(memory, chars + HIRED_ADVISORS, 100):
+        slot = _msvc_string(memory, adv + ADVISOR_SLOT) if adv else None
+        ch = _ptr(memory, adv + ADVISOR_CHARACTER) if adv else None
+        raw = memory.read(ch + CHARACTER_ID, 4) if ch else None
+        if not slot or not re.fullmatch(r"[a-z_]+", slot) or raw is None:
+            raise PointerError("implausible", "An advisor has no readable slot or character - layout does not match")
+        out.append({"slot": slot, "id": str(struct.unpack("<i", raw)[0])})
+    return out
+
+
 def resources_object(memory, country: int) -> int:
     cr = _ptr(memory, country + COUNTRY_RESOURCES)
     if cr is None:

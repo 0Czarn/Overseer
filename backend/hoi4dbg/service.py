@@ -627,6 +627,7 @@ class DebuggerService:
         analysis = state.pop("analysis")
         state.pop("_all", None)
         live = self._live_ideas(tag, state)
+        live_advisors = self._live_advisors(tag, state)
         roots = self._game_roots(install)
         defs = modifiers.definitions(roots)
         groups = government_mod.sections(state, defs)
@@ -634,7 +635,8 @@ class DebuggerService:
         shown = iter(self._present(flat, install, roots))
         data = {name: [next(shown) for _ in items] for name, items in groups.items()}
         data["mios"] = self._mios(state, tag, install, roots)
-        return envelope(SAVE, {"tag": tag, **data, "ideas_source": "live" if live else "save", "file": analysis["file"],
+        return envelope(SAVE, {"tag": tag, **data, "ideas_source": "live" if live else "save",
+                               "advisors_source": "live" if live_advisors else "save", "file": analysis["file"],
                                "in_game_date": (analysis.get("header") or {}).get("date")},
                         f"Laws, companies and advisors from {analysis['file']['name']}.")
 
@@ -697,6 +699,16 @@ class DebuggerService:
             return False
         try:
             state["ideas"] = self.live.ideas(tag)["ideas"]
+        except Exception:  # live data is optional: the save values stay
+            return False
+        return True
+
+    def _live_advisors(self, tag: str, state: dict) -> bool:
+        """Replaces state["advisors"] with the live hired advisors of `tag` (characters stay from the save)."""
+        if self.live is None:
+            return False
+        try:
+            state["advisors"] = self.live.advisors(tag)["advisors"]
         except Exception:  # live data is optional: the save values stay
             return False
         return True
@@ -892,6 +904,7 @@ class DebuggerService:
         state.pop("_all", None)
         state["buildings"] = self._controlled_buildings(path, install, tag)
         live_ideas = self._live_ideas(tag, state)
+        live_advisors = self._live_advisors(tag, state)
         userdata = (self.detect().get("userdata") or {}).get("path")
         mods = gamefiles.enabled_mods(Path(userdata)) if userdata else []
         defs = modifiers.definitions(tuple(str(r) for r in [install, *mods]))
@@ -914,7 +927,8 @@ class DebuggerService:
             result[field]["base_source"] = base_source[field]
         game = self.detect()
         return envelope(SAVE, {
-            "tag": tag, **result, "ideas_source": "live" if live_ideas else "save", "file": analysis["file"],
+            "tag": tag, **result, "ideas_source": "live" if live_ideas else "save",
+            "advisors_source": "live" if live_advisors else "save", "file": analysis["file"],
             "in_game_date": (analysis.get("header") or {}).get("date"),
             "freshness": save_freshness(analysis["file"]["mtime"], game),
             "not_read": ["core coastal states protection", "at war", "foreign propaganda", "occupation resistance",

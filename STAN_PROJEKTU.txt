@@ -42,6 +42,11 @@ ZROBIONE
             firmy) i rozkład ST/WS ("Spirits and laws LIVE"). Doradcy (postacie), modyfikatory dynamiczne, MIO - nadal
             z zapisu. Tablice gry: wskaźnik, int32 pojemność, int32 rozmiar (poprawione też w umowach handlowych).
             [x] test: zmiana prawa gospodarczego na Partial Mobilization w grze, bez zapisu -> widoczna od razu
+[x] DORADCY I SZTAB NA ŻYWO (2026-10-11): [country+0xFF0] = CCountryCharacters, tablica +0x58 = zatrudnieni
+            (CAdvisor: +0x80 slot, [+0x10] CCharacter z id postaci +0xC). 98/99 zgodne z zapisem (TUR zatrudniła
+            doradcę dzień po zapisie). Government & staff i rozkład ST/WS. Inne tablice CCountryCharacters:
+            +0x10 postacie, +0x40 wszystkie role doradców, +0x70 generałowie, +0x88 admirałowie, +0xA0 naukowcy.
+            [x] test: zatrudnienie doradcy w grze bez zapisu -> widoczny w aplikacji (potwierdzone przez użytkownika)
 [x] Country Editor: panel "Leadership" (portret i cechy przywódcy, partia rządząca, ideologia, frakcja z logo,
             wykres kołowy popularności partii w kolorach ideologii; szczegóły po najechaniu)
 [x] Country Editor: panel "National spirits" (ikony z gry DDS->PNG, modyfikatory i opis po najechaniu;

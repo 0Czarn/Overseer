@@ -482,6 +482,14 @@ class LiveService:
             raise LiveError("unsupported_version", "Live idea reading is only verified for 1.19.3.0.c01a")
         return {"ideas": self._with_country(process, tag, pointers.read_ideas), "tag": tag, "read_at": self._clock()}
 
+    def advisors(self, tag: str) -> dict:
+        """Live hired advisors and staff of `tag`: [{"slot", "id": character id}] (game memory)."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Live advisor reading is only verified for 1.19.3.0.c01a")
+        return {"advisors": self._with_country(process, tag, pointers.read_advisors), "tag": tag,
+                "read_at": self._clock()}
+
     def resources(self, tag: str, resources: list[str]) -> dict:
         """Live resources of `tag` (game memory): the six per-day parts of the save ({part: {resource: amount}})
         plus "imports" [{seller, resource, amount}] and "exports" [{buyer, resource, amount}] of its trade deals.
