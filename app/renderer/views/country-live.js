@@ -2,10 +2,9 @@
 // Stability / war support show what the game shows (base + every modifier, like the in-game tooltip),
 // with the base value editable directly (local memory write, single player only).
 import { h, notice, scopeBadge, toast } from '../lib/dom.js';
-import { REFRESH_EVENT } from '../lib/refresh.js';
+import { dataKey, refreshControl } from '../lib/refresh.js';
 import { FIELD_LABELS, changeSection, directEnabled } from './live-ui.js';
 
-const POLL_MS = 2000;
 const STRIP = ['political_power', 'command_power', 'fuel', 'army_experience', 'navy_experience', 'air_experience'];
 const GAUGES = { stability: 'Stability', war_support: 'War Support' };
 const KIND_LABEL = { party: 'Politics', idea: 'National spirit / law', leader: 'Country leader', advisor: 'Advisor', dynamic: 'Dynamic modifier' };
@@ -205,7 +204,8 @@ export function countryLivePanel(ctx, tag, { isPlayer = false } = {}) {
   const sourceLine = h('div', { class: 'hoi-source' });
   let values = {};
   let stopped = false;
-  let timer = null;
+  let busy = false;
+  let lastBreakdown = null;
   let change = null;
   const changeHost = h('div');
 
@@ -220,6 +220,9 @@ export function countryLivePanel(ctx, tag, { isPlayer = false } = {}) {
         return;
       }
       const d = res.data;
+      const key = dataKey(d);
+      if (key === lastBreakdown) return;   // unchanged: keep open tooltips as they are
+      lastBreakdown = key;
       Object.entries(gauges).forEach(([f, g]) => {
         g.setBreakdown(d[f]);
         if (values[f]?.status !== 'live') g.setBase(d[f].base, 'save');
@@ -229,8 +232,7 @@ export function countryLivePanel(ctx, tag, { isPlayer = false } = {}) {
           ? `Spirits, laws${d.advisors_source === 'live' ? ', advisors' : ''} LIVE; other modifiers from ` : 'Modifiers from ',
           d.file.name, d.in_game_date ? ` (${d.in_game_date.text})` : '',
           d.freshness?.category === 'current_session' ? '' : ' - an older session: save again if the leader changed. '),
-        h('span', { class: 'muted' }, ` Not read yet: ${d.not_read.join(', ')}. `),
-        h('button', { class: 'btn btn-small btn-ghost', onClick: loadBreakdown }, 'Reload'));
+        h('span', { class: 'muted' }, ` Not read yet: ${d.not_read.join(', ')}. `));
     } catch (err) {
       if (!stopped) sourceLine.replaceChildren(notice('warn', `Modifiers unavailable: ${err.message}`));
     }
@@ -239,7 +241,7 @@ export function countryLivePanel(ctx, tag, { isPlayer = false } = {}) {
   const render = (error) => {
     STRIP.forEach((f) => chips[f].update(values[f]));
     Object.entries(gauges).forEach(([f, g]) => { if (values[f]?.status === 'live') g.setBase(values[f].value, 'live'); });
-    status.textContent = error ? error : `LIVE · updated ${new Date().toLocaleTimeString()}`;
+    status.textContent = error ? error : `game memory · read ${new Date().toLocaleTimeString()}`;
     status.className = `hoi-status ${error ? 'hoi-status-off' : 'hoi-status-on'}`;
     const live = values.political_power?.status === 'live';
     if (isPlayer && (change === null || change.enabled !== live)) {
@@ -250,7 +252,6 @@ export function countryLivePanel(ctx, tag, { isPlayer = false } = {}) {
   };
 
   const tick = async () => {
-    if (stopped) return;
     try {
       const res = await ctx.api.get(`/api/live/values?tag=${encodeURIComponent(tag)}`);
       values = res.data ?? {};
@@ -258,20 +259,31 @@ export function countryLivePanel(ctx, tag, { isPlayer = false } = {}) {
     } catch (err) {
       if (!stopped) render(err.message);
     }
-    if (!stopped) timer = setTimeout(tick, POLL_MS);
   };
+
+  const run = async (force) => {   // Live: every LIVE_MS; On refresh: ↻ button
+    if (busy || stopped) return;
+    busy = true;
+    control.button.classList.add('hoi-refresh-busy');
+    if (force) lastBreakdown = null;
+    try {
+      await Promise.all([tick(), loadBreakdown()]);
+    } finally {
+      busy = false;
+      control.button.classList.remove('hoi-refresh-busy');
+    }
+  };
+  const control = refreshControl('Live game memory', 'Live game memory', run);
 
   const panel = h('section', { class: `hoi-panel ${directEnabled() ? 'hoi-editing' : ''}` },
     h('div', { class: 'hoi-head' }, h('span', { class: 'hoi-head-title' }, 'Live game memory'),
-      h('span', { class: 'hoi-head-right' }, editToggle, scopeBadge('local'), status)),
+      h('span', { class: 'hoi-head-right' }, editToggle, scopeBadge('local'), status, control.el)),
     strip,
     h('div', { class: 'hoi-gauges' }, gauges.stability.el, gauges.war_support.el),
     sourceLine,
     isPlayer ? h('details', { class: 'hoi-advanced' }, h('summary', null, 'Advanced: verified change through the game console'),
       changeHost) : null);
   const el = panel;
-  tick();
-  loadBreakdown();
-  window.addEventListener(REFRESH_EVENT, loadBreakdown);   // app-wide refresh interval (top bar)
-  return { el, stop: () => { stopped = true; clearTimeout(timer); change?.stop(); window.removeEventListener(REFRESH_EVENT, loadBreakdown); } };
+  run(true);
+  return { el, stop: () => { stopped = true; control.stop(); change?.stop(); } };
 }

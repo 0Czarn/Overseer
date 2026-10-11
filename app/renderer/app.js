@@ -1,6 +1,5 @@
 // Renderer entry: navigation, shared state, status polling.
 import { createApi } from './lib/api.js';
-import { REFRESH_CHOICES, REFRESH_EVENT } from './lib/refresh.js';
 import { clear, errorBox, h, toast } from './lib/dom.js';
 import { startFocusWatch } from './lib/focus-watch.js';
 import dashboard from './views/dashboard.js';
@@ -35,15 +34,14 @@ const state = {
   selectedCountry: prefs.selectedCountry ?? 'GER',
   observerCountry: prefs.observerCountry ?? 'SOV',
   compact: Boolean(prefs.compact),
-  refreshSec: Number.isFinite(prefs.refreshSec) ? prefs.refreshSec : 10,
   alwaysOnTop: false,
   status: null,
 };
 
 function savePrefs() {
   try {
-    const { selectedCountry, observerCountry, compact, refreshSec } = state;
-    localStorage.setItem(PREFS_KEY, JSON.stringify({ selectedCountry, observerCountry, compact, refreshSec }));
+    const { selectedCountry, observerCountry, compact } = state;
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ selectedCountry, observerCountry, compact }));
   } catch {
     /* storage unavailable - preferences are a convenience only */
   }
@@ -170,16 +168,6 @@ async function init() {
   applyCompact();
   document.getElementById('toggle-compact').addEventListener('change', (e) => ctx.setState({ compact: e.target.checked }));
   document.getElementById('toggle-ontop').addEventListener('change', (e) => ctx.setAlwaysOnTop(e.target.checked));
-  const interval = document.getElementById('refresh-interval');
-  interval.replaceChildren(...REFRESH_CHOICES.map((s) => new Option(s ? `${s} s` : 'Off', String(s), false, s === state.refreshSec)));
-  interval.addEventListener('change', (e) => ctx.setState({ refreshSec: Number(e.target.value) }));
-  let lastTick = Date.now();
-  setInterval(() => {   // app-wide refresh tick for the data tiles
-    if (state.refreshSec && Date.now() - lastTick >= state.refreshSec * 1000 && !document.hidden) {
-      lastTick = Date.now();
-      window.dispatchEvent(new Event(REFRESH_EVENT));
-    }
-  }, 1000);
   if (bridge) {
     state.alwaysOnTop = (await bridge.getWindowState()).alwaysOnTop;
     const info = await bridge.backendInfo();

@@ -73,8 +73,8 @@ function runSmoke(win, outDir, quit) {
               lines: g.querySelectorAll('.hoi-lines .hoi-line').length }))`);
             if (info.gauges.length !== 2) result.failures.push(`${size.name}/country-editor: stability/war support gauges missing`);
             await waitFor(wc, `document.querySelectorAll('.live-panel-body').length >= 4 && ![...document.querySelectorAll('.live-panel-body > .muted')].some((e) => e.textContent.startsWith('Reading'))`, 30000);
-            info.refreshButtons = await wc.executeJavaScript(`document.querySelectorAll('.hoi-refresh').length`);
-            if (info.refreshButtons < 4) result.failures.push(`${size.name}/country-editor: ${info.refreshButtons} refresh buttons`);
+            info.modeSwitches = await wc.executeJavaScript(`document.querySelectorAll('.hoi-mode').length`);
+            if (info.modeSwitches < 5) result.failures.push(`${size.name}/country-editor: ${info.modeSwitches} Live/On refresh switches`);
             info.spirits = await wc.executeJavaScript(`document.querySelectorAll('.hoi-panel:not(.gov-panel) .spirit-row .spirit').length`);
             if (!info.spirits) result.failures.push(`${size.name}/country-editor: no national spirits shown`);
             info.government = await wc.executeJavaScript(`[...document.querySelectorAll('.gov-row')].map((r) => r.querySelectorAll('.spirit').length)`);

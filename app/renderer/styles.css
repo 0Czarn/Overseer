@@ -528,4 +528,12 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
 .hoi-refresh:hover { background: #4a3f24; }
 .hoi-refresh-busy { animation: hoi-spin 0.8s linear infinite; }
 @keyframes hoi-spin { to { transform: rotate(360deg); } }
-.topbar-actions select.input-small { width: auto; padding: 2px 6px; }
+.hoi-mode-wrap { display: inline-flex; align-items: center; gap: 6px; }
+.hoi-mode { display: inline-flex; border: 1px solid var(--hoi-trim); border-radius: 3px; overflow: hidden; }
+.hoi-mode-btn { background: #1c1a12; color: var(--hoi-text); border: 0; padding: 2px 8px; font: inherit; font-size: 11px;
+  cursor: pointer; opacity: 0.7; }
+.hoi-mode-btn + .hoi-mode-btn { border-left: 1px solid var(--hoi-trim); }
+.hoi-mode-btn:hover { background: #3a3220; opacity: 1; }
+.hoi-mode-btn.hoi-mode-on { background: #4a3f24; color: var(--hoi-trim-hi); opacity: 1; font-weight: 600; }
+.hoi-mode-btn:focus-visible, .hoi-refresh:focus-visible { outline: 1px solid var(--hoi-trim-hi); outline-offset: 1px; }
+.hoi-refresh[hidden] { display: none; }
