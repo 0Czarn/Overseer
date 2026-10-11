@@ -44,6 +44,36 @@ class TechTreeTests(TempDirMixin, unittest.TestCase):
             "infantry_folder": {"sprite": "GFX_infantry_folder_tab", "x": 22},
             "electronics_folder": {"sprite": "GFX_techtree_engineering_tab", "x": 645}})
 
+    def test_layout_like_the_game(self):
+        # infantry_folder: gridbox infantry_weapons_tree at 140/325, 70 px slots, LEFT; infantry_weapons1 y = @1936 = 2
+        # -> x 280, under the "1936" label at 270 of the game's window
+        (self.tmp / "interface").mkdir()
+        (self.tmp / "interface" / "countrytechtreeview.gui").write_text(
+            'guiTypes = {\n'
+            '  containerWindowType = { name = "infantry_folder" position = { x = 0 y = 47 } size = { width = 100%% }\n'
+            '    containerWindowType = { name = "techtree_stripes" position = { x = 0 y = 0 }\n'
+            '      instantTextBoxType = { name = "infantry_year3" position = { x = 270 y = 50 } font = "hoi_36header" text = "1936" } }\n'
+            '    gridboxtype = { name = "infantry_weapons_tree" position = { x = 140 y = 325 }\n'
+            '      slotsize = { width = 70 height = 70 } format = "LEFT" } }\n'
+            '  containerWindowType = { name = "techtree_infantry_folder_item" position = { x = -56 y = -7 }\n'
+            '    size = { width = 183 height = 84 } }\n}\n', encoding="utf-8")
+        techtree._gui.cache_clear()
+        layout = techtree.folder_layout((str(self.tmp),), "infantry_folder")
+        self.assertEqual(layout["grids"]["infantry_weapons_tree"],
+                         {"x": 140.0, "y": 325.0, "w": 70.0, "h": 70.0, "format": "LEFT"})
+        self.assertEqual(layout["labels"], [{"text": "1936", "x": 270.0, "y": 50.0, "size": 36}])
+        self.assertEqual(layout["big"], {"dx": -56.0, "dy": -7.0, "w": 183.0, "h": 84.0})
+        self.assertEqual(layout["small"], {"dx": 0, "dy": 0, "w": 72, "h": 72})   # template missing: game default
+        grid = layout["grids"]["infantry_weapons_tree"]
+        self.assertEqual(techtree.place((0, 2), grid), (280.0, 325.0))
+        self.assertEqual(techtree.place((1, 2), {**grid, "format": "UP"}), (210.0, 465.0))
+        techs = {"infantry_weapons": {"parents": [], "positions": {"infantry_folder": (0, -1)}},
+                 "infantry_weapons1": {"parents": ["infantry_weapons"], "positions": {"infantry_folder": (0, 2)}},
+                 "lonely": {"parents": [], "positions": {"infantry_folder": (5, 5)}}}
+        self.assertIs(techtree.branch_grid("infantry_weapons1", techs, "infantry_folder", layout["grids"]), grid)
+        self.assertIsNone(techtree.branch_grid("lonely", techs, "infantry_folder", layout["grids"]))
+        self.assertIsNone(techtree.folder_layout((str(self.tmp),), "naval_folder"))
+
     def test_trigger(self):
         block = text.parse('available = { OR = { has_dlc = "A" AND = { has_dlc = "B" NOT = { has_dlc = "C" } } } }')
         avail = text.get(block, "available")

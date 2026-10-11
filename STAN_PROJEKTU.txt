@@ -122,7 +122,18 @@ ZROBIONE
             <folder>_tab z interface/countrytechtreeview.gui (quadTextureSprite, 2 klatki: wybrana / zwykła,
             91x61), kolejność wg pozycji x przycisku (Infantry ... Naval, Naval support, Air, Engineering,
             Industry); kliknięcie wybiera kartę (zapamiętana), pod paskiem nazwa i liczba technologii.
-            [ ] następnie: technologie w zakładce + graficzne drzewko (folder.position x/y w plikach technologii)
+[x] RESEARCH: kafelek "Technology tree" (2026-10-11): drzewko wybranej karty w układzie gry -
+            interface/countrytechtreeview.gui: okno <folder>, gałęzie gridbox "<technologia>_tree" (pozycja px,
+            pole 70x70, format LEFT = poziomo: kolumna = y technologii, inne = pionowo), napisy (lata, sekcje)
+            z zagnieżdżonych okien, szablony pól techtree_<folder>_item (183x84, -56/-7) i _small_item (72x72);
+            pozycje folder.position z common/technologies (stałe @1936 z pliku). Duże pole = technologia z
+            enable_equipments (założenie). Tła pól z gry wg stanu (GFX_technology_<folder>_[small_]<stan>_item_bg),
+            ikony GFX_<tech>_medium, linie leads_to (zielone od zbadanych). Stany dla wybranego państwa: zbadana
+            (pamięć +0x40), w trakcie (z paskiem postępu), dostępna, niedostępna; rok "przed czasem" na czerwono.
+            Nazwy jak w grze: własny tekst, inaczej nazwa pierwszego sprzętu (infantry_weapons1 -> Infantry
+            Equipment I). Kontrola: 9 kart bez nakładania się pól (poza 2+2 w Naval support i Air).
+            Brak: tło zakładki i animacja "w trakcie" (DDS skompresowane DXT - konwerter ich nie obsługuje).
+
 [x] Nagłówki kafelków jak w Live game memory: zielone "game memory · read HH:MM:SS" (szczegóły w podpowiedzi),
             bez gry "save <plik> · read HH:MM:SS"
 [x] Country Editor: panel "Leadership" (portret i cechy przywódcy, partia rządząca, ideologia, frakcja z logo,

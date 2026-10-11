@@ -101,6 +101,8 @@ export function researchPanel(ctx, tag) {
 }
 
 const TAB_KEY = 'hoi4dbg.researchTab';
+export const TAB_EVENT = 'hoi4dbg:research-tab';
+const SVG = 'http://www.w3.org/2000/svg';
 
 /** Remembered research tab, or the first one when it is not among `tabs`. */
 export function pickTab(tabs, remembered) {
@@ -145,6 +147,7 @@ export function researchTabsPanel(ctx) {
         b.addEventListener('click', () => {
           selected = t.id;
           writeTab(t.id);
+          window.dispatchEvent(new CustomEvent(TAB_EVENT, { detail: t.id }));
           buttons.forEach((x) => {
             x.classList.toggle('research-tab-on', x.dataset.tab === selected);
             x.setAttribute('aria-pressed', x.dataset.tab === selected ? 'true' : 'false');
@@ -156,8 +159,79 @@ export function researchTabsPanel(ctx) {
         return b;
       });
       showInfo();
+      window.dispatchEvent(new CustomEvent(TAB_EVENT, { detail: selected }));
       body.replaceChildren(h('div', { class: 'research-tab-strip', role: 'group', 'aria-label': 'Research tabs' }, buttons),
         info, h('p', { class: 'muted research-summary' }, res.note));
+    },
+  });
+}
+
+const STATE_LABEL = { researched: 'Researched', researching: 'Researching', available: 'Can be researched',
+  unavailable: 'Not available yet' };
+
+/** Tooltip of a technology in the tree. */
+export function techTitle(t) {
+  return [t.name, STATE_LABEL[t.state] ?? t.state,
+    t.state === 'researching' && t.progress != null ? progressText(t) : '',
+    t.start_year ? `${t.start_year}${t.ahead && t.state !== 'researched' ? ' (ahead of time)' : ''}` : '',
+    t.id].filter(Boolean).join(' · ');
+}
+
+/** Elbow line from the middle of one item to the middle of the next (path "d"). */
+export function elbow(a, b) {
+  const ax = a.x + a.w / 2; const ay = a.y + a.h / 2; const bx = b.x + b.w / 2; const by = b.y + b.h / 2;
+  if (Math.abs(ax - bx) < 1 || Math.abs(ay - by) < 1) return `M${ax},${ay} L${bx},${by}`;
+  const horizontal = Math.abs(bx - ax) > Math.abs(by - ay);
+  return horizontal ? `M${ax},${ay} H${(ax + bx) / 2} V${by} H${bx}` : `M${ax},${ay} V${(ay + by) / 2} H${bx} V${by}`;
+}
+
+function treeItem(d, t) {
+  const bg = d.backgrounds[`${t.size}_${t.state}`] ?? d.backgrounds[`${t.size}_available`];
+  return h('div', {
+    class: `tech-item tech-${t.size} tech-${t.state} ${t.ahead && t.state !== 'researched' ? 'tech-ahead' : ''}`,
+    title: techTitle(t), tabindex: 0,
+    style: { left: `${t.x}px`, top: `${t.y}px`, width: `${t.w}px`, height: `${t.h}px`,
+      backgroundImage: bg ? `url(${bg})` : 'none' },
+  },
+  t.icon ? h('img', { class: 'tech-icon', src: t.icon, alt: '' }) : null,
+  t.size === 'big' ? h('span', { class: 'tech-name' }, t.name) : null,
+  t.state === 'researching' && t.progress != null
+    ? h('div', { class: 'tech-progress' }, h('div', { style: { width: `${Math.min(100, t.progress * 100)}%` } })) : null,
+  t.ahead && t.state !== 'researched' && t.start_year ? h('span', { class: 'tech-year' }, t.start_year) : null);
+}
+
+/** Technology tree tile of one research tab (refreshable). Returns { el, refresh, stop }. */
+export function researchTreePanel(ctx, tag, folder) {
+  return livePanel(ctx, {
+    title: 'Technology tree', id: 'Technology tree', unavailable: 'Technology tree',
+    url: `/api/countries/${encodeURIComponent(tag)}/research/tree?folder=${encodeURIComponent(folder)}`,
+    liveParts: (res) => (res.data?.research_source === 'live' ? ['researched, research'] : []),
+    render(body, res) {
+      const d = res.data;
+      if (!d?.items) {
+        body.replaceChildren(notice('warn', `Technology tree unavailable: ${res.note}`));
+        return;
+      }
+      const byId = Object.fromEntries(d.items.map((t) => [t.id, t]));
+      const svg = document.createElementNS(SVG, 'svg');
+      svg.setAttribute('class', 'tech-lines');
+      svg.setAttribute('width', d.width);
+      svg.setAttribute('height', d.height);
+      d.lines.forEach((l) => {
+        const path = document.createElementNS(SVG, 'path');
+        path.setAttribute('d', elbow(byId[l.from], byId[l.to]));
+        path.setAttribute('class', byId[l.from].state === 'researched' ? 'tech-line-done' : 'tech-line');
+        svg.append(path);
+      });
+      const labels = d.labels.map((lb) => h('span', { class: 'tech-label',
+        style: { left: `${lb.x}px`, top: `${lb.y}px`, fontSize: `${Math.max(12, Math.round(lb.size * 0.55))}px` } }, lb.text));
+      const legend = h('div', { class: 'tech-legend' }, ['researched', 'researching', 'available', 'unavailable']
+        .map((st) => h('span', { class: `tech-legend-item tech-legend-${st}` }, STATE_LABEL[st])),
+      h('span', { class: 'tech-legend-item tech-legend-ahead' }, 'Year: ahead of time'));
+      const scroll = h('div', { class: 'tech-tree-scroll' },
+        h('div', { class: 'tech-tree', style: { width: `${d.width}px`, height: `${d.height}px` } },
+          svg, ...labels, ...d.items.map((t) => treeItem(d, t))));
+      body.replaceChildren(legend, scroll);
     },
   });
 }
@@ -170,10 +244,25 @@ export default {
     const tag = ctx.state.selectedCountry;
     const picker = await countryPicker(ctx);
     const tiles = [researchPanel(ctx, tag), researchTabsPanel(ctx)];
+    const treeHost = h('div');
+    let tree = null;
+    let shown = null;
+    const onTab = (e) => {
+      if (e.detail === shown) return;
+      shown = e.detail;
+      tree?.stop();
+      tree = researchTreePanel(ctx, tag, shown);
+      treeHost.replaceChildren(tree.el);
+    };
+    window.addEventListener(TAB_EVENT, onTab);
     root.append(
       viewHeader('Research', 'Research slots of the selected country and what each one researches.', picker),
       h('div', { class: 'country-head research-head' }, tagChip(tag, 'tag-chip-lg')),
-      ...tiles.map((t) => t.el));
-    return () => tiles.forEach((t) => t.stop());
+      ...tiles.map((t) => t.el), treeHost);
+    return () => {
+      window.removeEventListener(TAB_EVENT, onTab);
+      tiles.forEach((t) => t.stop());
+      tree?.stop();
+    };
   },
 };

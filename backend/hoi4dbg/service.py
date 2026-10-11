@@ -131,7 +131,7 @@ def usable_for(bonus: dict, techs: dict, researched: set[str], in_progress: set[
     every dependency and at least one technology leading to it researched (none = a root), no XOR one researched,
     in a tree folder and without an `allow` condition (country-only or hidden technologies). Sorted by start year,
     then id."""
-    cats = set(bonus.get("categories") or [])
+    cats = set(bonus.get("categories") or [])   # "*" in both = any category (tech tree state)
     out = []
     for tid, t in techs.items():
         if tid in researched or tid in in_progress or not t.get("in_tree") or not cats & set(t.get("categories") or []):
@@ -145,6 +145,17 @@ def usable_for(bonus: dict, techs: dict, researched: set[str], in_progress: set[
 
 
 MONTH_START = (0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334)   # the game has no leap years
+
+
+def _tech_xy(position, consts: dict) -> tuple[float, float]:
+    """(x, y) of folder.position = { x = 0 y = @1936 } with the file's @ constants."""
+    def num(v):
+        v = consts.get(v, v) if isinstance(v, str) else v
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return 0.0
+    return (num(text_mod.get(position, "x")), num(text_mod.get(position, "y"))) if isinstance(position, list) else (0.0, 0.0)
 
 
 def ahead_years(tech: dict | None, today: float | None) -> float:
@@ -806,6 +817,9 @@ class DebuggerService:
                 except Exception:
                     continue
                 for block in (v for k, v in (i for i in items if isinstance(i, tuple)) if k == "technologies"):
+                    # @1936 = 2 at the start of the file: constants used in folder positions
+                    consts = {k: v for k, v in (i for i in block if isinstance(i, tuple)) if k.startswith("@")} \
+                        if isinstance(block, list) else {}
                     for tid, body in (i for i in block if isinstance(i, tuple)) if isinstance(block, list) else []:
                         if not isinstance(body, list):
                             continue
@@ -830,7 +844,16 @@ class DebuggerService:
                                 # a technology can sit in several tabs (one folder block each)
                                 "folders": [text_mod.get(f, "name") for k, f in body
                                             if k == "folder" and isinstance(f, list)
-                                            and isinstance(text_mod.get(f, "name"), str)]}
+                                            and isinstance(text_mod.get(f, "name"), str)],
+                                "positions": {text_mod.get(f, "name"): _tech_xy(text_mod.get(f, "position"), consts)
+                                              for k, f in body if k == "folder" and isinstance(f, list)
+                                              and isinstance(text_mod.get(f, "name"), str)},
+                                # equipment technologies are the big items of the tree
+                                "big": text_mod.get(body, "enable_equipments") is not None,
+                                # the game names a technology without its own text after its first equipment
+                                "equipment": next((e for e in text_mod.get(body, "enable_equipments") or []
+                                                   if isinstance(e, str)), None)
+                                if isinstance(text_mod.get(body, "enable_equipments"), list) else None}
                         except (TypeError, ValueError):
                             continue
             for path in sorted((root / "common" / "defines").glob("*.lua")):
@@ -845,6 +868,19 @@ class DebuggerService:
                 if child in techs:
                     techs[child].setdefault("parents", []).append(tid)
         return techs, defines
+
+    def _tech_names(self, install: Path, ids: set[str], techs: dict) -> dict[str, str]:
+        """{technology id: name as the game shows it}: its own text, else the text of its first equipment
+        (infantry_weapons1 -> infantry_equipment_1 "Infantry Equipment I"), else the id made readable."""
+        keys = set(ids) | {techs[t]["equipment"] for t in ids if techs.get(t, {}).get("equipment")}
+        names = focus_mod.loc_names(install, keys)
+        names.update(focus_mod.loc_names(install, {r for v in names.values() for r in LOC_REF.findall(v)} - set(names)))
+        out = {}
+        for t in ids:
+            key = t if names.get(t) else techs.get(t, {}).get("equipment")
+            text = clean_loc(names[key], names) if key and names.get(key) else None
+            out[t] = text or t.replace("_", " ").capitalize()
+        return out
 
     def research_tabs(self) -> dict:
         """Tabs of the research screen (technology folders) for the installed game, enabled mods and owned DLCs,
@@ -871,6 +907,84 @@ class DebuggerService:
             t["image"] = gfx.icon_data_uri(texture) if texture else None
         return envelope(SAVE, {"tabs": tabs, "dlcs": sorted(dlcs), "mods": len(roots) - 1},
                         f"{len(tabs)} research tabs from the game files, {len(roots) - 1} mod(s), {len(dlcs)} DLC(s).")
+
+    def research_tree(self, tag: str, folder: str) -> dict:
+        """Technologies of one research tab laid out like the game (interface/countrytechtreeview.gui) with the
+        state of each one for `tag`: researched, researching (+ progress), available (ahead of time marked),
+        unavailable; lines from each technology to the ones it leads to."""
+        tag = tag.upper()
+        install = self._install_path()
+        if install is None:
+            return envelope(UNAVAILABLE, None, "Needs the game installation")
+        roots = tuple(str(r) for r in self._game_roots(install))
+        layout = techtree.folder_layout(roots, folder)
+        if layout is None:
+            return envelope(UNAVAILABLE, None, f"The game has no tech tree window for {folder}")
+        research = self.research(tag)
+        rdata = research.get("data") or {}
+        techs, _defines = self._technologies(roots)
+        researched = set(rdata.get("researched") or [])
+        slots = {s["technology"]: s for s in rdata.get("slots") or [] if s.get("technology")}
+        year = rdata.get("game_year")
+        in_tab = {tid: t for tid, t in techs.items() if folder in (t.get("positions") or {})}
+        names = focus_mod.loc_names(install, {lb["text"] for lb in layout["labels"]})
+        loc = lambda key: (clean_loc(names[key], names) if names.get(key) else None) or key  # noqa: E731
+        tech_names = self._tech_names(install, set(in_tab), techs)
+        sprites = gfx.sprites(roots)
+
+        def sprite(name):
+            texture = sprites.get(name)
+            return gfx.icon_data_uri(texture) if texture else None
+
+        def background(size, state):
+            small = "small_" if size == "small" else ""
+            for name in (f"GFX_technology_{folder}_{small}{state}_item_bg", f"GFX_technology_{small}{state}_item_bg",
+                         f"GFX_technology_{state}_item_bg"):
+                uri = sprite(name)
+                if uri:
+                    return uri
+            return None
+        items = []
+        for tid, t in in_tab.items():
+            grid = techtree.branch_grid(tid, techs, folder, layout["grids"])
+            if grid is None:
+                continue
+            x, y = techtree.place(t["positions"][folder], grid)
+            size = "big" if t.get("big") else "small"
+            box = layout[size]
+            if tid in researched:
+                state = "researched"
+            elif tid in slots:
+                state = "researching"
+            elif researched and usable_for({"categories": ["*"]}, {tid: {**t, "categories": ["*"]}}, researched, set()):
+                state = "available"
+            else:
+                state = "unavailable"
+            slot = slots.get(tid) or {}
+            items.append({"id": tid, "name": tech_names[tid], "x": x + box["dx"], "y": y + box["dy"], "w": box["w"],
+                          "h": box["h"], "size": size, "state": state, "start_year": t.get("start_year"),
+                          "ahead": bool(year and t.get("start_year") and t["start_year"] > year),
+                          "progress": slot.get("progress"), "days_left": slot.get("days_left"),
+                          "icon": sprite(f"GFX_{tid}_medium")})
+        # big items sit 56 px left of their slot: shift the whole tab when one would start outside
+        dx = max(0.0, 10 - min([i["x"] for i in items] + [10]))
+        dy = max(0.0, 10 - min([i["y"] for i in items] + [10]))
+        for i in items:
+            i["x"] += dx
+            i["y"] += dy
+        layout = {**layout, "labels": [{**lb, "x": lb["x"] + dx, "y": lb["y"] + dy} for lb in layout["labels"]]}
+        placed = {i["id"]: i for i in items}
+        lines = [{"from": tid, "to": child} for tid in placed for child in techs[tid].get("leads_to") or []
+                 if child in placed]
+        width = max([i["x"] + i["w"] for i in items] + [lb["x"] + 200 for lb in layout["labels"]] + [400]) + 20
+        height = max([i["y"] + i["h"] for i in items] + [lb["y"] + 60 for lb in layout["labels"]] + [300]) + 20
+        backgrounds = {f"{size}_{state}": background(size, "currently_researching" if state == "researching" else state)
+                       for size in ("big", "small") for state in ("researched", "researching", "available", "unavailable")}
+        data = {"tag": tag, "folder": folder, "width": width, "height": height, "items": items, "lines": lines,
+                "labels": [{**lb, "text": loc(lb["text"])} for lb in layout["labels"]],
+                "backgrounds": backgrounds, "research_source": rdata.get("research_source"),
+                "file": rdata.get("file"), "in_game_date": rdata.get("in_game_date")}
+        return envelope(SAVE, data, f"{len(items)} technologies of {folder}.")
 
     def research(self, tag: str) -> dict:
         """Research slots of `tag` and what each one researches: game memory while the game runs, else the newest
@@ -919,25 +1033,24 @@ class DebuggerService:
         names = focus_mod.loc_names(install, ids | {b["name"] for b in bonuses if b["name"]}
                                     | {k for b in bonuses for c in b["categories"] for k in (c, f"{c}_research")})
         sprites = gfx.sprites(roots)
+        usable = {b["id"]: usable_for(b, techs, set(researched or []), ids) for b in bonuses} if researched else {}
+        tech_names = self._tech_names(install, ids | {t for u in usable.values() for t in u}, techs)
         out = []
         for s in slots:
             tech = s["technology"]
             sprite = sprites.get(f"GFX_{tech}_medium") if tech else None
-            out.append({**s, "name": clean_loc(names[tech], names) if tech and names.get(tech) else tech,
+            out.append({**s, "name": tech_names.get(tech) if tech else None,
                         "icon": gfx.icon_data_uri(sprite) if sprite else None,
                         **research_progress(s, techs.get(tech or ""), defines, today, country_speed)})
-        usable = {b["id"]: usable_for(b, techs, set(researched or []), ids) for b in bonuses} if researched else {}
-        names.update(focus_mod.loc_names(install, {t for u in usable.values() for t in u} - set(names)))
-        refs = {r for v in names.values() for r in LOC_REF.findall(v)} - set(names)   # "$armored_car_equipment_1$"
-        names.update(focus_mod.loc_names(install, refs))
         loc = lambda key: (clean_loc(names[key], names) if key and names.get(key) else None) or key  # noqa: E731
         data = {"tag": tag, "slots": out, "research_source": "live" if live else "save",
+                "researched": sorted(researched or []),
                 "game_year": int(today) if today is not None else None,
                 # categories as the game names research bonuses: "<category>_research" (Motorization Research Speed)
                 "bonuses": [{**b, "label": loc(b["name"]),
                              "category_labels": [loc(f"{c}_research") if names.get(f"{c}_research") else loc(c)
                                                  for c in b["categories"]],
-                             "usable": [{"id": t, "name": loc(t) if names.get(t) else t.replace("_", " ").capitalize(),
+                             "usable": [{"id": t, "name": tech_names[t],
                                          "start_year": techs[t].get("start_year")}
                                         for t in usable.get(b["id"], [])]
                              if researched else None}

@@ -575,3 +575,33 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
 .research-tab-text { width: auto; height: 40px; padding: 0 10px; border: 1px solid var(--hoi-trim); color: var(--hoi-text); }
 .research-tab-text.research-tab-on { background: #4a3f24; }
 .research-tab-info { padding: 8px 10px; border: 1px solid #3a3526; border-top: 0; background: #1c1a12; color: var(--hoi-text); }
+
+/* Technology tree (layout of the game's research screen) */
+.tech-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 8px; font-size: 12px; color: var(--hoi-text); }
+.tech-legend-item::before { content: ''; display: inline-block; width: 10px; height: 10px; margin-right: 5px; border-radius: 2px;
+  vertical-align: -1px; }
+.tech-legend-researched::before { background: #5f8d3a; }
+.tech-legend-researching::before { background: #d9b24a; }
+.tech-legend-available::before { background: #7a8a9a; }
+.tech-legend-unavailable::before { background: #3a3a3a; }
+.tech-legend-ahead::before { background: #b5423a; }
+.tech-tree-scroll { overflow: auto; max-height: 75vh; border: 1px solid #3a3526; background:
+  repeating-linear-gradient(90deg, #15140f 0 140px, #191812 140px 280px); }
+.tech-tree { position: relative; }
+.tech-lines { position: absolute; left: 0; top: 0; pointer-events: none; }
+.tech-line, .tech-line-done { fill: none; stroke-width: 3; }
+.tech-line { stroke: #4a4636; }
+.tech-line-done { stroke: #7d9a4a; }
+.tech-label { position: absolute; color: #b9a776; font-weight: 600; white-space: nowrap; letter-spacing: 0.04em; pointer-events: none; }
+.tech-item { position: absolute; background-repeat: no-repeat; background-size: 100% 100%; box-sizing: border-box; cursor: default; }
+.tech-item:focus-visible { outline: 2px solid var(--hoi-trim-hi); }
+.tech-small .tech-icon { position: absolute; left: 3px; top: 3px; width: 64px; height: 64px; object-fit: contain; }
+.tech-big .tech-icon { position: absolute; left: 50%; top: 58%; transform: translate(-50%, -50%); max-width: 70%; max-height: 62%; }
+.tech-name { position: absolute; left: 6px; top: 3px; right: 6px; font-size: 11px; font-weight: 600; color: #e8e2c8;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 1px #000; }
+.tech-unavailable { filter: grayscale(0.7) brightness(0.75); }
+.tech-researching { outline: 2px solid #d9b24a; outline-offset: -2px; }
+.tech-progress { position: absolute; left: 4px; right: 4px; bottom: 3px; height: 5px; background: #0e100c; }
+.tech-progress > div { height: 100%; background: #d9b24a; }
+.tech-year { position: absolute; right: 3px; bottom: 3px; padding: 0 3px; font-size: 10px; background: #b5423a; color: #fff;
+  border-radius: 2px; }

@@ -96,13 +96,18 @@ function runSmoke(win, outDir, quit) {
             info.researchSlots = await wc.executeJavaScript(`document.querySelectorAll('.research-slot').length`);
             info.researchSwitch = await wc.executeJavaScript(`document.querySelectorAll('.hoi-mode').length`);
             if (!info.researchSlots) result.failures.push(`${size.name}/research: no research slots shown`);
-            if (info.researchSwitch !== 2) result.failures.push(`${size.name}/research: ${info.researchSwitch}/2 Live/On refresh switches`);
+            if (info.researchSwitch < 2) result.failures.push(`${size.name}/research: ${info.researchSwitch} Live/On refresh switches`);
             await waitFor(wc, `!!document.querySelector('.research-tab')`, 20000);
             info.researchTabs = await wc.executeJavaScript(`document.querySelectorAll('.research-tab').length`);
             if (!info.researchTabs) result.failures.push(`${size.name}/research: no research tabs shown`);
             info.researchTabImages = await wc.executeJavaScript(`[...document.querySelectorAll('.research-tab')].filter((b) => b.style.backgroundImage).length`);
             if (info.researchTabImages !== info.researchTabs) result.failures.push(`${size.name}/research: ${info.researchTabImages}/${info.researchTabs} tabs with the game image`);
+            await waitFor(wc, `!!document.querySelector('.tech-item, .tech-tree-scroll + .notice')`, 60000);
+            info.techItems = await wc.executeJavaScript(`document.querySelectorAll('.tech-item').length`);
+            if (!info.techItems) result.failures.push(`${size.name}/research: technology tree empty`);
             await wc.executeJavaScript(`document.querySelector('.research-tab-strip').scrollIntoView()`);
+            await sleep(300);
+            await wc.executeJavaScript(`document.querySelector('.tech-tree-scroll')?.scrollIntoView({ block: 'start' })`);
             wc.invalidate();
             await sleep(1200);
           }
