@@ -58,6 +58,12 @@ ZROBIONE
             Oba 99/99 zgodne z zapisem. Kafelek Leadership i ST/WS. Szablon i zasady frakcji to w pamięci tokeny -
             zostają z zapisu, dopóki przywódca frakcji się nie zmieni.
             [x] test: wyrzucenie Tuwy z Kominternu w grze bez zapisu -> zniknęła z listy (potwierdzone)
+[x] DOKTRYNY NA ŻYWO (2026-10-11): [[hoi4.exe+0x332F260]+0x400] = CDoctrineSystem, [+0x8] = tablica po 0xA0 na
+            slot państwa; teczki po 0x50 (+0x10 wielka doktryna, +0x18 ścieżki po 0x60, poddoktryna +0x8); w szablonie
+            tylko klucz nazwy (+0x28) -> id z common/doctrines (warianty x/x_no_lar: ten używany w zapisie).
+            99/99 zgodne z zapisem. Rozkład ST/WS. Odblokowane nagrody - jeszcze z zapisu (nie znaleziono w pamięci;
+            w zapisie 1936 nikt ich nie ma, więc nie było z czym porównać).
+            [x] test: ZSRR wybrał mobile_infantry i guerilla_war w grze bez zapisu -> odczytane z pamięci
 [x] Nagłówki kafelków jak w Live game memory: zielone "game memory · read HH:MM:SS" (szczegóły w podpowiedzi),
             bez gry "save <plik> · read HH:MM:SS"
 [x] Country Editor: panel "Leadership" (portret i cechy przywódcy, partia rządząca, ideologia, frakcja z logo,

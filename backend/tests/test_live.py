@@ -942,3 +942,29 @@ class IdeaPointerTests(unittest.TestCase):
                          {"name": "Allies", "icon": "GFX_faction_icon_allies", "members": ["ENG", "CAN"]})
         with self.assertRaises(pointers.PointerError):   # a member that is no country: wrong layout
             pointers.read_faction(mem, country, {eng: "ENG"})
+
+    def test_read_doctrines(self):
+        mem = FakeMemory(0x4000)
+        static = 0x400_0000
+        mem.regions_data[static] = bytearray(0x100)
+        module_base = static - pointers.COUNTRY_TABLE[0]
+        tags = ["GER", "ENG", "SOV"]
+        root, system, array = BASE + 0x100, BASE + 0x600, BASE + 0x800
+        folders, tracks, grand, sub = BASE + 0xC00, BASE + 0x1000, BASE + 0x2000, BASE + 0x2400
+        mem.put(static, "Q", root)
+        mem.put(root + pointers.DOCTRINE_SYSTEM, "Q", system)
+        mem.put(system + pointers.DOCTRINE_COUNTRIES, "Q", array)
+        entry = array + pointers.DOCTRINE_ENTRY * 3    # SOV: slot 3 of the country table
+        mem.put(entry + 8, "Q", 3)
+        mem.put(entry + pointers.DOCTRINE_FOLDERS, "Q", folders)
+        mem.put(entry + pointers.DOCTRINE_FOLDERS + 12, "i", 2)           # land and naval folder
+        mem.put(folders + pointers.FOLDER_GRAND, "Q", grand)
+        mem.put(folders + pointers.FOLDER_TRACKS, "Q", tracks)
+        mem.put(folders + pointers.FOLDER_TRACKS + 12, "i", 2)             # 2 tracks, the 2nd empty
+        mem.put(tracks + pointers.TRACK_SUB, "Q", sub)
+        self._string(mem, grand + pointers.TEMPLATE_NAME, "GRAND_DOCTRINE_MASS_ASSAULT")
+        self._string(mem, sub + pointers.TEMPLATE_NAME, "SUBDOCTRINE_HUMAN_WAVES")
+        self.assertEqual(pointers.read_doctrines(mem, module_base, tags, "SOV"),
+                         ["GRAND_DOCTRINE_MASS_ASSAULT", "SUBDOCTRINE_HUMAN_WAVES"])
+        with self.assertRaises(pointers.PointerError):   # entry of another slot: wrong layout
+            pointers.read_doctrines(mem, module_base, tags, "ENG")

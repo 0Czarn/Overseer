@@ -378,6 +378,62 @@ def read_faction(memory, country: int, tags: dict[int, str]) -> dict | None:
             "icon": _msvc_string(memory, faction + FACTION_FIELDS["icon"]), "members": members}
 
 
+# Doctrines (2026-10-11, 99/99 countries: the save's grand doctrines and subdoctrines, same order):
+# [[hoi4.exe + COUNTRY_TABLE[0]] + 0x400] = CDoctrineSystem; [+ 0x8] = inline array of CCountryDoctrineStatus, 0xa0
+# bytes each, one per country table slot (entry + 0x8 = the slot); entry + 0x10 = folders (inline, 0x50 bytes each,
+# int32 size + 0x1c): folder + 0x10 = CGrandDoctrineTemplate or 0, + 0x18 = tracks (inline, 0x60 bytes each, int32
+# size + 0x24 of the folder): track + 0x8 = CSubDoctrineTemplate or 0. Templates hold no id, only the name key
+# (std::string + 0x28, e.g. GRAND_DOCTRINE_MASS_ASSAULT) - the id comes from common/doctrines. Unlocked rewards
+# are not located yet.
+DOCTRINE_SYSTEM = 0x400
+DOCTRINE_COUNTRIES = 0x8
+DOCTRINE_ENTRY = 0xA0
+DOCTRINE_FOLDERS = 0x10
+FOLDER_SIZE, TRACK_SIZE = 0x50, 0x60
+FOLDER_GRAND, FOLDER_TRACKS = 0x10, 0x18
+TRACK_SUB = 0x8
+TEMPLATE_NAME = 0x28
+
+
+def read_doctrines(memory, module_base: int, tags: list[str], tag: str) -> list[str]:
+    """Name keys of the grand doctrines and slotted subdoctrines of `tag`, folder by folder, as in the save."""
+    table = _ptr(memory, module_base + COUNTRY_TABLE[0])
+    system = _ptr(memory, table + DOCTRINE_SYSTEM) if table else None
+    array = _ptr(memory, system + DOCTRINE_COUNTRIES) if system else None
+    if array is None:
+        raise PointerError("no_doctrines", "The doctrine system is not readable")
+    slot = tags.index(tag) + 1
+    entry = array + DOCTRINE_ENTRY * slot
+    raw = memory.read(entry + 8, 24)
+    if not raw:
+        raise PointerError("unreadable", f"Doctrines of {tag} are not readable")
+    own_slot, folders, _cap, count = struct.unpack("<QQii", raw)
+    if own_slot != slot or not 0 <= count <= 16:
+        raise PointerError("implausible", "Doctrine entry does not belong to the country - layout does not match")
+    out = []
+
+    def name(template):
+        key = _msvc_string(memory, template + TEMPLATE_NAME)
+        if not key or not re.fullmatch(r"[A-Za-z0-9_]+", key):
+            raise PointerError("implausible", "A doctrine has no readable name - layout does not match")
+        return key
+    for k in range(count):
+        folder = folders + FOLDER_SIZE * k
+        head = memory.read(folder + FOLDER_GRAND, 0x18)
+        if not head:
+            raise PointerError("unreadable", "A doctrine folder is not readable")
+        grand, tracks, _tcap, tcount = struct.unpack("<QQii", head)
+        if grand:
+            out.append(name(grand))
+        if not 0 <= tcount <= 16:
+            raise PointerError("implausible", "Doctrine tracks out of range - layout does not match")
+        for t in range(tcount):
+            sub = _ptr(memory, tracks + TRACK_SIZE * t + TRACK_SUB)
+            if sub:
+                out.append(name(sub))
+    return out
+
+
 # Plausible ranges for direct (local) writes; the game itself clamps some of them.
 WRITE_RANGES = {"stability": (0.0, 1.0), "war_support": (0.0, 1.0), "political_power": (-10_000.0, 100_000.0),
                 "command_power": (0.0, 10_000.0), "fuel": (0.0, 100_000_000.0), "army_experience": (0.0, 100_000.0),

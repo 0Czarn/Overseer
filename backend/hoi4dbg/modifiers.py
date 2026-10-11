@@ -80,6 +80,7 @@ def definitions(roots: tuple[str, ...]) -> dict:
     bop: dict[str, list] = {}         # balance of power -> [{"id", "min", "max", "mods", "side"}]
     buildings: dict[str, dict] = {}   # building -> {"controllers": [tags] or None (any), "mods"}
     doctrines: dict[str, dict] = {}   # grand doctrine / subdoctrine -> {"mods", "rewards": [(name, mods)]}
+    doctrine_names: dict[str, list[str]] = {}   # name key -> ids in definition order (game memory holds the key)
     defines: dict[str, float] = {}
     for root in map(Path, roots):
         for path in sorted((root / "common" / "ideas").glob("*.txt")):
@@ -137,6 +138,10 @@ def definitions(roots: tuple[str, ...]) -> dict:
             for name, body in (e for e in _parse(path) if isinstance(e, tuple)):
                 if isinstance(body, list):
                     rewards = text.get(body, "rewards")
+                    if isinstance(text.get(body, "name"), str):
+                        ids = doctrine_names.setdefault(text.get(body, "name"), [])
+                        if name not in ids:
+                            ids.append(name)
                     doctrines[name] = {
                         "mods": {k: v for k, v in _numbers(body).items() if k not in NOT_MODIFIERS},
                         "rewards": [(r, _numbers(m)) for r, m in (i for i in rewards or [] if isinstance(i, tuple))]
@@ -153,7 +158,8 @@ def definitions(roots: tuple[str, ...]) -> dict:
                 if m:
                     defines[name] = float(m.group(1))
     return {"ideas": ideas, "idea_names": idea_names, "idea_meta": idea_meta, "dynamic_icons": dynamic_icons, "traits": traits, "dynamic": dynamic, "static": static,
-            "rules": rules, "bop": bop, "buildings": buildings, "doctrines": doctrines, "defines": defines}
+            "rules": rules, "bop": bop, "buildings": buildings, "doctrines": doctrines,
+            "doctrine_names": doctrine_names, "defines": defines}
 
 
 def _bop_ranges(body: list) -> list[dict]:

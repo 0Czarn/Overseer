@@ -744,6 +744,26 @@ class DebuggerService:
                 "leader": faction["members"][0] == tag}
         return True
 
+    def _live_doctrines(self, tag: str, state: dict, defs: dict, everyone: dict) -> bool:
+        """Replaces state["doctrines"] with the live ones of `tag`. A name key shared by variants (e.g. x and
+        x_no_lar) resolves to the variant this game uses in the save, else the first defined; unlocked rewards stay
+        from the save for the same doctrine. False when not readable."""
+        if self.live is None:
+            return False
+        try:
+            keys = self.live.doctrines(tag)["names"]
+        except Exception:  # live data is optional: the save values stay
+            return False
+        used = {d["id"] for st in everyone.values() for d in st.get("doctrines") or []}
+        rewards = {d["id"]: d["rewards"] for d in state.get("doctrines") or []}
+        out = []
+        for key in keys:
+            ids = defs["doctrine_names"].get(key) or [key]
+            doctrine = next((i for i in ids if i in used), ids[0])
+            out.append({"id": doctrine, "rewards": rewards.get(doctrine, 0)})
+        state["doctrines"] = out
+        return True
+
     def _live_parties(self, tag: str, roots: tuple[str, ...]) -> dict | None:
         """Live popularity / ruling party, or None (game not running, other version, ...)."""
         if self.live is None:
@@ -921,7 +941,7 @@ class DebuggerService:
             return envelope(UNAVAILABLE, {"file": path.name, "error": {"code": exc.code, "message": str(exc)}},
                             str(exc))
         analysis = state.pop("analysis")
-        state.pop("_all", None)
+        everyone = state.pop("_all", {})
         state["buildings"] = self._controlled_buildings(path, install, tag)
         live_ideas = self._live_ideas(tag, state)
         live_advisors = self._live_advisors(tag, state)
@@ -929,6 +949,7 @@ class DebuggerService:
         mods = gamefiles.enabled_mods(Path(userdata)) if userdata else []
         defs = modifiers.definitions(tuple(str(r) for r in [install, *mods]))
         self._live_leadership(tag, tuple(str(r) for r in [install, *mods]), state)
+        live_doctrines = self._live_doctrines(tag, state, defs, everyone)
         names = focus_mod.loc_names(install, modifiers.loc_keys(state, defs))
         base_source = {}
         for field in modifiers.KEYS:
@@ -945,7 +966,8 @@ class DebuggerService:
         game = self.detect()
         return envelope(SAVE, {
             "tag": tag, **result, "ideas_source": "live" if live_ideas else "save",
-            "advisors_source": "live" if live_advisors else "save", "file": analysis["file"],
+            "advisors_source": "live" if live_advisors else "save",
+            "doctrines_source": "live" if live_doctrines else "save", "file": analysis["file"],
             "in_game_date": (analysis.get("header") or {}).get("date"),
             "freshness": save_freshness(analysis["file"]["mtime"], game),
             "not_read": ["core coastal states protection", "at war", "foreign propaganda", "occupation resistance",

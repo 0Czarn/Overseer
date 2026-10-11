@@ -491,6 +491,16 @@ class LiveService:
                                                                            pointers.read_dynamic_modifiers(mem, c)))
         return {"ideas": ideas, "dynamic_modifiers": dynamic, "tag": tag, "read_at": self._clock()}
 
+    def doctrines(self, tag: str) -> dict:
+        """Live grand doctrines and subdoctrines of `tag` as name keys of common/doctrines (game memory)."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Live doctrine reading is only verified for 1.19.3.0.c01a")
+        key = (process["pid"], process.get("started"))
+        names = self._with_country(process, tag, lambda mem, _c: pointers.read_doctrines(
+            mem, self._module_base[key], self._tags[process.get("install") or ""], tag))
+        return {"names": names, "tag": tag, "read_at": self._clock()}
+
     def advisors(self, tag: str) -> dict:
         """Live hired advisors and staff of `tag`: [{"slot", "id": character id}] (game memory)."""
         process = self._process()
