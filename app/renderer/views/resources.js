@@ -1,5 +1,5 @@
-// Country Editor: resources per day (newest save) - produced, to market, sold, imported, available, used - with
-// a small pie per resource (where the supply at home comes from / where production goes) and game icons.
+// Country Editor: resources per day (game memory while the game runs, else newest save) - produced, to market,
+// sold, imported, available, used - with a small pie per resource (where the supply at home comes from / where production goes) and game icons.
 import { h, notice } from '../lib/dom.js';
 import { livePanel, saveSource } from '../lib/refresh.js';
 import { slicePath } from './overview.js';
@@ -94,7 +94,7 @@ function totalsPie(rows, key, title, parts) {
 export function resourcesPanel(ctx, tag) {
   return livePanel(ctx, {
     title: 'Resources (per day)', url: `/api/countries/${encodeURIComponent(tag)}/resources`, unavailable: 'Resources',
-    describe: (res) => saveSource(res),
+    describe: (res) => saveSource(res, res.data?.resources_source === 'live' ? ['resources, trade deals'] : []),
     render(body, res) {
       const d = res.data;
       if (!d?.resources) {

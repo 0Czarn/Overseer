@@ -28,6 +28,15 @@ ZROBIONE
     baza ST/WS, PP/CP/paliwo/XP. Z NAJNOWSZEGO ZAPISU (odświeżane przy nowym zapisie/autozapisie):
     duchy, prawa, doradcy, MIO, zasoby, przywódca, frakcja - do odnalezienia w pamięci (zasoby: nie ma ich
     w zasięgu 2 wskaźników od obiektu państwa; gra nie trzyma sum - szczegóły i dalsze kroki w RAPORT_2026-10-10.txt)
+    2026-10-11: commit 28aa60a (Resources, partie na żywo, odświeżanie).
+[x] ZASOBY NA ŻYWO (2026-10-11): metoda "przed/po" (użytkownik kupił 24 ropy od USA w zapauzowanej grze) +
+            nazwy klas C++ z RTTI gry. [country+0x11F8] = CCountryResources: pule (wydobycie +0x28, import +0x188,
+            dostępne +0x238, zużycie +0x398 ujemne, na rynek +0x450, sprzedane +0x5B0), 7 surowców w kolejności
+            common/resources, fixed64/100000. Umowy: [CR+0x740] lista importu (liczba CR+0x748), CResourceExchange
+            (+0x80 CR sprzedawcy, +0x90 surowiec, +0x98 ilość). Zgodność z zapisem 97/99 państw (2 różnice = zmiana
+            zrobiona w grze po zapisie). Kafelek Resources czyta pamięć ("LIVE: resources, trade deals"), bez gry - zapis.
+            Pule gra przelicza przy tyknięciu dnia; lista umów i "sprzedane" zmieniają się od razu.
+            [x] potwierdzone po 1 dniu gry: import ZSRR = 24 ropy, guma 0 (umowa z FRA zniknęła)
 [x] Country Editor: panel "Leadership" (portret i cechy przywódcy, partia rządząca, ideologia, frakcja z logo,
             wykres kołowy popularności partii w kolorach ideologii; szczegóły po najechaniu)
 [x] Country Editor: panel "National spirits" (ikony z gry DDS->PNG, modyfikatory i opis po najechaniu;

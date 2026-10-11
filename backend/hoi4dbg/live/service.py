@@ -475,6 +475,38 @@ class LiveService:
         out = self._with_country(process, tag, lambda mem, c: pointers.read_parties(mem, c, ideologies))
         return {**out, "tag": tag, "read_at": self._clock()}
 
+    def resources(self, tag: str, resources: list[str]) -> dict:
+        """Live resources of `tag` (game memory): the six per-day parts of the save ({part: {resource: amount}})
+        plus "imports" [{seller, resource, amount}] and "exports" [{buyer, resource, amount}] of its trade deals.
+        `resources` = names in the order of common/resources."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Live resource reading is only verified for 1.19.3.0.c01a")
+        key = (process["pid"], process.get("started"))
+        install = process.get("install") or ""
+        if install not in self._tags:
+            self._tags[install] = pointers.tag_order(Path(install))
+        try:
+            with self._open_memory(process["pid"]) as mem:
+                if key not in self._module_base:
+                    self._module_base[key] = mem.modules()[pointers.MODULE][0]
+                countries = pointers.country_objects(mem, self._module_base[key], self._tags[install])
+                if tag not in countries:
+                    raise LiveError("country_missing", f"{tag} has no country object in the running game")
+                cr_of = {t: pointers._ptr(mem, c + pointers.COUNTRY_RESOURCES) for t, c in countries.items()}
+                sellers = {cr: t for t, cr in cr_of.items() if cr}
+                out = pointers.read_resources(mem, pointers.resources_object(mem, countries[tag]), resources)
+                tokens = out.pop("_tokens")
+                out["imports"] = pointers.read_imports(mem, cr_of[tag], tokens, sellers)
+                out["exports"] = [{"buyer": t, "resource": d["resource"], "amount": d["amount"]}
+                                  for t, cr in cr_of.items() if cr and t != tag
+                                  for d in pointers.read_imports(mem, cr, tokens, sellers) if d["seller"] == tag]
+        except pointers.PointerError as exc:
+            raise LiveError(exc.code, str(exc)) from exc
+        except (MemoryAccessError, OSError, KeyError) as exc:
+            raise LiveError("memory_error", f"Game memory access failed: {exc}") from exc
+        return {**out, "tag": tag, "read_at": self._clock()}
+
     def session(self) -> dict:
         """Running game: mode (game.log), local player country and states owned by every country (memory)."""
         process = self._process()

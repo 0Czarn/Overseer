@@ -799,3 +799,43 @@ class PartyPointerTests(unittest.TestCase):
         mem.put(parties[2] + pointers.PARTY_POPULARITY, "q", 500 * 100000)   # not a percentage: wrong layout
         with self.assertRaises(pointers.PointerError):
             pointers.read_parties(mem, country, ["democratic", "communism", "fascism", "neutrality"])
+
+
+class ResourcePointerTests(unittest.TestCase):
+    NAMES = ["oil", "aluminium", "rubber"]
+    TOKENS = [0x4E37, 0x4E1F, 0x3E05]
+
+    def _pools(self, mem, cr, values):
+        for part, pool in pointers.RESOURCE_POOLS.items():
+            for k, (token, v) in enumerate(zip(self.TOKENS, values.get(part, [0, 0, 0]))):
+                mem.put(cr + pool + pointers.POOL_SLOTS + 16 * k, "q", round(v * 100000))
+                mem.put(cr + pool + pointers.POOL_SLOTS + 16 * k + 8, "I", token)
+
+    def test_read_resources_and_imports(self):
+        mem = FakeMemory(0x4000)
+        cr, seller_cr, array, deal, res = BASE + 0x100, BASE + 0x900, BASE + 0x1000, BASE + 0x1100, BASE + 0x1300
+        self._pools(mem, cr, {"produced": [191, 130, 2], "used": [0, -19, -8], "imported": [24, 0, 0]})
+        out = pointers.read_resources(mem, cr, self.NAMES)
+        self.assertEqual(out["produced"], {"oil": 191.0, "aluminium": 130.0, "rubber": 2.0})
+        self.assertEqual(out["used"], {"oil": 0.0, "aluminium": 19.0, "rubber": 8.0})   # stored negative
+        self.assertEqual(out["_tokens"], dict(zip(self.TOKENS, self.NAMES)))
+        mem.put(cr + pointers.IMPORTS, "Q", array)
+        mem.put(cr + pointers.IMPORTS + 8, "i", 1)
+        mem.put(array, "Q", deal)
+        mem.put(deal + pointers.EXCHANGE["seller_resources"], "Q", seller_cr)
+        mem.put(deal + pointers.EXCHANGE["resource"], "Q", res)
+        mem.put(deal + pointers.EXCHANGE["amount"], "q", 24 * 100000)
+        mem.put(res + pointers.RESOURCE_TOKEN, "I", 0x4E37)
+        self.assertEqual(pointers.read_imports(mem, cr, out["_tokens"], {seller_cr: "USA"}),
+                         [{"seller": "USA", "resource": "oil", "amount": 24.0}])
+
+    def test_wrong_layout_is_refused(self):
+        mem = FakeMemory(0x4000)
+        cr = BASE + 0x100
+        self._pools(mem, cr, {})
+        mem.put(cr + pointers.RESOURCE_POOLS["exported"] + pointers.POOL_SLOTS + 8, "I", 0x1234)   # other token
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_resources(mem, cr, self.NAMES)
+        self._pools(mem, cr, {"produced": [5e7, 0, 0]})   # not an amount per day
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_resources(mem, cr, self.NAMES)

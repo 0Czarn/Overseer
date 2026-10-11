@@ -653,10 +653,19 @@ class DebuggerService:
         roots = self._game_roots(install)
         order = resource_order(roots)
         sellers: dict[str, list] = {}
-        for other, st in everyone.items():
-            for deal in (st.get("resources") or {}).get("exports", []):
-                if deal["receiver"] == tag and deal["amount"]:
-                    sellers.setdefault(deal["resource"], []).append({"country": other, "amount": deal["amount"]})
+        live = self._live_resources(tag, list(order))
+        if live:
+            res = {**{k: live[k] for k in ("produced", "to_market", "exported", "imported", "available", "used")},
+                   "exports": [{"receiver": d["buyer"], "resource": d["resource"], "amount": d["amount"]}
+                               for d in live["exports"]]}
+            for deal in live["imports"]:
+                if deal["amount"] and deal["seller"]:
+                    sellers.setdefault(deal["resource"], []).append({"country": deal["seller"], "amount": deal["amount"]})
+        else:
+            for other, st in everyone.items():
+                for deal in (st.get("resources") or {}).get("exports", []):
+                    if deal["receiver"] == tag and deal["amount"]:
+                        sellers.setdefault(deal["resource"], []).append({"country": other, "amount": deal["amount"]})
         keys = set(order) | set().union(*[set(v) for k, v in res.items() if isinstance(v, dict)])
         names = focus_mod.loc_names(install, {f"PRODUCTION_MATERIALS_{k.upper()}" for k in keys})
         rows = []
@@ -674,8 +683,19 @@ class DebuggerService:
         strip = sprites.get("GFX_resources_strip")
         return envelope(SAVE, {"tag": tag, "resources": rows, "icons": gfx.icon_data_uri(strip) if strip else None,
                                "icon_frames": max([v["frame"] for v in order.values()] or [0]),
+                               "resources_source": "live" if live else "save",
                                "file": analysis["file"], "in_game_date": (analysis.get("header") or {}).get("date")},
-                        f"Resources per day from {analysis['file']['name']}.")
+                        "Resources per day from game memory." if live
+                        else f"Resources per day from {analysis['file']['name']}.")
+
+    def _live_resources(self, tag: str, order: list[str]) -> dict | None:
+        """Live resources and trade deals of `tag`, or None (game not running, other version, ...)."""
+        if self.live is None:
+            return None
+        try:
+            return self.live.resources(tag, order)
+        except Exception:  # live data is optional: the save values stay
+            return None
 
     def _live_parties(self, tag: str, roots: tuple[str, ...]) -> dict | None:
         """Live popularity / ruling party, or None (game not running, other version, ...)."""

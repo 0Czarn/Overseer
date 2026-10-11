@@ -74,6 +74,21 @@ def country_object(memory, module_base: int, tags: list[str], tag: str) -> int:
     return country
 
 
+def country_objects(memory, module_base: int, tags: list[str]) -> dict[str, int]:
+    """{tag: country object} for every readable slot of the country table ({} when it is not readable)."""
+    table = _ptr(memory, module_base + COUNTRY_TABLE[0])
+    array = _ptr(memory, table + COUNTRY_TABLE[1]) if table else None
+    data = memory.read(array + 8, 8 * len(tags)) if array else None
+    if not data:
+        return {}
+    out = {}
+    for i, tag in enumerate(tags):
+        country = struct.unpack_from("<Q", data, 8 * i)[0]
+        if 0x10000 <= country < 0x7FFF_FFFF_FFFF:
+            out[tag] = country
+    return out
+
+
 def player_tags(memory, module_base: int, tags: list[str]) -> list[str]:
     """Countries not hidden by fog of war - the player's own country when that is unambiguous. Empty when the flag
     is not readable or too many countries are visible (fog of war off). Not a multiplayer indicator."""
@@ -143,6 +158,81 @@ def read_parties(memory, country: int, ideologies: list[str]) -> dict:
         parties.append(party)
     ruling = _ptr(memory, pol + RULING_PARTY)
     return {"popularity": popularity, "ruling": ideologies[parties.index(ruling)] if ruling in parties else None}
+
+
+# Resources (2026-10-11, 97/99 countries equal to the save in all six parts; the 2 others differed only by a trade
+# deal made in game after the save). Found by RTTI class names (CCountryResources, CStrategicResourcePool,
+# CResourceExchange) after a before/after memory diff of a new trade deal:
+# [country + 0x11f8] = CCountryResources; inside it pools of 0xb0 bytes, each with 8 inline slots of 16 bytes from
+# pool + 0x38: fixed64/100000 amount, then the token of the resource (int32) - slot k = k-th resource of
+# common/resources. used is stored negative. [CR + 0x740] = array of this country's imports (CResourceExchange*),
+# int32 count at CR + 0x748; exchange + 0x38 = buyer country object, + 0x80 = seller's CCountryResources,
+# + 0x90 = resource object (token int32 at + 0x8), + 0x98 = amount (fixed64/100000).
+# Pools are recomputed by the game on the daily tick, except "exported" which follows new deals at once.
+COUNTRY_RESOURCES = 0x11F8
+RESOURCE_POOLS = {"produced": 0x28, "imported": 0x188, "available": 0x238, "used": 0x398, "to_market": 0x450,
+                  "exported": 0x5B0}
+POOL_SLOTS = 0x38
+IMPORTS = 0x740
+EXCHANGE = {"buyer": 0x38, "seller_resources": 0x80, "resource": 0x90, "amount": 0x98}
+RESOURCE_TOKEN = 0x8
+
+
+def resources_object(memory, country: int) -> int:
+    cr = _ptr(memory, country + COUNTRY_RESOURCES)
+    if cr is None:
+        raise PointerError("no_resources", "The country's resources object is not readable")
+    return cr
+
+
+def read_resources(memory, cr: int, resources: list[str]) -> dict:
+    """{part: {resource: amount per day}} for the RESOURCE_POOLS of a CCountryResources object, plus
+    "_tokens": {token: resource} for decoding trade deals."""
+    if not 0 < len(resources) <= 8:
+        raise PointerError("implausible", f"{len(resources)} resources do not fit the 8 slots of a pool")
+    data = memory.read(cr, max(RESOURCE_POOLS.values()) + POOL_SLOTS + 16 * 8)
+    if not data:
+        raise PointerError("no_resources", "The country's resources object is not readable")
+    out: dict = {}
+    tokens = None
+    for part, pool in RESOURCE_POOLS.items():
+        slots = [struct.unpack_from("<qI", data, pool + POOL_SLOTS + 16 * k) for k in range(len(resources))]
+        if tokens is None:
+            tokens = [t for _, t in slots]
+            if len(set(tokens)) != len(tokens) or 0 in tokens:
+                raise PointerError("implausible", "Resource tokens are not distinct - layout does not match")
+        elif [t for _, t in slots] != tokens:
+            raise PointerError("implausible", f"Resource pool {part} has other tokens - layout does not match")
+        values = {name: (-raw if part == "used" else raw) / 100000 for name, (raw, _) in zip(resources, slots)}
+        if any(not -1_000_000 <= v <= 1_000_000 for v in values.values()):
+            raise PointerError("implausible", f"Resource pool {part} out of range - layout does not match")
+        out[part] = values
+    out["_tokens"] = dict(zip(tokens, resources))
+    return out
+
+
+def read_imports(memory, cr: int, tokens: dict[int, str], sellers: dict[int, str]) -> list[dict]:
+    """Trade deals in which the country of `cr` buys: [{"seller": tag, "resource", "amount"}]."""
+    raw = memory.read(cr + IMPORTS, 12)
+    if not raw:
+        return []
+    array, count = struct.unpack("<Qi", raw)
+    if count <= 0:
+        return []
+    if count > 500 or not 0x10000 <= array < 0x7FFF_FFFF_FFFF:
+        raise PointerError("implausible", f"{count} imports - layout does not match")
+    out = []
+    for k in range(count):
+        deal = _ptr(memory, array + 8 * k)
+        seller = _ptr(memory, deal + EXCHANGE["seller_resources"]) if deal else None
+        res = _ptr(memory, deal + EXCHANGE["resource"]) if deal else None
+        token = memory.read(res + RESOURCE_TOKEN, 4) if res else None
+        amount = memory.read(deal + EXCHANGE["amount"], 8) if deal else None
+        if token is None or amount is None:
+            continue
+        out.append({"seller": sellers.get(seller), "resource": tokens.get(struct.unpack("<I", token)[0]),
+                    "amount": struct.unpack("<q", amount)[0] / 100000})
+    return out
 
 
 # Plausible ranges for direct (local) writes; the game itself clamps some of them.
