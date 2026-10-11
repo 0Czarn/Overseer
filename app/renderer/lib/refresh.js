@@ -80,10 +80,12 @@ export function refreshControl(id, title, run) {
 
 /**
  * Tile with header (title, source line, mode switch, ↻) whose content comes from `url`.
- * render(body, res) fills the body; describe(res) returns the source text shown in the header.
+ * render(body, res) fills the body; liveParts(res) names the parts read from game memory. The header shows
+ * "game memory · read <time>" (green) when any part is live, else "save <file> · read <time>"; the details
+ * (live parts, save file, in-game date) are in the tooltip of that line.
  * Returns { el, refresh, stop }.
  */
-export function livePanel(ctx, { title, url, render, describe, cls = '', unavailable = title, id = title }) {
+export function livePanel(ctx, { title, url, render, liveParts, cls = '', unavailable = title, id = title }) {
   const body = h('div', { class: 'live-panel-body' }, h('span', { class: 'muted' }, `Reading ${title.toLowerCase()}…`));
   const source = h('span', { class: 'hoi-status' });
   let last = null;
@@ -102,8 +104,10 @@ export function livePanel(ctx, { title, url, render, describe, cls = '', unavail
         last = key;
         render(body, res);
       }
-      source.textContent = describe?.(res) ?? '';
-      source.title = `Checked ${new Date().toLocaleTimeString()}`;
+      const line = sourceLine(res, liveParts?.(res) ?? [], new Date().toLocaleTimeString());
+      source.textContent = line.text;
+      source.title = line.title;
+      source.className = `hoi-status ${line.live ? 'hoi-status-on' : ''}`.trim();
     } catch (err) {
       if (!stopped) body.replaceChildren(notice('warn', `${unavailable} unavailable: ${err.message}`));
     } finally {
@@ -121,7 +125,14 @@ export function livePanel(ctx, { title, url, render, describe, cls = '', unavail
   return { el, refresh, stop: () => { stopped = true; control.stop(); } };
 }
 
-/** "file · in-game date" source line of a save-based response, with LIVE parts named. */
+/** Header line of a tile: { text, title, live } - see livePanel. */
+export function sourceLine(res, live, time) {
+  if (!res.data?.file) return { text: '', title: '', live: false };
+  return { text: live.length ? `game memory · read ${time}` : `save ${res.data.file.name} · read ${time}`,
+    title: saveSource(res, live), live: live.length > 0 };
+}
+
+/** "file · in-game date" of a save-based response, with LIVE parts named (tooltip of the header line). */
 export function saveSource(res, live = []) {
   const d = res.data;
   if (!d?.file) return '';

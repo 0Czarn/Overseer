@@ -49,6 +49,12 @@ ZROBIONE
             doradcę dzień po zapisie). Government & staff i rozkład ST/WS. Inne tablice CCountryCharacters:
             +0x10 postacie, +0x40 wszystkie role doradców, +0x70 generałowie, +0x88 admirałowie, +0xA0 naukowcy.
             [x] test: zatrudnienie doradcy w grze bez zapisu -> widoczny w aplikacji (potwierdzone przez użytkownika)
+[x] MODYFIKATORY DYNAMICZNE NA ŻYWO (2026-10-11): country+0xE80 = tablica wpisów po 0x40 (+0x18 CDynamicModifier,
+            nazwa +0x28; +0x28 wartości int64/100000, rozmiar +0x34). 99/99 państw, 76 modyfikatorów zgodnych z zapisem.
+            Kafelek National spirits i rozkład ST/WS.
+            [x] test: cel SOV_strengthen_the_mobilization_plan (focus.autocomplete) -> The Red Army zmienia się (potwierdzone)
+[x] Nagłówki kafelków jak w Live game memory: zielone "game memory · read HH:MM:SS" (szczegóły w podpowiedzi),
+            bez gry "save <plik> · read HH:MM:SS"
 [x] Country Editor: panel "Leadership" (portret i cechy przywódcy, partia rządząca, ideologia, frakcja z logo,
             wykres kołowy popularności partii w kolorach ideologii; szczegóły po najechaniu)
 [x] Country Editor: panel "National spirits" (ikony z gry DDS->PNG, modyfikatory i opis po najechaniu;

@@ -1,7 +1,7 @@
 // Country Editor: who rules the country - leader, ideology, faction and party popularity pie (newest save),
 // in the style of the game's politics screen.
 import { h, notice } from '../lib/dom.js';
-import { livePanel, saveSource } from '../lib/refresh.js';
+import { livePanel } from '../lib/refresh.js';
 import { formatModifier, modifierClass } from './spirits.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
@@ -82,7 +82,7 @@ function factionBlock(f) {
 export function overviewPanel(ctx, tag) {
   return livePanel(ctx, {
     title: 'Leadership', url: `/api/countries/${encodeURIComponent(tag)}/overview`,
-    describe: (res) => saveSource(res, res.data?.parties_source === 'live' ? ['parties'] : []),
+    liveParts: (res) => (res.data?.parties_source === 'live' ? ['parties'] : []),
     render(body, res) {
       const d = res.data;
       if (!d?.parties) {

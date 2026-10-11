@@ -214,6 +214,45 @@ def read_ideas(memory, country: int) -> list[str]:
     return out
 
 
+# Dynamic modifiers (2026-10-11, 99/99 countries / 76 modifiers equal to the save, names and every value):
+# country + 0xe80 = array of 0x40-byte SDynamicModifierEntry (pointer, int32 capacity, int32 size - inline entries,
+# not pointers); entry + 0x18 = CDynamicModifier (+ 0x28 = its id, std::string), entry + 0x20 = 1 (enabled; only 1
+# seen), entry + 0x28 = int64 values / 100000 in the order of the definition in common/dynamic_modifiers, size at
+# entry + 0x34.
+DYNAMIC_MODIFIERS = 0xE80
+DYNAMIC_ENTRY = 0x40
+DYNAMIC = {"definition": 0x18, "enabled": 0x20, "values": 0x28}
+DYNAMIC_NAME = 0x28
+
+
+def read_dynamic_modifiers(memory, country: int) -> list[dict]:
+    """[{"id", "values": [float], "enabled"}] of a country object, like the save's dynamic_modifier blocks."""
+    raw = memory.read(country + DYNAMIC_MODIFIERS, 16)
+    if not raw:
+        raise PointerError("unreadable", "The dynamic modifiers of the country are not readable")
+    array, capacity, size = struct.unpack("<Qii", raw)
+    if size == 0:
+        return []
+    if not 0 < size <= min(capacity, 200):
+        raise PointerError("implausible", f"{size}/{capacity} dynamic modifiers - layout does not match")
+    out = []
+    for k in range(size):
+        entry = array + DYNAMIC_ENTRY * k
+        head = memory.read(entry + DYNAMIC["definition"], 0x20)
+        if not head:
+            raise PointerError("unreadable", "A dynamic modifier is not readable")
+        definition, enabled, values, _cap, count = struct.unpack("<QqQii", head)
+        name = _msvc_string(memory, definition + DYNAMIC_NAME)
+        if not name or not re.fullmatch(r"[A-Za-z0-9_.\-]+", name) or not 0 <= count <= 500:
+            raise PointerError("implausible", "A dynamic modifier has no readable id - layout does not match")
+        data = memory.read(values, 8 * count) if count else b""
+        if data is None:
+            raise PointerError("unreadable", f"Values of {name} are not readable")
+        out.append({"id": name, "values": [v / 100000 for v in struct.unpack(f"<{count}q", data)],
+                    "enabled": enabled != 0})
+    return out
+
+
 # Advisors (2026-10-11, 98/99 countries equal to the save; TUR had hired one in the game day after it):
 # [country + 0xff0] = CCountryCharacters; its array + 0x58 (read_array) = hired advisors (CAdvisor*, political
 # advisors, theorists, chiefs of staff and high command alike); CAdvisor + 0x80 = slot (std::string),

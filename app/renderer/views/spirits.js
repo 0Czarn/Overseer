@@ -1,6 +1,6 @@
 // National spirits of the selected country (newest save): HOI4-like icon row; modifiers show on hover / focus.
 import { h, notice } from '../lib/dom.js';
-import { livePanel, saveSource } from '../lib/refresh.js';
+import { livePanel } from '../lib/refresh.js';
 
 // Modifiers where a higher value is worse for the country (shown red when positive), as in the game's tooltips.
 const BAD_WHEN_HIGH = /cost|penalty|accident|consumption|losses|attrition|requirement|need|to_others|weekly_casualties|enemy_|weight/;
@@ -46,7 +46,7 @@ export function iconTile(item, { round = false } = {}) {
 export function spiritsPanel(ctx, tag) {
   return livePanel(ctx, {
     title: 'National spirits', url: `/api/countries/${encodeURIComponent(tag)}/spirits`,
-    describe: (res) => saveSource(res, res.data?.ideas_source === 'live' ? ['spirits'] : []),
+    liveParts: (res) => (res.data?.ideas_source === 'live' ? ['spirits'] : []),
     render(body, res) {
       const list = res.data?.spirits;
       body.replaceChildren(h('div', { class: 'spirit-row' }, ...(!list ? [notice('warn', `National spirits unavailable: ${res.note}`)]
@@ -116,8 +116,8 @@ function sectionIcon(name) {
 export function governmentPanel(ctx, tag) {
   return livePanel(ctx, {
     title: 'Government & staff', cls: 'gov-panel', url: `/api/countries/${encodeURIComponent(tag)}/government`,
-    describe: (res) => saveSource(res, [res.data?.ideas_source === 'live' && 'laws, companies',
-      res.data?.advisors_source === 'live' && 'advisors, staff'].filter(Boolean)),
+    liveParts: (res) => [res.data?.ideas_source === 'live' && 'laws, companies',
+      res.data?.advisors_source === 'live' && 'advisors, staff'].filter(Boolean),
     unavailable: 'Government & staff',
     render(body, res) {
       if (!res.data?.laws) {

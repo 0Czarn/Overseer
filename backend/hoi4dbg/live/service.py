@@ -476,11 +476,14 @@ class LiveService:
         return {**out, "tag": tag, "read_at": self._clock()}
 
     def ideas(self, tag: str) -> dict:
-        """Live ideas of `tag` (national spirits, laws, companies) in the game's order (game memory)."""
+        """Live ideas of `tag` (national spirits, laws, companies) in the game's order and its dynamic modifiers
+        (game memory)."""
         process = self._process()
         if not pointers.supported(process.get("version")):
             raise LiveError("unsupported_version", "Live idea reading is only verified for 1.19.3.0.c01a")
-        return {"ideas": self._with_country(process, tag, pointers.read_ideas), "tag": tag, "read_at": self._clock()}
+        ideas, dynamic = self._with_country(process, tag, lambda mem, c: (pointers.read_ideas(mem, c),
+                                                                           pointers.read_dynamic_modifiers(mem, c)))
+        return {"ideas": ideas, "dynamic_modifiers": dynamic, "tag": tag, "read_at": self._clock()}
 
     def advisors(self, tag: str) -> dict:
         """Live hired advisors and staff of `tag`: [{"slot", "id": character id}] (game memory)."""

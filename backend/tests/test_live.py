@@ -885,3 +885,23 @@ class IdeaPointerTests(unittest.TestCase):
         self._string(mem, adv + pointers.ADVISOR_SLOT, "\x01\x02garbage")
         with self.assertRaises(pointers.PointerError):
             pointers.read_advisors(mem, country)
+
+    def test_read_dynamic_modifiers(self):
+        mem = FakeMemory(0x4000)
+        country, array, definition, values = BASE + 0x100, BASE + 0x1000, BASE + 0x1400, BASE + 0x1800
+        mem.put(country + pointers.DYNAMIC_MODIFIERS, "Q", array)
+        mem.put(country + pointers.DYNAMIC_MODIFIERS + 8, "i", 1)
+        mem.put(country + pointers.DYNAMIC_MODIFIERS + 12, "i", 1)
+        mem.put(array + pointers.DYNAMIC["definition"], "Q", definition)
+        mem.put(array + pointers.DYNAMIC["enabled"], "q", 1)
+        mem.put(array + pointers.DYNAMIC["values"], "Q", values)
+        mem.put(array + pointers.DYNAMIC["values"] + 12, "i", 4)   # size
+        self._string(mem, definition + pointers.DYNAMIC_NAME, "SOV_second_five_year_plan_dynamic_modifier")
+        for i, v in enumerate((-15000, 5000, 10000, 5000)):
+            mem.put(values + 8 * i, "q", v)
+        self.assertEqual(pointers.read_dynamic_modifiers(mem, country),
+                         [{"id": "SOV_second_five_year_plan_dynamic_modifier", "values": [-0.15, 0.05, 0.1, 0.05],
+                           "enabled": True}])
+        mem.put(country + pointers.DYNAMIC_MODIFIERS + 12, "i", 5)   # more than the capacity: wrong layout
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_dynamic_modifiers(mem, country)

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dataKey, readMode, saveSource, writeMode } from '../renderer/lib/refresh.js';
+import { dataKey, readMode, saveSource, sourceLine, writeMode } from '../renderer/lib/refresh.js';
 
 test('change detection ignores read time stamps', () => {
   assert.equal(dataKey({ a: 1, read_at: 5, b: { read_at: 9, c: 2 } }), dataKey({ a: 1, read_at: 7, b: { c: 2, read_at: 1 } }));
@@ -29,4 +29,13 @@ test('tile mode survives a broken storage', () => {
   assert.equal(readMode(broken, 'x'), 'live');
   assert.doesNotThrow(() => writeMode(broken, 'x', 'manual'));
   assert.equal(readMode(null, 'x'), 'live');
+});
+
+test('header line: green game memory when any part is live, details in the tooltip', () => {
+  const res = { data: { file: { name: 'x.hoi4' }, in_game_date: { text: '1936.3.12.1' } } };
+  assert.deepEqual(sourceLine(res, ['spirits'], '18:42:46'),
+    { text: 'game memory · read 18:42:46', title: 'LIVE: spirits · save x.hoi4 · 1936.3.12.1', live: true });
+  assert.deepEqual(sourceLine(res, [], '18:42:46'),
+    { text: 'save x.hoi4 · read 18:42:46', title: 'save x.hoi4 · 1936.3.12.1', live: false });
+  assert.equal(sourceLine({ data: null }, [], 't').text, '');
 });

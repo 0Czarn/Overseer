@@ -694,13 +694,15 @@ class DebuggerService:
                         else f"Resources per day from {analysis['file']['name']}.")
 
     def _live_ideas(self, tag: str, state: dict) -> bool:
-        """Replaces state["ideas"] with the live ideas of `tag`; False when the game cannot be read."""
+        """Replaces state["ideas"] and state["dynamic_modifiers"] with the live ones of `tag`; False when the game
+        cannot be read."""
         if self.live is None:
             return False
         try:
-            state["ideas"] = self.live.ideas(tag)["ideas"]
+            live = self.live.ideas(tag)
         except Exception:  # live data is optional: the save values stay
             return False
+        state["ideas"], state["dynamic_modifiers"] = live["ideas"], live["dynamic_modifiers"]
         return True
 
     def _live_advisors(self, tag: str, state: dict) -> bool:
