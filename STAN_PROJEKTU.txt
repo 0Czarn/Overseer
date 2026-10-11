@@ -73,7 +73,13 @@ ZROBIONE
             Combat Casualties = heroes_dying_war_support_penalty - z zapisu tekstowego (tokeny binarne nieznane).
             KARY NA ŻYWO (2026-10-11, przed/po tydzień wojny): country+0x14C8 bombardowania, +0x14D0 straty, fixed64
             /32768; zgodne z 2 zapisami użytkownika (ZSRR i Polska) do 5. cyfry, 0 dla państw w pokoju.
-            Do zrobienia: źródło -19,75%, wojny na żywo, propaganda, ochrona wybrzeża, napadane konwoje,
+            WOJNY NA ŻYWO (2026-10-11) - NIE ZROBIONE, uwaga użytkownika: "może to średnio działać". Ustalone:
+            klasa CWarRelation (+0x10 = sloty obu stron, np. 3/10 = SOV/POL), rekord relacji państwa (po 0xA10,
+            klucz = slot drugiego państwa, +0x298 wskaźnik na wojnę, +0x2B0 opinia = cached_sum zapisu). Brak stałej
+            ścieżki: u ZSRR rekordy leżą od country+0x16D0, u innych państw gdzie indziej; nic nie wskazuje na tablicę;
+            pole country+0x1328 jest niezerowe tylko w czasie wojny, ale znaczenie nieznane i nie mówi kto zaczął.
+            Wojny zostają z zapisu (nowa wojna widoczna po autozapisie). Flaga "kto zaczął" w pamięci nieznaleziona.
+            Do zrobienia: źródło -19,75%, propaganda, ochrona wybrzeża, napadane konwoje,
             attaché, zatopiony Pride of the Fleet.
 [x] Nagłówki kafelków jak w Live game memory: zielone "game memory · read HH:MM:SS" (szczegóły w podpowiedzi),
             bez gry "save <plik> · read HH:MM:SS"
