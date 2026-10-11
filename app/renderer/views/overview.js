@@ -82,7 +82,7 @@ function factionBlock(f) {
 export function overviewPanel(ctx, tag) {
   return livePanel(ctx, {
     title: 'Leadership', url: `/api/countries/${encodeURIComponent(tag)}/overview`,
-    liveParts: (res) => (res.data?.parties_source === 'live' ? ['parties'] : []),
+    liveParts: (res) => (res.data?.parties_source === 'live' ? ['parties, leader, faction'] : []),
     render(body, res) {
       const d = res.data;
       if (!d?.parties) {

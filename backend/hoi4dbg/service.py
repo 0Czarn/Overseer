@@ -724,6 +724,26 @@ class DebuggerService:
         except Exception:  # live data is optional: the save values stay
             return None
 
+    def _live_leadership(self, tag: str, roots: tuple[str, ...], state: dict) -> bool:
+        """Replaces popularity, ruling party, leader and faction in `state` with the live ones of `tag`; the
+        faction keeps the save's template and rules while its leader is the same. False when not readable."""
+        live = self._live_parties(tag, roots)
+        if not live:
+            return False
+        state["popularity"] = live["popularity"]
+        state["ruling_party"] = live["ruling"] or state.get("ruling_party")
+        if live.get("leader") and live["leader"]["id"] in (state.get("characters") or {}):
+            state["leader"] = live["leader"]["id"]
+            state["leader_ideology"] = live["leader"]["ideology"] or state.get("leader_ideology")
+        if "faction" in live:
+            saved, faction = state.get("faction") or {}, live["faction"]
+            same = bool(faction and saved.get("members", [])[:1] == faction["members"][:1])
+            state["faction"] = None if faction is None else {
+                "members": faction["members"], "name": faction["name"], "icon": faction["icon"],
+                "template": saved.get("template") if same else None, "rules": saved.get("rules", []) if same else [],
+                "leader": faction["members"][0] == tag}
+        return True
+
     def _live_parties(self, tag: str, roots: tuple[str, ...]) -> dict | None:
         """Live popularity / ruling party, or None (game not running, other version, ...)."""
         if self.live is None:
@@ -749,10 +769,7 @@ class DebuggerService:
         roots = self._game_roots(install)
         defs = modifiers.definitions(roots)
         ideo = government_mod.ideologies(roots)
-        live_parties = self._live_parties(tag, roots)
-        if live_parties:
-            state["popularity"] = live_parties["popularity"]
-            state["ruling_party"] = live_parties["ruling"] or state.get("ruling_party")
+        live_parties = self._live_leadership(tag, roots, state)
         parties = state.get("party_names") or {}
         names_needed = set(parties) | {f"{i}_noun" for i in parties} | {state.get("leader_ideology") or ""}
         for ideology, p in parties.items():
@@ -797,7 +814,8 @@ class DebuggerService:
                     m["label"] = clean_loc(labels.get(f"MODIFIER_{m['key'].upper()}", ""), names) or m["label"]
         faction_out = None
         if faction:
-            faction_out = {"name": loc(faction.get("name"), template.get("name")) or template.get("name") or "Faction",
+            faction_out = {"name": loc(faction.get("name"), template.get("name")) or faction.get("name")
+                           or template.get("name") or "Faction",
                            "icon": icon(faction.get("icon") or template.get("icon")), "members": faction["members"],
                            "leader": faction["members"][0] if faction["members"] else None}
         return envelope(SAVE, {"tag": tag, "leader": leader_out, "parties": party_list, "faction": faction_out,
@@ -910,11 +928,8 @@ class DebuggerService:
         userdata = (self.detect().get("userdata") or {}).get("path")
         mods = gamefiles.enabled_mods(Path(userdata)) if userdata else []
         defs = modifiers.definitions(tuple(str(r) for r in [install, *mods]))
+        self._live_leadership(tag, tuple(str(r) for r in [install, *mods]), state)
         names = focus_mod.loc_names(install, modifiers.loc_keys(state, defs))
-        live_parties = self._live_parties(tag, tuple(str(r) for r in [install, *mods]))
-        if live_parties:
-            state["popularity"] = live_parties["popularity"]
-            state["ruling_party"] = live_parties["ruling"] or state.get("ruling_party")
         base_source = {}
         for field in modifiers.KEYS:
             base_source[field] = "save"

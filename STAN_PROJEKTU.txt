@@ -53,6 +53,11 @@ ZROBIONE
             nazwa +0x28; +0x28 wartości int64/100000, rozmiar +0x34). 99/99 państw, 76 modyfikatorów zgodnych z zapisem.
             Kafelek National spirits i rozkład ST/WS.
             [x] test: cel SOV_strengthen_the_mobilization_plan (focus.autocomplete) -> The Red Army zmienia się (potwierdzone)
+[x] PRZYWÓDCA I FRAKCJA NA ŻYWO (2026-10-11): [rządząca partia+0x70] = CCountryLeader (+0x8 postać, +0x140
+            CIdeology -> nazwa +0x10); [[country+0xF88]+0x290] = CFaction (+0x38 nazwa, +0x58 członkowie, +0x548 ikona).
+            Oba 99/99 zgodne z zapisem. Kafelek Leadership i ST/WS. Szablon i zasady frakcji to w pamięci tokeny -
+            zostają z zapisu, dopóki przywódca frakcji się nie zmieni.
+            [x] test: wyrzucenie Tuwy z Kominternu w grze bez zapisu -> zniknęła z listy (potwierdzone)
 [x] Nagłówki kafelków jak w Live game memory: zielone "game memory · read HH:MM:SS" (szczegóły w podpowiedzi),
             bez gry "save <plik> · read HH:MM:SS"
 [x] Country Editor: panel "Leadership" (portret i cechy przywódcy, partia rządząca, ideologia, frakcja z logo,

@@ -905,3 +905,40 @@ class IdeaPointerTests(unittest.TestCase):
         mem.put(country + pointers.DYNAMIC_MODIFIERS + 12, "i", 5)   # more than the capacity: wrong layout
         with self.assertRaises(pointers.PointerError):
             pointers.read_dynamic_modifiers(mem, country)
+
+    def test_read_leader(self):
+        mem = FakeMemory(0x4000)
+        country, pol, party, array, leader, ch, ideo = (BASE + 0x100, BASE + 0x400, BASE + 0x600, BASE + 0x800,
+                                                       BASE + 0x1000, BASE + 0x1400, BASE + 0x1800)
+        mem.put(country + pointers.POLITICS, "Q", pol)
+        mem.put(pol + pointers.RULING_PARTY, "Q", party)
+        mem.put(party + pointers.PARTY_LEADERS, "Q", array)
+        mem.put(party + pointers.PARTY_LEADERS + 8, "i", 1)
+        mem.put(party + pointers.PARTY_LEADERS + 12, "i", 1)
+        mem.put(array, "Q", leader)
+        mem.put(leader + pointers.LEADER_CHARACTER, "Q", ch)
+        mem.put(ch + pointers.CHARACTER_ID, "i", 4352)
+        mem.put(leader + pointers.LEADER_IDEOLOGY, "Q", ideo)
+        self._string(mem, ideo + pointers.IDEOLOGY_NAME, "stalinism")
+        self.assertEqual(pointers.read_leader(mem, country), {"id": "4352", "ideology": "stalinism"})
+        mem.put(party + pointers.PARTY_LEADERS + 12, "i", 0)   # party without a leader
+        self.assertIsNone(pointers.read_leader(mem, country))
+
+    def test_read_faction(self):
+        mem = FakeMemory(0x4000)
+        country, dip, faction, array = BASE + 0x100, BASE + 0x400, BASE + 0x1000, BASE + 0x2000
+        eng, can = BASE + 0x3000, BASE + 0x3100
+        mem.put(country + pointers.DIPLOMACY, "Q", dip)
+        self.assertIsNone(pointers.read_faction(mem, country, {}))   # not in a faction
+        mem.put(dip + pointers.FACTION, "Q", faction)
+        self._string(mem, faction + pointers.FACTION_FIELDS["name"], "Allies")
+        self._string(mem, faction + pointers.FACTION_FIELDS["icon"], "GFX_faction_icon_allies")
+        mem.put(faction + pointers.FACTION_FIELDS["members"], "Q", array)
+        mem.put(faction + pointers.FACTION_FIELDS["members"] + 8, "i", 2)
+        mem.put(faction + pointers.FACTION_FIELDS["members"] + 12, "i", 2)
+        mem.put(array, "Q", eng)
+        mem.put(array + 8, "Q", can)
+        self.assertEqual(pointers.read_faction(mem, country, {eng: "ENG", can: "CAN"}),
+                         {"name": "Allies", "icon": "GFX_faction_icon_allies", "members": ["ENG", "CAN"]})
+        with self.assertRaises(pointers.PointerError):   # a member that is no country: wrong layout
+            pointers.read_faction(mem, country, {eng: "ENG"})

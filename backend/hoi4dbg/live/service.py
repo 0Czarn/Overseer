@@ -468,12 +468,18 @@ class LiveService:
         return found[-1] if found else None
 
     def parties(self, tag: str, ideologies: list[str]) -> dict:
-        """Live party popularity and ruling party of `tag` (game memory)."""
+        """Live party popularity and ruling party of `tag`, its leader {"id", "ideology"} and faction
+        {"name", "icon", "members"} or None (game memory)."""
         process = self._process()
         if not pointers.supported(process.get("version")):
             raise LiveError("unsupported_version", "Live party reading is only verified for 1.19.3.0.c01a")
-        out = self._with_country(process, tag, lambda mem, c: pointers.read_parties(mem, c, ideologies))
-        return {**out, "tag": tag, "read_at": self._clock()}
+        key = (process["pid"], process.get("started"))
+
+        def read(mem, c):
+            countries = pointers.country_objects(mem, self._module_base[key], self._tags[process.get("install") or ""])
+            return {**pointers.read_parties(mem, c, ideologies), "leader": pointers.read_leader(mem, c),
+                    "faction": pointers.read_faction(mem, c, {o: t for t, o in countries.items()})}
+        return {**self._with_country(process, tag, read), "tag": tag, "read_at": self._clock()}
 
     def ideas(self, tag: str) -> dict:
         """Live ideas of `tag` (national spirits, laws, companies) in the game's order and its dynamic modifiers

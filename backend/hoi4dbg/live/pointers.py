@@ -328,6 +328,56 @@ def read_imports(memory, cr: int, tokens: dict[int, str], sellers: dict[int, str
     return out
 
 
+# Leader (2026-10-11, 99/99 countries equal to the save: character and sub-ideology): [ruling party + 0x70] = array
+# of CCountryLeader* (read_array), the first one rules; leader + 0x8 = CCharacter (id + 0xc), [leader + 0x140] =
+# CIdeology whose std::string + 0x10 is the sub-ideology (e.g. stalinism).
+PARTY_LEADERS = 0x70
+LEADER_CHARACTER = 0x8
+LEADER_IDEOLOGY = 0x140
+IDEOLOGY_NAME = 0x10
+
+# Faction (2026-10-11, 99/99 countries: same members in the same order, the faction leader first):
+# [[country + 0xf88] (CDiplomacyStatus) + 0x290] = CFaction (NFactions), 0 outside a faction; + 0x38 = name as
+# shown (std::string), + 0x58 = members (read_array of CCountry*), + 0x548 = icon sprite (std::string).
+# Template and rules are interned tokens there (no text) - they stay from the save.
+DIPLOMACY = 0xF88
+FACTION = 0x290
+FACTION_FIELDS = {"name": 0x38, "members": 0x58, "icon": 0x548}
+
+
+def read_leader(memory, country: int) -> dict | None:
+    """{"id": character id as in the save, "ideology": sub-ideology} of the ruling party's leader, or None."""
+    pol = _ptr(memory, country + POLITICS)
+    party = _ptr(memory, pol + RULING_PARTY) if pol else None
+    if party is None:
+        return None
+    leaders = read_array(memory, party + PARTY_LEADERS, 50)
+    if not leaders or leaders[0] is None:
+        return None
+    ch = _ptr(memory, leaders[0] + LEADER_CHARACTER)
+    raw = memory.read(ch + CHARACTER_ID, 4) if ch else None
+    ideology = _ptr(memory, leaders[0] + LEADER_IDEOLOGY)
+    name = _msvc_string(memory, ideology + IDEOLOGY_NAME) if ideology else None
+    if raw is None or (name is not None and not re.fullmatch(r"[a-z_]+", name)):
+        raise PointerError("implausible", "The country leader is not readable - layout does not match")
+    return {"id": str(struct.unpack("<i", raw)[0]), "ideology": name}
+
+
+def read_faction(memory, country: int, tags: dict[int, str]) -> dict | None:
+    """{"name", "icon", "members": [tag]} of the country's faction (None outside one); `tags` = {object: tag}."""
+    dip = _ptr(memory, country + DIPLOMACY)
+    if dip is None:
+        raise PointerError("unreadable", "The country's diplomacy object is not readable")
+    faction = _ptr(memory, dip + FACTION)
+    if faction is None:
+        return None
+    members = [tags.get(c) for c in read_array(memory, faction + FACTION_FIELDS["members"], 500)]
+    if not members or None in members:
+        raise PointerError("implausible", "Faction members are not countries - layout does not match")
+    return {"name": _msvc_string(memory, faction + FACTION_FIELDS["name"]),
+            "icon": _msvc_string(memory, faction + FACTION_FIELDS["icon"]), "members": members}
+
+
 # Plausible ranges for direct (local) writes; the game itself clamps some of them.
 WRITE_RANGES = {"stability": (0.0, 1.0), "war_support": (0.0, 1.0), "political_power": (-10_000.0, 100_000.0),
                 "command_power": (0.0, 10_000.0), "fuel": (0.0, 100_000_000.0), "army_experience": (0.0, 100_000.0),
