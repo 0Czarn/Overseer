@@ -153,7 +153,8 @@ def definitions(roots: tuple[str, ...]) -> dict:
         for path in sorted((root / "common" / "defines").glob("*.lua")):
             src = path.read_text(encoding="utf-8-sig", errors="replace")
             for name in ("BASE_STABILITY_PARTY_POPULARITY_FACTOR", "MIN_STABILITY", "MAX_STABILITY",
-                         "MIN_WAR_SUPPORT", "MAX_WAR_SUPPORT", "WAR_SUPPORT_TENSION_IMPACT"):
+                         "MIN_WAR_SUPPORT", "MAX_WAR_SUPPORT", "WAR_SUPPORT_TENSION_IMPACT",
+                         "BASE_STABILITY_WAR_FACTOR", "WAR_SUPPORT_OFFNSIVE_WAR", "WAR_SUPPORT_DEFENSIVE_WAR"):
                 m = re.search(DEFINE_RE.format(name), src, re.M)
                 if m:
                     defines[name] = float(m.group(1))
@@ -314,6 +315,24 @@ def breakdown(state: dict, defs: dict, names: dict[str, str] | None = None) -> d
         for reward, mods in definition["rewards"][:d.get("rewards") or 0]:
             sources.append(("doctrine", reward, f"{label}: {names.get(reward, reward)}", mods))
 
+    # war (2026-10-11, SOV at war with POL, checked against the game tooltip): offensive / defensive war support
+    # from the defines; "At war" = BASE_STABILITY_WAR_FACTOR x (1 + war_stability_factor) - the game showed -19.75 %
+    # where this gives -20 % (source of the difference not found yet); penalties that build up weekly from the save
+    wars = state.get("wars") or []
+    if wars:
+        factor = sum(mods.get("war_stability_factor", 0) for *_rest, mods in sources)
+        sources.append(("war", "at_war", "At war",
+                        {KEYS["stability"]: defs["defines"].get("BASE_STABILITY_WAR_FACTOR", -0.2) * (1 + factor)}))
+        if any(w["offensive"] for w in wars):
+            sources.append(("war", "offensive_war", "Offensive war",
+                            {KEYS["war_support"]: defs["defines"].get("WAR_SUPPORT_OFFNSIVE_WAR", -0.2)}))
+        if any(not w["offensive"] for w in wars):
+            sources.append(("war", "defensive_war", "Defensive war",
+                            {KEYS["war_support"]: defs["defines"].get("WAR_SUPPORT_DEFENSIVE_WAR", 0.2)}))
+    for key, label in (("bombing_penalty", "Enemy bombing"), ("casualties_penalty", "Combat Casualties")):
+        if state.get(key):
+            sources.append(("war", key, label, {KEYS["war_support"]: state[key]}))
+
     popularity = (state.get("popularity") or {}).get(state.get("ruling_party"))
     if popularity:
         base_factor = defs["defines"].get("BASE_STABILITY_PARTY_POPULARITY_FACTOR", 0.15)
@@ -325,7 +344,14 @@ def breakdown(state: dict, defs: dict, names: dict[str, str] | None = None) -> d
                            {KEYS["stability"]: factor * popularity / 100}))
 
     out = {"unchecked_rules": unchecked}
-    for field, key in KEYS.items():
+    fields = list(KEYS.items())
+    fields.sort(key=lambda fk: fk[0] != "war_support")   # war support first: stability at war depends on it
+    for field, key in fields:
+        if field == "stability" and wars and out.get("war_support", {}).get("total") is not None:
+            # static modifier war_support_during_war: stability_factor -0.3, scaled by how much war support is missing
+            scale = defs["static"].get("war_support_during_war", {}).get(key, -0.3)
+            sources.append(("war", "war_support_during_war", "War Support",
+                            {key: scale * (1 - out["war_support"]["total"])}))
         base = state.get(field)
         parts = [{"kind": kind, "id": sid, "name": label, "value": round(mods[key], 6)}
                  for kind, sid, label, mods in sources if mods.get(key)]

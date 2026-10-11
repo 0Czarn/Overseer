@@ -149,7 +149,8 @@ DYNAMIC = """SOV_plan = {
 }
 """
 DEFINES = ("NCountry = {\n\tBASE_STABILITY_PARTY_POPULARITY_FACTOR = 0.15,\n\tMAX_STABILITY = 1.0,\n"
-           "\tWAR_SUPPORT_TENSION_IMPACT = 0.4,\t\t-- Total impact of world tension\n}\n")
+           "\tWAR_SUPPORT_TENSION_IMPACT = 0.4,\t\t-- Total impact of world tension\n"
+           "\tBASE_STABILITY_WAR_FACTOR = -0.2,\n\tWAR_SUPPORT_OFFNSIVE_WAR = -0.2,\n\tWAR_SUPPORT_DEFENSIVE_WAR = 0.2,\n}\n")
 RULES = """war_declaration_rule_major_only = {
 \ttype = war_declaration_rules
 \ttrigger = { is_major = yes }
@@ -159,6 +160,7 @@ joining_rule_communist_only = { type = joining_rules }
 unknown_condition_rule = { trigger = { has_war = yes } modifier = { stability_factor = 0.5 } }
 """
 STATIC = ("pride_of_the_fleet_country = {\n\twar_support_factor = 0.05\n}\n"
+          "war_support_during_war = { stability_factor = -0.3 }\n"
           "SOV_bop_mod = { power_balance_weekly = -0.01 stability_factor = -0.01 }\n")
 BUILDINGS = """@landmark_repair = 0.15
 buildings = {
@@ -288,6 +290,25 @@ class ModifierTests(TempDirMixin, unittest.TestCase):
             self.assertEqual([p["value"] for p in b["stability"]["parts"] if p["kind"] == "doctrine"], st)
             self.assertEqual([p["value"] for p in b["war_support"]["parts"] if p["kind"] == "doctrine"], ws)
             self.assertAlmostEqual(b["stability"]["parts"][0]["value"], party)   # 100 % x (0.15 + 0.05 at reward 5)
+
+    def test_war_like_the_game_tooltip(self):
+        # 'Stest 1' (SOV attacked POL, 1936.7.29): war support 15.58 % in the game, "War Support" -25.32 % stability
+        block = text.parse("""diplomacy={ active_relations={ POL={ war_relation={ first="SOV" second="POL"
+            first_was_instigator=yes } } MON={ cached_sum=10 } } }""")
+        self.assertEqual(politics.wars_of(block, "SOV"), [{"enemy": "POL", "offensive": True}])
+        self.assertEqual(politics.wars_of(block, "POL"), [{"enemy": "POL", "offensive": False}])
+        state = {"tag": "SOV", "stability": 1.0, "war_support": 0.3, "wars": [{"enemy": "POL", "offensive": True}],
+                 "tension": 16.91, "bombing_penalty": -0.05664, "casualties_penalty": -0.00521}
+        b = modifiers.breakdown(state, self.defs)
+        self.assertEqual([(p["name"], p["value"]) for p in b["war_support"]["parts"]], [
+            ("World tension (16.91%)", 0.06764), ("Offensive war", -0.2), ("Enemy bombing", -0.05664),
+            ("Combat Casualties", -0.00521)])
+        ws = b["war_support"]["total"]
+        self.assertAlmostEqual(ws, 0.3 + 0.06764 - 0.2 - 0.05664 - 0.00521)
+        self.assertEqual([p["name"] for p in b["stability"]["parts"]], ["At war", "War Support"])
+        self.assertAlmostEqual(b["stability"]["parts"][1]["value"], -0.3 * (1 - ws), places=6)
+        peace = modifiers.breakdown({**state, "wars": []}, self.defs)
+        self.assertEqual([p["name"] for p in peace["stability"]["parts"]], [])   # no war: no war lines
 
     def test_total_is_clamped(self):
         state = {"stability": 0.95, "war_support": 0.0, "popularity": {"a": 100.0}, "ruling_party": "a"}

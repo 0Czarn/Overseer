@@ -64,6 +64,15 @@ ZROBIONE
             99/99 zgodne z zapisem. Rozkład ST/WS. Odblokowane nagrody - jeszcze z zapisu (nie znaleziono w pamięci;
             w zapisie 1936 nikt ich nie ma, więc nie było z czym porównać).
             [x] test: ZSRR wybrał mobile_infantry i guerilla_war w grze bez zapisu -> odczytane z pamięci
+[x] WOJNA W ROZKŁADZIE ST/WS (2026-10-11, zapisy użytkownika 'Stest 1/2', ZSRR w wojnie z Polską):
+            poparcie wojny 15,58% = gra co do setnej; stabilność 27,87% vs gra 28,12% (różnica: "At war" gra -19,75%,
+            liczone -20% x (1 + war_stability_factor) - źródło 0,25 pp nieznane).
+            Źródła: wojny z diplomacy.active_relations.<TAG>.war_relation (first/second/first_was_instigator),
+            Offensive/Defensive war (definicje WAR_SUPPORT_OFFNSIVE/DEFENSIVE_WAR), "War Support" =
+            war_support_during_war -0,3 x (1 - poparcie wojny), Enemy bombing = being_bombed_support_penalty,
+            Combat Casualties = heroes_dying_war_support_penalty - z zapisu tekstowego (tokeny binarne nieznane).
+            Do zrobienia: źródło -19,75%, wojny i kary na żywo, propaganda, ochrona wybrzeża, napadane konwoje,
+            attaché, zatopiony Pride of the Fleet.
 [x] Nagłówki kafelków jak w Live game memory: zielone "game memory · read HH:MM:SS" (szczegóły w podpowiedzi),
             bez gry "save <plik> · read HH:MM:SS"
 [x] Country Editor: panel "Leadership" (portret i cechy przywódcy, partia rządząca, ideologia, frakcja z logo,

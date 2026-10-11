@@ -970,8 +970,8 @@ class DebuggerService:
             "doctrines_source": "live" if live_doctrines else "save", "file": analysis["file"],
             "in_game_date": (analysis.get("header") or {}).get("date"),
             "freshness": save_freshness(analysis["file"]["mtime"], game),
-            "not_read": ["core coastal states protection", "at war", "foreign propaganda", "occupation resistance",
-                         "bombing / casualties / sunk convoys"] + [f"faction rule {r} (condition)"
+            "not_read": ["core coastal states protection", "foreign propaganda", "convoys raided", "attache sent",
+                         "sunk Pride of the Fleet"] + [f"faction rule {r} (condition)"
                                                                   for r in result["unchecked_rules"]],
         }, f"Modifiers from {analysis['file']['name']} and the game files.")
 

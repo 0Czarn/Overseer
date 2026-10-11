@@ -215,12 +215,30 @@ def summary(block: list, manager: list | None, tag: str, world_state: dict | Non
         "mios": mios_of(block),
         "resources": resources_of(block),
         "pride_of_the_fleet": text.get(block, "pride_of_the_fleet") is not None,
+        # war support penalties that build up weekly (text saves; binary tokens not known yet)
+        "bombing_penalty": _float(text.get(block, "being_bombed_support_penalty")) or 0.0,
+        "casualties_penalty": _float(text.get(block, "heroes_dying_war_support_penalty")) or 0.0,
+        "wars": wars_of(block, tag),
         "faction": next(({**f, "leader": f["members"][0] == tag} for f in (world_state or {}).get("factions", [])
                          if tag in f["members"]), None),
         "tension": (world_state or {}).get("tension"),
         "doctrines": (world_state or {}).get("doctrines", {}).get(tag, []),
         "power_balances": [b for b in (world_state or {}).get("power_balances", []) if tag in b["countries"]],
     }
+
+
+def wars_of(block: list, tag: str) -> list[dict]:
+    """[{"enemy", "offensive"}] from the country's diplomacy (text saves, 2026-10-11 'Stest 1': SOV attacked POL ->
+    active_relations.POL.war_relation = { first="SOV" second="POL" first_was_instigator=yes ... })."""
+    out = []
+    relations = text.get(text.get(block, "diplomacy") or [], "active_relations") or []
+    for enemy, rel in (r for r in relations if isinstance(r, tuple)):
+        war = text.get(rel, "war_relation") if isinstance(rel, list) else None
+        if not isinstance(war, list):
+            continue
+        instigator_first = text.get(war, "first_was_instigator") == "yes"
+        out.append({"enemy": enemy, "offensive": (text.get(war, "first") == tag) == instigator_first})
+    return out
 
 
 def _float(v) -> float | None:
