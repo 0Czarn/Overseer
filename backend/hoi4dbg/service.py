@@ -604,10 +604,12 @@ class DebuggerService:
             return envelope(UNAVAILABLE, None, str(exc))
         analysis = state.pop("analysis")
         state.pop("_all", None)
+        live = self._live_ideas(tag, state)
         roots = self._game_roots(install)
         defs = modifiers.definitions(roots)
         out = self._present(modifiers.spirits(state, defs), install, roots)
-        return envelope(SAVE, {"tag": tag, "spirits": out, "file": analysis["file"],
+        return envelope(SAVE, {"tag": tag, "spirits": out, "ideas_source": "live" if live else "save",
+                               "file": analysis["file"],
                                "in_game_date": (analysis.get("header") or {}).get("date")},
                         f"National spirits from {analysis['file']['name']}; icons and texts from the game files.")
 
@@ -624,6 +626,7 @@ class DebuggerService:
             return envelope(UNAVAILABLE, None, str(exc))
         analysis = state.pop("analysis")
         state.pop("_all", None)
+        live = self._live_ideas(tag, state)
         roots = self._game_roots(install)
         defs = modifiers.definitions(roots)
         groups = government_mod.sections(state, defs)
@@ -631,7 +634,7 @@ class DebuggerService:
         shown = iter(self._present(flat, install, roots))
         data = {name: [next(shown) for _ in items] for name, items in groups.items()}
         data["mios"] = self._mios(state, tag, install, roots)
-        return envelope(SAVE, {"tag": tag, **data, "file": analysis["file"],
+        return envelope(SAVE, {"tag": tag, **data, "ideas_source": "live" if live else "save", "file": analysis["file"],
                                "in_game_date": (analysis.get("header") or {}).get("date")},
                         f"Laws, companies and advisors from {analysis['file']['name']}.")
 
@@ -687,6 +690,16 @@ class DebuggerService:
                                "file": analysis["file"], "in_game_date": (analysis.get("header") or {}).get("date")},
                         "Resources per day from game memory." if live
                         else f"Resources per day from {analysis['file']['name']}.")
+
+    def _live_ideas(self, tag: str, state: dict) -> bool:
+        """Replaces state["ideas"] with the live ideas of `tag`; False when the game cannot be read."""
+        if self.live is None:
+            return False
+        try:
+            state["ideas"] = self.live.ideas(tag)["ideas"]
+        except Exception:  # live data is optional: the save values stay
+            return False
+        return True
 
     def _live_resources(self, tag: str, order: list[str]) -> dict | None:
         """Live resources and trade deals of `tag`, or None (game not running, other version, ...)."""
@@ -878,6 +891,7 @@ class DebuggerService:
         analysis = state.pop("analysis")
         state.pop("_all", None)
         state["buildings"] = self._controlled_buildings(path, install, tag)
+        live_ideas = self._live_ideas(tag, state)
         userdata = (self.detect().get("userdata") or {}).get("path")
         mods = gamefiles.enabled_mods(Path(userdata)) if userdata else []
         defs = modifiers.definitions(tuple(str(r) for r in [install, *mods]))
@@ -900,7 +914,7 @@ class DebuggerService:
             result[field]["base_source"] = base_source[field]
         game = self.detect()
         return envelope(SAVE, {
-            "tag": tag, **result, "file": analysis["file"],
+            "tag": tag, **result, "ideas_source": "live" if live_ideas else "save", "file": analysis["file"],
             "in_game_date": (analysis.get("header") or {}).get("date"),
             "freshness": save_freshness(analysis["file"]["mtime"], game),
             "not_read": ["core coastal states protection", "at war", "foreign propaganda", "occupation resistance",

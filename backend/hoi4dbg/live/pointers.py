@@ -166,16 +166,52 @@ def read_parties(memory, country: int, ideologies: list[str]) -> dict:
 # [country + 0x11f8] = CCountryResources; inside it pools of 0xb0 bytes, each with 8 inline slots of 16 bytes from
 # pool + 0x38: fixed64/100000 amount, then the token of the resource (int32) - slot k = k-th resource of
 # common/resources. used is stored negative. [CR + 0x740] = array of this country's imports (CResourceExchange*),
-# int32 count at CR + 0x748; exchange + 0x38 = buyer country object, + 0x80 = seller's CCountryResources,
+# int32 count at CR + 0x74c; exchange + 0x38 = buyer country object, + 0x80 = seller's CCountryResources,
 # + 0x90 = resource object (token int32 at + 0x8), + 0x98 = amount (fixed64/100000).
 # Pools are recomputed by the game on the daily tick, except "exported" which follows new deals at once.
 COUNTRY_RESOURCES = 0x11F8
 RESOURCE_POOLS = {"produced": 0x28, "imported": 0x188, "available": 0x238, "used": 0x398, "to_market": 0x450,
                   "exported": 0x5B0}
 POOL_SLOTS = 0x38
-IMPORTS = 0x740
+IMPORTS = 0x740  # array of CResourceExchange* (see read_array)
 EXCHANGE = {"buyer": 0x38, "seller_resources": 0x80, "resource": 0x90, "amount": 0x98}
 RESOURCE_TOKEN = 0x8
+
+
+def read_array(memory, address: int, limit: int) -> list[int | None]:
+    """Elements of the game's pointer arrays: pointer to the data, int32 capacity, int32 size (2026-10-11: size is
+    the second number - a 9-slot array of RAJ held 8 ideas and a stale 9th slot)."""
+    raw = memory.read(address, 16)
+    if not raw:
+        raise PointerError("unreadable", "Array header is not readable")
+    data, capacity, size = struct.unpack("<Qii", raw)
+    if size == 0:
+        return []
+    if not 0 < size <= min(capacity, limit) or not 0x10000 <= data < 0x7FFF_FFFF_FFFF:
+        raise PointerError("implausible", f"Array of {size}/{capacity} elements - layout does not match")
+    items = memory.read(data, 8 * size)
+    if not items:
+        raise PointerError("unreadable", "Array data is not readable")
+    return [v if 0x10000 <= v < 0x7FFF_FFFF_FFFF else None for v in struct.unpack(f"<{size}Q", items)]
+
+
+# Ideas (2026-10-11, 99/99 countries equal to the save's politics ideas, same order): [politics + 0x50] = array of
+# CIdea* (read_array); CIdea + 0x18 = its id (MSVC std::string). National spirits, laws and companies are all ideas.
+IDEAS = 0x50
+IDEA_NAME = 0x18
+
+
+def read_ideas(memory, country: int) -> list[str]:
+    pol = _ptr(memory, country + POLITICS)
+    if pol is None:
+        raise PointerError("no_politics", "The country's politics object is not readable")
+    out = []
+    for idea in read_array(memory, pol + IDEAS, 1000):
+        name = _msvc_string(memory, idea + IDEA_NAME) if idea else None
+        if not name or not re.fullmatch(r"[A-Za-z0-9_.\-]+", name):
+            raise PointerError("implausible", "An idea has no readable id - layout does not match")
+        out.append(name)
+    return out
 
 
 def resources_object(memory, country: int) -> int:
@@ -213,17 +249,8 @@ def read_resources(memory, cr: int, resources: list[str]) -> dict:
 
 def read_imports(memory, cr: int, tokens: dict[int, str], sellers: dict[int, str]) -> list[dict]:
     """Trade deals in which the country of `cr` buys: [{"seller": tag, "resource", "amount"}]."""
-    raw = memory.read(cr + IMPORTS, 12)
-    if not raw:
-        return []
-    array, count = struct.unpack("<Qi", raw)
-    if count <= 0:
-        return []
-    if count > 500 or not 0x10000 <= array < 0x7FFF_FFFF_FFFF:
-        raise PointerError("implausible", f"{count} imports - layout does not match")
     out = []
-    for k in range(count):
-        deal = _ptr(memory, array + 8 * k)
+    for deal in read_array(memory, cr + IMPORTS, 500):
         seller = _ptr(memory, deal + EXCHANGE["seller_resources"]) if deal else None
         res = _ptr(memory, deal + EXCHANGE["resource"]) if deal else None
         token = memory.read(res + RESOURCE_TOKEN, 4) if res else None

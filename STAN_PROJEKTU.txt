@@ -37,6 +37,11 @@ ZROBIONE
             zrobiona w grze po zapisie). Kafelek Resources czyta pamięć ("LIVE: resources, trade deals"), bez gry - zapis.
             Pule gra przelicza przy tyknięciu dnia; lista umów i "sprzedane" zmieniają się od razu.
             [x] potwierdzone po 1 dniu gry: import ZSRR = 24 ropy, guma 0 (umowa z FRA zniknęła)
+[x] IDEE NA ŻYWO (2026-10-11): [[country+0xF90]+0x50] = tablica CIdea* (nazwa: CIdea+0x18), 99/99 państw zgodne
+            z zapisem (te same idee, ta sama kolejność). Zasila kafelki: National spirits, Government & staff (prawa,
+            firmy) i rozkład ST/WS ("Spirits and laws LIVE"). Doradcy (postacie), modyfikatory dynamiczne, MIO - nadal
+            z zapisu. Tablice gry: wskaźnik, int32 pojemność, int32 rozmiar (poprawione też w umowach handlowych).
+            [x] test: zmiana prawa gospodarczego na Partial Mobilization w grze, bez zapisu -> widoczna od razu
 [x] Country Editor: panel "Leadership" (portret i cechy przywódcy, partia rządząca, ideologia, frakcja z logo,
             wykres kołowy popularności partii w kolorach ideologii; szczegóły po najechaniu)
 [x] Country Editor: panel "National spirits" (ikony z gry DDS->PNG, modyfikatory i opis po najechaniu;

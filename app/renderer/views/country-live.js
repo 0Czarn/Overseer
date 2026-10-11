@@ -225,8 +225,9 @@ export function countryLivePanel(ctx, tag, { isPlayer = false } = {}) {
         if (values[f]?.status !== 'live') g.setBase(d[f].base, 'save');
       });
       sourceLine.replaceChildren(
-        h('span', null, `Modifiers from ${d.file.name}`, d.in_game_date ? ` (${d.in_game_date.text})` : '',
-          d.freshness?.category === 'current_session' ? '' : ' - an older session: save again if spirits, leader or advisors changed. '),
+        h('span', null, d.ideas_source === 'live' ? 'Spirits and laws LIVE; other modifiers from ' : 'Modifiers from ',
+          d.file.name, d.in_game_date ? ` (${d.in_game_date.text})` : '',
+          d.freshness?.category === 'current_session' ? '' : ' - an older session: save again if leader or advisors changed. '),
         h('span', { class: 'muted' }, ` Not read yet: ${d.not_read.join(', ')}. `),
         h('button', { class: 'btn btn-small btn-ghost', onClick: loadBreakdown }, 'Reload'));
     } catch (err) {

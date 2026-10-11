@@ -45,7 +45,8 @@ export function iconTile(item, { round = false } = {}) {
 /** National spirits tile (refreshable). Returns { el, refresh, stop }. */
 export function spiritsPanel(ctx, tag) {
   return livePanel(ctx, {
-    title: 'National spirits', url: `/api/countries/${encodeURIComponent(tag)}/spirits`, describe: (res) => saveSource(res),
+    title: 'National spirits', url: `/api/countries/${encodeURIComponent(tag)}/spirits`,
+    describe: (res) => saveSource(res, res.data?.ideas_source === 'live' ? ['spirits'] : []),
     render(body, res) {
       const list = res.data?.spirits;
       body.replaceChildren(h('div', { class: 'spirit-row' }, ...(!list ? [notice('warn', `National spirits unavailable: ${res.note}`)]
@@ -115,7 +116,8 @@ function sectionIcon(name) {
 export function governmentPanel(ctx, tag) {
   return livePanel(ctx, {
     title: 'Government & staff', cls: 'gov-panel', url: `/api/countries/${encodeURIComponent(tag)}/government`,
-    describe: (res) => saveSource(res), unavailable: 'Government & staff',
+    describe: (res) => saveSource(res, res.data?.ideas_source === 'live' ? ['laws, companies'] : []),
+    unavailable: 'Government & staff',
     render(body, res) {
       if (!res.data?.laws) {
         body.replaceChildren(notice('warn', `Unavailable: ${res.note}`));

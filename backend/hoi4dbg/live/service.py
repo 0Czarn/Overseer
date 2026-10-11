@@ -475,6 +475,13 @@ class LiveService:
         out = self._with_country(process, tag, lambda mem, c: pointers.read_parties(mem, c, ideologies))
         return {**out, "tag": tag, "read_at": self._clock()}
 
+    def ideas(self, tag: str) -> dict:
+        """Live ideas of `tag` (national spirits, laws, companies) in the game's order (game memory)."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Live idea reading is only verified for 1.19.3.0.c01a")
+        return {"ideas": self._with_country(process, tag, pointers.read_ideas), "tag": tag, "read_at": self._clock()}
+
     def resources(self, tag: str, resources: list[str]) -> dict:
         """Live resources of `tag` (game memory): the six per-day parts of the save ({part: {resource: amount}})
         plus "imports" [{seller, resource, amount}] and "exports" [{buyer, resource, amount}] of its trade deals.
@@ -498,9 +505,16 @@ class LiveService:
                 out = pointers.read_resources(mem, pointers.resources_object(mem, countries[tag]), resources)
                 tokens = out.pop("_tokens")
                 out["imports"] = pointers.read_imports(mem, cr_of[tag], tokens, sellers)
-                out["exports"] = [{"buyer": t, "resource": d["resource"], "amount": d["amount"]}
-                                  for t, cr in cr_of.items() if cr and t != tag
-                                  for d in pointers.read_imports(mem, cr, tokens, sellers) if d["seller"] == tag]
+                out["exports"] = []
+                for t, cr in cr_of.items():
+                    if not cr or t == tag:
+                        continue
+                    try:  # tags without a country (released later, ...) may hold no import array
+                        deals = pointers.read_imports(mem, cr, tokens, sellers)
+                    except pointers.PointerError:
+                        continue
+                    out["exports"] += [{"buyer": t, "resource": d["resource"], "amount": d["amount"]}
+                                       for d in deals if d["seller"] == tag]
         except pointers.PointerError as exc:
             raise LiveError(exc.code, str(exc)) from exc
         except (MemoryAccessError, OSError, KeyError) as exc:

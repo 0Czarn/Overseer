@@ -820,7 +820,8 @@ class ResourcePointerTests(unittest.TestCase):
         self.assertEqual(out["used"], {"oil": 0.0, "aluminium": 19.0, "rubber": 8.0})   # stored negative
         self.assertEqual(out["_tokens"], dict(zip(self.TOKENS, self.NAMES)))
         mem.put(cr + pointers.IMPORTS, "Q", array)
-        mem.put(cr + pointers.IMPORTS + 8, "i", 1)
+        mem.put(cr + pointers.IMPORTS + 8, "i", 1)    # capacity
+        mem.put(cr + pointers.IMPORTS + 12, "i", 1)   # size
         mem.put(array, "Q", deal)
         mem.put(deal + pointers.EXCHANGE["seller_resources"], "Q", seller_cr)
         mem.put(deal + pointers.EXCHANGE["resource"], "Q", res)
@@ -839,3 +840,32 @@ class ResourcePointerTests(unittest.TestCase):
         self._pools(mem, cr, {"produced": [5e7, 0, 0]})   # not an amount per day
         with self.assertRaises(pointers.PointerError):
             pointers.read_resources(mem, cr, self.NAMES)
+
+
+class IdeaPointerTests(unittest.TestCase):
+    def _string(self, mem, address, text):
+        raw = text.encode()
+        if len(raw) < 16:   # MSVC small string: inline buffer, size, capacity 15
+            mem.regions_data[BASE][address - BASE:address - BASE + len(raw)] = raw
+        else:
+            heap = address + 0x200
+            mem.regions_data[BASE][heap - BASE:heap - BASE + len(raw)] = raw
+            mem.put(address, "Q", heap)
+        mem.put(address + 16, "Q", len(raw))
+        mem.put(address + 24, "Q", max(15, len(raw)))
+
+    def test_read_ideas_uses_size_not_capacity(self):
+        mem = FakeMemory(0x4000)
+        country, pol, array = BASE + 0x100, BASE + 0x1000, BASE + 0x1100
+        ideas = [BASE + 0x2000 + 0x400 * i for i in range(3)]
+        mem.put(country + pointers.POLITICS, "Q", pol)
+        mem.put(pol + pointers.IDEAS, "Q", array)
+        mem.put(pol + pointers.IDEAS + 8, "i", 3)    # capacity
+        mem.put(pol + pointers.IDEAS + 12, "i", 2)   # size: the 3rd slot is stale
+        for i, (idea, name) in enumerate(zip(ideas, ("civilian_economy", "export_focus", "stale_idea"))):
+            mem.put(array + 8 * i, "Q", idea)
+            self._string(mem, idea + pointers.IDEA_NAME, name)
+        self.assertEqual(pointers.read_ideas(mem, country), ["civilian_economy", "export_focus"])
+        mem.put(pol + pointers.IDEAS + 12, "i", 9)   # more than the capacity: wrong layout
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_ideas(mem, country)
