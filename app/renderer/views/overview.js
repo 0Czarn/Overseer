@@ -1,6 +1,7 @@
 // Country Editor: who rules the country - leader, ideology, faction and party popularity pie (newest save),
 // in the style of the game's politics screen.
 import { h, notice } from '../lib/dom.js';
+import { livePanel, saveSource } from '../lib/refresh.js';
 import { formatModifier, modifierClass } from './spirits.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
@@ -77,32 +78,30 @@ function factionBlock(f) {
       h('div', null, `Leader: ${f.leader ?? '—'}`), h('div', null, `Members: ${f.members.join(', ')}`)));
 }
 
-/** Returns the panel; fills itself when the data arrives. */
+/** Leadership tile (refreshable; party popularity and ruling party live from game memory when possible). */
 export function overviewPanel(ctx, tag) {
-  const body = h('div', { class: 'ov-body' }, h('span', { class: 'muted' }, 'Reading government…'));
-  const source = h('span', { class: 'hoi-status' });
-  const el = h('section', { class: 'hoi-panel' },
-    h('div', { class: 'hoi-head' }, h('span', { class: 'hoi-head-title' }, 'Leadership'), source), body);
-  ctx.api.get(`/api/countries/${encodeURIComponent(tag)}/overview`).then((res) => {
-    const d = res.data;
-    if (!d?.parties) {
-      body.replaceChildren(notice('warn', `Government unavailable: ${res.note}`));
-      return;
-    }
-    source.textContent = `${d.file.name}${d.in_game_date ? ` · ${d.in_game_date.text}` : ''}`;
-    const ruling = d.parties.find((p) => p.ruling);
-    body.replaceChildren(...[
-      d.leader ? leaderBlock(d.leader, ruling) : null,
-      h('div', { class: 'ov-info' },
-        h('div', { class: 'ov-leader-name' }, d.leader?.name ?? 'Unknown leader'),
-        h('div', { class: 'ov-line' }, h('span', { class: 'muted' }, 'Ruling party '), h('b', null, ruling?.name ?? '—'),
-          ruling?.long_name ? h('span', { class: 'muted' }, ` · ${ruling.long_name}`) : null),
-        h('div', { class: 'ov-line' }, h('span', { class: 'muted' }, 'Ideology '),
-          h('i', { class: 'swatch', style: { background: ruling?.color ?? '#777' } }),
-          h('b', null, ` ${ruling?.ideology_name ?? '—'}`),
-          d.leader?.ideology_name ? h('span', null, ` (${d.leader.ideology_name})`) : null),
-        factionBlock(d.faction)),
-      pie(d.parties)].filter(Boolean));
-  }).catch((err) => body.replaceChildren(notice('warn', `Government unavailable: ${err.message}`)));
-  return el;
+  return livePanel(ctx, {
+    title: 'Leadership', url: `/api/countries/${encodeURIComponent(tag)}/overview`,
+    describe: (res) => saveSource(res, res.data?.parties_source === 'live' ? ['parties'] : []),
+    render(body, res) {
+      const d = res.data;
+      if (!d?.parties) {
+        body.replaceChildren(notice('warn', `Leadership unavailable: ${res.note}`));
+        return;
+      }
+      const ruling = d.parties.find((p) => p.ruling);
+      body.replaceChildren(h('div', { class: 'ov-body' }, ...[
+        d.leader ? leaderBlock(d.leader, ruling) : null,
+        h('div', { class: 'ov-info' },
+          h('div', { class: 'ov-leader-name' }, d.leader?.name ?? 'Unknown leader'),
+          h('div', { class: 'ov-line' }, h('span', { class: 'muted' }, 'Ruling party '), h('b', null, ruling?.name ?? '—'),
+            ruling?.long_name ? h('span', { class: 'muted' }, ` · ${ruling.long_name}`) : null),
+          h('div', { class: 'ov-line' }, h('span', { class: 'muted' }, 'Ideology '),
+            h('i', { class: 'swatch', style: { background: ruling?.color ?? '#777' } }),
+            h('b', null, ` ${ruling?.ideology_name ?? '—'}`),
+            d.leader?.ideology_name ? h('span', null, ` (${d.leader.ideology_name})`) : null),
+          factionBlock(d.faction)),
+        pie(d.parties)].filter(Boolean)));
+    },
+  });
 }

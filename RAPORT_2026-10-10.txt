@@ -1,0 +1,72 @@
+RAPORT 2026-10-10 - stan pracy i notatki do wznowienia
+======================================================================
+
+COMMITY DZIŚ
+- 7461125  Countries & Players (Save files / Live), flaga multiplayer, rozkład ST/WS, edycja na żywo
+- d4d6136  Country Editor: Leadership, National spirits, Government & staff, MIO, więcej źródeł ST/WS
+- NIESCOMMITOWANE (działa, testy OK: 198 py / 37 js / smoke): kafelek Resources, popularność partii na żywo,
+  odświeżanie kafelków (globalny interwał + przycisk ↻). Pliki: app/renderer/lib/refresh.js,
+  app/renderer/views/resources.js, overview.js, spirits.js, country-editor.js, country-live.js, app.js,
+  index.html, styles.css, smoke.cjs, app/tests/{refresh,resources}.test.js, backend/hoi4dbg/{service,server}.py,
+  live/{pointers,service}.py, saves/{politics,reader}.py, backend/tests/{test_live,test_resources}.py
+  -> pierwszy krok po wznowieniu: przejrzeć `git status`, zrobić commit (bez image.png i plików użytkownika:
+     Jak_ma_wygladac_aplikacja.txt, restart_test.md, test.txt, usunięte prompt*.md / zalozenia.md).
+
+CO JEST W COUNTRY EDITOR (od góry)
+ 1. Nagłówek kraju
+ 2. Leadership: portret+cechy przywódcy, partia rządząca, ideologia, frakcja, wykres kołowy partii
+ 3. National spirits: ikony (DDS->PNG), modyfikatory po najechaniu
+ 4. Live game memory: PP/CP/paliwo/XP (edytowalne), Stability/War Support z pełnym rozkładem + "In game/Match" (UNKNOWN)
+ 5. Resources (per day): wydobycie, na rynek (ile sprzedane), import, dostępne, zużycie, bilans + wykresy
+ 6. Government & staff: prawa, doradcy, firmy/MIO (klik rozwija listę MIO), teoretyk, sztab
+ 7. Dane z zapisu (kafelki wartości)
+
+ŹRÓDŁA DANYCH: CO NA ŻYWO, CO Z ZAPISU
+- NA ŻYWO (pamięć, wersja 1.19.3.0.c01a): PP, CP, paliwo, XP, baza ST/WS (live/pointers.py FIELDS),
+  liczba stanów państwa (+0x484), popularność partii i partia rządząca (NOWE, 99/99 państw zgodne z zapisem):
+    [country+0xF90] = obiekt polityki (PP w nim +0xE0)
+    [pol+0x20] = tablica wskaźników partii w kolejności common/ideologies (democratic, communism, fascism,
+                 neutrality); party+0x88 = popularność fixed64/100000 (%); [pol+0xD0] = partia rządząca
+    (pol+0x28 to NIE koniec tablicy - liczba partii = liczba ideologii)
+- Z NAJNOWSZEGO ZAPISU (odświeża się samo przy nowym zapisie/autozapisie): duchy, prawa, doradcy, MIO,
+  zasoby, przywódca, frakcja, napięcie światowe, BoP, doktryny.
+
+ZASOBY W PAMIĘCI - CO SPRAWDZONO (nie znaleziono, praca przerwana)
+- Gra NIE trzyma sum państwa (produced / to_market / available / used): pełny skan pamięci dla ZSRR
+  (wektory 7 wartości i trójki stal/chrom/węgiel blisko siebie) w kodowaniach i32, fx32 (x1000), f32, fx64, f64
+  - brak. Brak też w obiekcie państwa + 2 poziomy wskaźników (mapper, 0x3000 / 0x800).
+- Zasoby w pamięci są fixed32 x1000: import ropy ITA 63.57908 (zapis) = 63579 w pamięci, w obiektach
+  pojedynczych dostaw (dwie identyczne tablice po 8 int32 = `resources` i `resources_unclapmed` z bloków
+  `origin` zapisu), np. 0x254bf881830 (adres z tego procesu, nieaktualny po restarcie).
+  Nikt nie wskazuje na te obiekty (pełny skan wskaźników +-0x100, oraz drzewo ITA 2 poziomy +-0x40000).
+- Liczenie ze stanów odpada: mnożnik wydobycia różny per stan (SOV x1.38-1.6, ENG ropa x4.5).
+- Proponowane dalej: metoda "przed/po" - użytkownik zmienia prawo handlu / umowę handlową w grze,
+  porównać pamięć przed i po (szukać int32 x1000, które zmieniły się o oczekiwaną wartość).
+- Alternatywa uzgodniona do decyzji użytkownika: zostawić zasoby z zapisu; najpierw przenieść do pamięci
+  duchy narodowe / prawa / doradców (listy idei, podobne do partii).
+
+TOKENY ZAPISU BINARNEGO 1.19.3 (backend/hoi4dbg/saves/politics.py TOKENS) - wyprowadzone przez wyrównanie
+11.hoi4 (tekst) z 2-1.hoi4 (binarny) tej samej gry; mapa robocza: %TEMP%\hoi4probe\tokmap.json (może zniknąć)
+- MP: 0x365C=multiplayer (nagłówek), gracze 0x3567, country_leader 0x3035
+- frakcje 0x2A7D (members 0x2AA6, rule_status 0x4C65, rules 0x317B), threat 0x2BBD (napięcie = suma 1. liczby)
+- power_balance 0x4DDF/0x4DDB/template 0x4C1A, doctrine 0x35F9 (sub_doctrine 0x418A, rewards 0x4182)
+- MIO: production 0x2FB4 > industrial_organisations 0x4ADA; size 0x002F; odblokowane cechy 0x38A4{0x2E8E}
+  (sprawdzone SOV_1942: poziom 10 = 10 cech), polityka 0x28FC; tekstowe nazwy tych 3 kluczy nieznane
+- zasoby: resources 0x2E42, produced 0x2FAC, imported 0x30C2, to_use 0x30C3 ({dostępne}{?}{-zużycie}),
+  to_export 0x30C4 (= na rynek), exported 0x30C5 (sprzedane), export 0x30C6 (umowy), steel/rubber/tungsten/
+  chromium = 0x3E03/05/06/07
+- uwaga: mapa tokenów górnego poziomu z wyrównania jest przesunięta o 1 - tokeny górne ustalać po treści
+
+FORMUŁY ST/WS (backend/hoi4dbg/modifiers.py) - zweryfikowane z grą
+- partia: popularność x (0.15 + suma party_popularity_stability_factor) (GER 40% x 25% = 10%)
+- napięcie: 0.4 x tension (SOV +1.92%); reguły frakcji z triggerem (is_major...); BoP aktywny zakres;
+  landmarki dla kontrolera; doktryny (pierwsze N nagród); custom_modifier_tooltip NIE jest modyfikatorem
+- SOV 43.2% = gra 43%. Nieczytane: ochrona wybrzeży, wojna, propaganda, opór, bombardowania/straty.
+- Wartości końcowej ST/WS gra nie trzyma w pamięci pod stałym adresem (sprawdzone) -> "In game/Match".
+
+NARZĘDZIA / TRYB PRACY
+- Sondy w %TEMP%\hoi4probe\*.py, uruchamiane z backend/: python -I -c "import sys; sys.path.insert(0,'.'); exec(open(r'...').read())"
+- live/__main__.py build() daje LiveService z .debugger (DebuggerService)
+- Gra musi być zapauzowana na stanie najnowszego zapisu do porównań pamięć <-> zapis.
+- Aplikacja: npm start; testy: npm test; smoke: npm run smoke (sprawdza kafelki Country Editor)
+- Zrzuty smoke są robione przed wczytaniem danych (ukryte okno) - wygląd kafelków niesprawdzony wzrokowo.

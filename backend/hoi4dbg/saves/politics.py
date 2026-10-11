@@ -33,7 +33,12 @@ TOKENS = {
     # size-10 MIO lists exactly 10 such traits; text names of these three keys are not known yet.
     "production": 0x2FB4, "industrial_organisations": 0x4ADA, "size": 0x002F, "funds": 0x4AD9, "icon": 0x00B5,
     "research_bonus": 0x3161, "mio_unlocked_trait": 0x38A4, "mio_trait": 0x2E8E, "mio_policy": 0x28FC,
-    "long_name": 0x34EB,   # party long name (SOV_communism_party_russian_long in the SOV 1936 save)
+    "long_name": 0x34EB,
+    # resources (country block; aligned with 11.hoi4 / 2-1.hoi4): produced, imported, to_export (= resources to
+    # market), exported (sold), to_use = { available-at-home, (unused), -used-by-production }, export = trade deals
+    "resources": 0x2E42, "produced": 0x2FAC, "imported": 0x30C2, "to_use": 0x30C3, "to_export": 0x30C4,
+    "exported": 0x30C5, "export": 0x30C6, "resource": 0x3064, "delivered": 0x30C9, "receiver": 0x00C6,
+    "steel": 0x3E03, "rubber": 0x3E05, "tungsten": 0x3E06, "chromium": 0x3E07,   # party long name (SOV_communism_party_russian_long in the SOV 1936 save)
     "portraits": 0x4C29, "civilian": 0x4B26, "army": 0x289D, "navy": 0x289E, "small": 0x30D7, "large": 0x4C28,
 }
 NAMES = {**binvalues.NAMES, **{v: k for k, v in TOKENS.items()}}
@@ -141,6 +146,28 @@ def _unlocked_traits(org: list, size: int) -> list[str]:
     return next((g for g in groups.values() if len(g) == size), [])
 
 
+def _amounts(block) -> dict[str, float]:
+    out = {}
+    for k, v in block if isinstance(block, list) else []:
+        if isinstance(k, str) and isinstance(v, str) and _float(v) is not None:
+            out[k] = _float(v)
+    return out
+
+
+def resources_of(block: list) -> dict:
+    """{"produced", "to_market", "exported", "imported", "available", "used": {resource: amount},
+    "exports": [{receiver, resource, amount}]} of a country block (amounts per day, as the game shows them)."""
+    r = text.get(block, "resources") or []
+    to_use = [b for b in (text.get(r, "to_use") or []) if isinstance(b, list)]
+    used = {k: -v for k, v in _amounts(to_use[2] if len(to_use) > 2 else []).items()}
+    deals = [{"receiver": text.get(e, "receiver"), "resource": text.get(e, "resource"),
+              "amount": _float(text.get(e, "delivered")) or 0.0}
+             for k, e in r if k == "export" and isinstance(e, list)]
+    return {"produced": _amounts(text.get(r, "produced")), "to_market": _amounts(text.get(r, "to_export")),
+            "exported": _amounts(text.get(r, "exported")), "imported": _amounts(text.get(r, "imported")),
+            "available": _amounts(to_use[0] if to_use else []), "used": used, "exports": deals}
+
+
 def mios_of(block: list) -> list[dict]:
     out = []
     for mio_id, org in text.get(text.get(block, "production") or [], "industrial_organisations") or []:
@@ -186,6 +213,7 @@ def summary(block: list, manager: list | None, tag: str, world_state: dict | Non
         "dynamic_modifiers": dynamic, "characters": characters_of(manager or [], tag),
         "major": text.get(block, "major") == "yes",
         "mios": mios_of(block),
+        "resources": resources_of(block),
         "pride_of_the_fleet": text.get(block, "pride_of_the_fleet") is not None,
         "faction": next(({**f, "leader": f["members"][0] == tag} for f in (world_state or {}).get("factions", [])
                          if tag in f["members"]), None),

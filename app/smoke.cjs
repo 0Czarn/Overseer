@@ -72,10 +72,11 @@ function runSmoke(win, outDir, quit) {
               value: g.querySelector('.hoi-gauge-value').textContent,
               lines: g.querySelectorAll('.hoi-lines .hoi-line').length }))`);
             if (info.gauges.length !== 2) result.failures.push(`${size.name}/country-editor: stability/war support gauges missing`);
-            await waitFor(wc, `!document.querySelector('.spirit-row .muted')?.textContent.startsWith('Reading')`, 20000);
+            await waitFor(wc, `document.querySelectorAll('.live-panel-body').length >= 4 && ![...document.querySelectorAll('.live-panel-body > .muted')].some((e) => e.textContent.startsWith('Reading'))`, 30000);
+            info.refreshButtons = await wc.executeJavaScript(`document.querySelectorAll('.hoi-refresh').length`);
+            if (info.refreshButtons < 4) result.failures.push(`${size.name}/country-editor: ${info.refreshButtons} refresh buttons`);
             info.spirits = await wc.executeJavaScript(`document.querySelectorAll('.hoi-panel:not(.gov-panel) .spirit-row .spirit').length`);
             if (!info.spirits) result.failures.push(`${size.name}/country-editor: no national spirits shown`);
-            await waitFor(wc, `![...document.querySelectorAll('.gov-row .muted')].some((e) => e.textContent.startsWith('Reading'))`, 20000);
             info.government = await wc.executeJavaScript(`[...document.querySelectorAll('.gov-row')].map((r) => r.querySelectorAll('.spirit').length)`);
             if (info.government.length !== 3 || info.government.some((n) => n < 6)) result.failures.push(`${size.name}/country-editor: government slots ${info.government}`);
             info.mios = await wc.executeJavaScript(`(() => { const t = document.querySelector('.mio-slot'); if (!t) return -1;
@@ -84,6 +85,9 @@ function runSmoke(win, outDir, quit) {
             await waitFor(wc, `!!document.querySelector('.ov-body .pie, .ov-body .notice')`, 20000);
             info.pieSlices = await wc.executeJavaScript(`document.querySelectorAll('.ov-body .pie-slice').length`);
             if (!info.pieSlices) result.failures.push(`${size.name}/country-editor: no party popularity pie`);
+            await waitFor(wc, `!!document.querySelector('.res-table, .res-body .notice')`, 20000);
+            info.resources = await wc.executeJavaScript(`document.querySelectorAll('.res-row:not(.res-head)').length`);
+            if (!info.resources) result.failures.push(`${size.name}/country-editor: no resources`);
             info.editableChips = await wc.executeJavaScript(`document.querySelectorAll('.hoi-chip .hoi-chip-input').length`);
             if (info.editableChips !== 6) result.failures.push(`${size.name}/country-editor: ${info.editableChips}/6 editable live values`);
           }

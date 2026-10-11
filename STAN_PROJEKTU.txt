@@ -22,10 +22,18 @@ ZROBIONE
 [x] Krok B  Automatyczne mapowanie pól zapisu na pamięć (wszystkie państwa naraz)
 [x] Krok C  Gracz rozpoznawany z pamięci gry (przy włączonej mgle wojny; inaczej ostatni
             pewny wynik / zapis) - patrz sprostowanie w docs/PROGRESS.md
+[x] Odświeżanie kafelków: globalny interwał na górnym pasku (Off/5/10/30/60 s) + przycisk ↻ na kafelku;
+            przerysowanie tylko przy zmianie danych
+    NA ŻYWO z pamięci: popularność partii + partia rządząca ([[c+0xf90]+0x20][i]+0x88, 99/99 państw),
+    baza ST/WS, PP/CP/paliwo/XP. Z NAJNOWSZEGO ZAPISU (odświeżane przy nowym zapisie/autozapisie):
+    duchy, prawa, doradcy, MIO, zasoby, przywódca, frakcja - do odnalezienia w pamięci (zasoby: nie ma ich
+    w zasięgu 2 wskaźników od obiektu państwa; gra nie trzyma sum - szczegóły i dalsze kroki w RAPORT_2026-10-10.txt)
 [x] Country Editor: panel "Leadership" (portret i cechy przywódcy, partia rządząca, ideologia, frakcja z logo,
             wykres kołowy popularności partii w kolorach ideologii; szczegóły po najechaniu)
 [x] Country Editor: panel "National spirits" (ikony z gry DDS->PNG, modyfikatory i opis po najechaniu;
             idee kategorii "country" + modyfikatory dynamiczne z wartościami z zapisu)
+[x] Country Editor: Resources (na dzień): wydobycie, na rynek (ile sprzedane), import, dostępne, zużycie,
+            bilans; ikony z gry, mini-wykres na każdy surowiec, 2 wykresy zbiorcze; kupcy/sprzedawcy po najechaniu
 [x] Country Editor: Laws & Government (pobór, handel, gospodarka, 3 doradców), Research & Production
             (5 firm + teoretyk), Military Staff (szefowie armii/floty/lotnictwa + 3 high command) - ikony
             i portrety z gry, modyfikatory i cechy po najechaniu, puste sloty z "+"

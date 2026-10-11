@@ -4,6 +4,7 @@ import { ppCommand, verifyChange } from '../lib/verify.js';
 import { countryLivePanel } from './country-live.js';
 import { governmentPanel, spiritsPanel } from './spirits.js';
 import { overviewPanel } from './overview.js';
+import { resourcesPanel } from './resources.js';
 import { countryPicker, tagChip } from './shared.js';
 
 const STATUS_NOTE = { read: null, absent: 'not in save', unmapped: 'not mapped yet' };
@@ -128,7 +129,9 @@ export default {
     );
     // Live values for any country (game country table); verified console changes only for the player country.
     const live = countryLivePanel(ctx, tag, { isPlayer });
-    root.append(overviewPanel(ctx, tag), spiritsPanel(ctx, tag), live.el, governmentPanel(ctx, tag));
+    const tiles = [overviewPanel(ctx, tag), spiritsPanel(ctx, tag)];
+    const lower = [resourcesPanel(ctx, tag), governmentPanel(ctx, tag)];
+    root.append(...tiles.map((t) => t.el), live.el, ...lower.map((t) => t.el));
     if (fromSave) {
       root.append(
         snapshotBanner(saved.data),
@@ -142,6 +145,6 @@ export default {
         meta.source === 'demo' ? h('div', { class: 'tile-grid' }, fields.map((f) => demoTile(f, meta.data.values[f.key]))) : null,
       ].filter(Boolean)); // append(null) would print "null"
     }
-    return () => live?.stop();
+    return () => { live?.stop(); [...tiles, ...lower].forEach((t) => t.stop()); };
   },
 };

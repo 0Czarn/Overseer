@@ -780,3 +780,22 @@ class CountryTableTests(TempDirMixin, unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PartyPointerTests(unittest.TestCase):
+    def test_read_parties(self):
+        mem = FakeMemory(0x4000)
+        country, pol, array = BASE + 0x100, BASE + 0x1000, BASE + 0x2000
+        parties = [BASE + 0x2400 + 0x100 * i for i in range(4)]
+        mem.put(country + pointers.POLITICS, "Q", pol)
+        mem.put(pol + pointers.PARTIES, "Q", array)
+        for i, (p, pop) in enumerate(zip(parties, (10.0, 88.0, 2.0, 0.0))):
+            mem.put(array + 8 * i, "Q", p)
+            mem.put(p + pointers.PARTY_POPULARITY, "q", round(pop * 100000))
+        mem.put(pol + pointers.RULING_PARTY, "Q", parties[1])
+        out = pointers.read_parties(mem, country, ["democratic", "communism", "fascism", "neutrality"])
+        self.assertEqual(out, {"popularity": {"democratic": 10.0, "communism": 88.0, "fascism": 2.0, "neutrality": 0.0},
+                               "ruling": "communism"})
+        mem.put(parties[2] + pointers.PARTY_POPULARITY, "q", 500 * 100000)   # not a percentage: wrong layout
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_parties(mem, country, ["democratic", "communism", "fascism", "neutrality"])

@@ -115,6 +115,36 @@ def owned_states(memory, module_base: int, tags: list[str]) -> dict[str, int]:
     return out if out and all(0 <= n <= 5000 for n in out.values()) else {}
 
 
+# Party popularity (2026-10-10, 99/99 countries equal to the save, ruling party 99/99):
+# [country + 0xf90] = politics object; [politics + 0x20] = array of party objects, one per ideology in the order of
+# common/ideologies; party + 0x88 = popularity (fixed64 / 100000, in %); [politics + 0xd0] = the ruling party object.
+POLITICS = 0xF90
+PARTIES = 0x20
+RULING_PARTY = 0xD0
+PARTY_POPULARITY = 0x88
+
+
+def read_parties(memory, country: int, ideologies: list[str]) -> dict:
+    """{"popularity": {ideology: %}, "ruling": ideology or None} of a country object."""
+    pol = _ptr(memory, country + POLITICS)
+    array = _ptr(memory, pol + PARTIES) if pol else None
+    if array is None:
+        raise PointerError("no_politics", "The country's politics object is not readable")
+    popularity, parties = {}, []
+    for i, ideology in enumerate(ideologies):
+        party = _ptr(memory, array + 8 * i)
+        raw = memory.read(party + PARTY_POPULARITY, 8) if party else None
+        if raw is None:
+            raise PointerError("no_party", f"Party {ideology} is not readable")
+        value = struct.unpack("<q", raw)[0] / 100000
+        if not -0.001 <= value <= 100.001:
+            raise PointerError("implausible", f"Party popularity {value} out of range - layout does not match")
+        popularity[ideology] = value
+        parties.append(party)
+    ruling = _ptr(memory, pol + RULING_PARTY)
+    return {"popularity": popularity, "ruling": ideologies[parties.index(ruling)] if ruling in parties else None}
+
+
 # Plausible ranges for direct (local) writes; the game itself clamps some of them.
 WRITE_RANGES = {"stability": (0.0, 1.0), "war_support": (0.0, 1.0), "political_power": (-10_000.0, 100_000.0),
                 "command_power": (0.0, 10_000.0), "fuel": (0.0, 100_000_000.0), "army_experience": (0.0, 100_000.0),

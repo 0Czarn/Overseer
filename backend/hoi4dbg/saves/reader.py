@@ -286,7 +286,7 @@ class SaveAnalyzer:
                         self._politics = {result["copy"]: cached}  # keep only the newest
         if tag not in cached:
             raise binary.SaveFormatError("country_missing", f"Country {tag} does not exist in this save")
-        return {"analysis": result, **cached[tag]}
+        return {"analysis": result, **cached[tag], "_all": cached}
 
     def country_values(self, path: Path, tag: str) -> dict:
         """Country Editor values for `tag` from the cached copy of a save (text, or binary 1.19.3)."""

@@ -2,6 +2,7 @@
 // Stability / war support show what the game shows (base + every modifier, like the in-game tooltip),
 // with the base value editable directly (local memory write, single player only).
 import { h, notice, scopeBadge, toast } from '../lib/dom.js';
+import { REFRESH_EVENT } from '../lib/refresh.js';
 import { FIELD_LABELS, changeSection, directEnabled } from './live-ui.js';
 
 const POLL_MS = 2000;
@@ -209,7 +210,7 @@ export function countryLivePanel(ctx, tag, { isPlayer = false } = {}) {
   const changeHost = h('div');
 
   const loadBreakdown = async () => {
-    sourceLine.textContent = 'Reading modifiers from the newest save…';
+    if (!sourceLine.textContent) sourceLine.textContent = 'Reading modifiers from the newest save…';
     try {
       const res = await ctx.api.get(`/api/countries/${encodeURIComponent(tag)}/stability`);
       if (stopped) return;
@@ -269,5 +270,6 @@ export function countryLivePanel(ctx, tag, { isPlayer = false } = {}) {
   const el = panel;
   tick();
   loadBreakdown();
-  return { el, stop: () => { stopped = true; clearTimeout(timer); change?.stop(); } };
+  window.addEventListener(REFRESH_EVENT, loadBreakdown);   // app-wide refresh interval (top bar)
+  return { el, stop: () => { stopped = true; clearTimeout(timer); change?.stop(); window.removeEventListener(REFRESH_EVENT, loadBreakdown); } };
 }

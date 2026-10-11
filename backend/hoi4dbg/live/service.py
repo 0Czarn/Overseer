@@ -467,6 +467,14 @@ class LiveService:
             return None
         return found[-1] if found else None
 
+    def parties(self, tag: str, ideologies: list[str]) -> dict:
+        """Live party popularity and ruling party of `tag` (game memory)."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Live party reading is only verified for 1.19.3.0.c01a")
+        out = self._with_country(process, tag, lambda mem, c: pointers.read_parties(mem, c, ideologies))
+        return {**out, "tag": tag, "read_at": self._clock()}
+
     def session(self) -> dict:
         """Running game: mode (game.log), local player country and states owned by every country (memory)."""
         process = self._process()

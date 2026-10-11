@@ -7,6 +7,7 @@ import datetime as dt
 import json
 from pathlib import Path
 import logging
+import functools
 import platform
 import re
 import sys
@@ -23,6 +24,7 @@ from .reports import ReportError, ReportStore
 from .saves import equipment as save_equipment
 from .saves import fields as save_fields
 from .saves import states as save_states
+from .saves import text as text_mod
 from .saves.binary import SaveFormatError
 from .saves.reader import SaveAnalyzer, list_saves
 
@@ -102,6 +104,24 @@ def save_freshness(save_mtime: float, game: dict, now: float | None = None) -> d
     else:
         category, label = "previous_session", "From an EARLIER session - NOT the current game state"
     return {"category": category, "label": label, "age_s": age_s, "is_live": False}
+
+
+@functools.lru_cache(maxsize=2)
+def resource_order(roots: tuple[str, ...]) -> dict[str, dict]:
+    """{resource: {"frame": icon_frame}} from common/resources (later roots override)."""
+    out: dict[str, dict] = {}
+    for root in map(Path, roots):
+        for path in sorted((root / "common" / "resources").glob("*.txt")):
+            try:
+                items = text_mod.parse(re.sub(r"#[^\n]*", "", path.read_text(encoding="utf-8-sig", errors="replace")))
+            except Exception:
+                continue
+            for _k, block in (i for i in items if isinstance(i, tuple)):
+                for name, body in (i for i in block if isinstance(i, tuple)) if isinstance(block, list) else []:
+                    frame = text_mod.get(body, "icon_frame") if isinstance(body, list) else None
+                    if frame is not None:
+                        out[name] = {"frame": int(float(frame))}
+    return out
 
 
 LOC_REF = re.compile(r"\$([A-Za-z0-9_.]+)(?:\|[^$]*)?\$")
@@ -583,6 +603,7 @@ class DebuggerService:
         except SaveFormatError as exc:
             return envelope(UNAVAILABLE, None, str(exc))
         analysis = state.pop("analysis")
+        state.pop("_all", None)
         roots = self._game_roots(install)
         defs = modifiers.definitions(roots)
         out = self._present(modifiers.spirits(state, defs), install, roots)
@@ -602,6 +623,7 @@ class DebuggerService:
         except SaveFormatError as exc:
             return envelope(UNAVAILABLE, None, str(exc))
         analysis = state.pop("analysis")
+        state.pop("_all", None)
         roots = self._game_roots(install)
         defs = modifiers.definitions(roots)
         groups = government_mod.sections(state, defs)
@@ -612,6 +634,57 @@ class DebuggerService:
         return envelope(SAVE, {"tag": tag, **data, "file": analysis["file"],
                                "in_game_date": (analysis.get("header") or {}).get("date")},
                         f"Laws, companies and advisors from {analysis['file']['name']}.")
+
+    def resources(self, tag: str) -> dict:
+        """Resources of `tag` (newest save): produced, to market, sold, imported (with the selling countries),
+        available at home and used by production, per resource; icons from the game's resource strip."""
+        tag = tag.upper()
+        install = self._install_path()
+        picked = self._pick_save(None)
+        if install is None or picked is None:
+            return envelope(UNAVAILABLE, None, "Needs the game installation and a save")
+        try:
+            state = self.saves.politics(picked[0], tag)
+        except SaveFormatError as exc:
+            return envelope(UNAVAILABLE, None, str(exc))
+        analysis = state.pop("analysis")
+        everyone = state.pop("_all", {})
+        res = state["resources"]
+        roots = self._game_roots(install)
+        order = resource_order(roots)
+        sellers: dict[str, list] = {}
+        for other, st in everyone.items():
+            for deal in (st.get("resources") or {}).get("exports", []):
+                if deal["receiver"] == tag and deal["amount"]:
+                    sellers.setdefault(deal["resource"], []).append({"country": other, "amount": deal["amount"]})
+        keys = set(order) | set().union(*[set(v) for k, v in res.items() if isinstance(v, dict)])
+        names = focus_mod.loc_names(install, {f"PRODUCTION_MATERIALS_{k.upper()}" for k in keys})
+        rows = []
+        for k in sorted(keys, key=lambda k: (order.get(k, {}).get("frame", 99), k)):
+            get = lambda part: round(res[part].get(k, 0.0), 3)  # noqa: E731
+            rows.append({"resource": k, "name": names.get(f"PRODUCTION_MATERIALS_{k.upper()}", k.capitalize()),
+                         "frame": order.get(k, {}).get("frame"), "produced": get("produced"),
+                         "to_market": get("to_market"), "exported": get("exported"), "imported": get("imported"),
+                         "available": get("available"), "used": get("used"),
+                         "balance": round(get("available") - get("used"), 3),
+                         "buyers": sorted(({"country": d["receiver"], "amount": d["amount"]} for d in res["exports"]
+                                           if d["resource"] == k and d["amount"]), key=lambda d: -d["amount"]),
+                         "sellers": sorted(sellers.get(k, []), key=lambda d: -d["amount"])})
+        sprites = gfx.sprites(roots)
+        strip = sprites.get("GFX_resources_strip")
+        return envelope(SAVE, {"tag": tag, "resources": rows, "icons": gfx.icon_data_uri(strip) if strip else None,
+                               "icon_frames": max([v["frame"] for v in order.values()] or [0]),
+                               "file": analysis["file"], "in_game_date": (analysis.get("header") or {}).get("date")},
+                        f"Resources per day from {analysis['file']['name']}.")
+
+    def _live_parties(self, tag: str, roots: tuple[str, ...]) -> dict | None:
+        """Live popularity / ruling party, or None (game not running, other version, ...)."""
+        if self.live is None:
+            return None
+        try:
+            return self.live.parties(tag, list(government_mod.ideologies(roots)["colors"]))
+        except Exception:  # live data is optional: the save values stay
+            return None
 
     def overview(self, tag: str) -> dict:
         """Who rules `tag`: leader (portrait, sub-ideology, traits), ruling party, faction, party popularities."""
@@ -625,9 +698,14 @@ class DebuggerService:
         except SaveFormatError as exc:
             return envelope(UNAVAILABLE, None, str(exc))
         analysis = state.pop("analysis")
+        state.pop("_all", None)
         roots = self._game_roots(install)
         defs = modifiers.definitions(roots)
         ideo = government_mod.ideologies(roots)
+        live_parties = self._live_parties(tag, roots)
+        if live_parties:
+            state["popularity"] = live_parties["popularity"]
+            state["ruling_party"] = live_parties["ruling"] or state.get("ruling_party")
         parties = state.get("party_names") or {}
         names_needed = set(parties) | {f"{i}_noun" for i in parties} | {state.get("leader_ideology") or ""}
         for ideology, p in parties.items():
@@ -676,7 +754,8 @@ class DebuggerService:
                            "icon": icon(faction.get("icon") or template.get("icon")), "members": faction["members"],
                            "leader": faction["members"][0] if faction["members"] else None}
         return envelope(SAVE, {"tag": tag, "leader": leader_out, "parties": party_list, "faction": faction_out,
-                               "ruling_party": state.get("ruling_party"), "file": analysis["file"],
+                               "ruling_party": state.get("ruling_party"), "parties_source": "live" if live_parties else "save",
+                               "file": analysis["file"],
                                "in_game_date": (analysis.get("header") or {}).get("date")},
                         f"Government from {analysis['file']['name']}.")
 
@@ -777,11 +856,16 @@ class DebuggerService:
             return envelope(UNAVAILABLE, {"file": path.name, "error": {"code": exc.code, "message": str(exc)}},
                             str(exc))
         analysis = state.pop("analysis")
+        state.pop("_all", None)
         state["buildings"] = self._controlled_buildings(path, install, tag)
         userdata = (self.detect().get("userdata") or {}).get("path")
         mods = gamefiles.enabled_mods(Path(userdata)) if userdata else []
         defs = modifiers.definitions(tuple(str(r) for r in [install, *mods]))
         names = focus_mod.loc_names(install, modifiers.loc_keys(state, defs))
+        live_parties = self._live_parties(tag, tuple(str(r) for r in [install, *mods]))
+        if live_parties:
+            state["popularity"] = live_parties["popularity"]
+            state["ruling_party"] = live_parties["ruling"] or state.get("ruling_party")
         base_source = {}
         for field in modifiers.KEYS:
             base_source[field] = "save"

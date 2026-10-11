@@ -1,5 +1,6 @@
 // National spirits of the selected country (newest save): HOI4-like icon row; modifiers show on hover / focus.
 import { h, notice } from '../lib/dom.js';
+import { livePanel, saveSource } from '../lib/refresh.js';
 
 // Modifiers where a higher value is worse for the country (shown red when positive), as in the game's tooltips.
 const BAD_WHEN_HIGH = /cost|penalty|accident|consumption|losses|attrition|requirement|need|to_others|weekly_casualties|enemy_|weight/;
@@ -41,22 +42,16 @@ export function iconTile(item, { round = false } = {}) {
       item.kind === 'dynamic' ? h('div', { class: 'spirit-tip-kind' }, 'Dynamic modifier (values from the save)') : null));
 }
 
-/** Returns the panel element; fills itself when the data arrives. */
+/** National spirits tile (refreshable). Returns { el, refresh, stop }. */
 export function spiritsPanel(ctx, tag) {
-  const row = h('div', { class: 'spirit-row' }, h('span', { class: 'muted' }, 'Reading national spirits…'));
-  const source = h('span', { class: 'hoi-status' });
-  const el = h('section', { class: 'hoi-panel' },
-    h('div', { class: 'hoi-head' }, h('span', { class: 'hoi-head-title' }, 'National spirits'), source), row);
-  ctx.api.get(`/api/countries/${encodeURIComponent(tag)}/spirits`).then((res) => {
-    const list = res.data?.spirits;
-    if (!list) {
-      row.replaceChildren(notice('warn', `National spirits unavailable: ${res.note}`));
-      return;
-    }
-    source.textContent = `${res.data.file.name}${res.data.in_game_date ? ` · ${res.data.in_game_date.text}` : ''}`;
-    row.replaceChildren(...(list.length ? list.map((x) => iconTile(x)) : [h('span', { class: 'muted' }, 'No national spirits')]));
-  }).catch((err) => row.replaceChildren(notice('warn', `National spirits unavailable: ${err.message}`)));
-  return el;
+  return livePanel(ctx, {
+    title: 'National spirits', url: `/api/countries/${encodeURIComponent(tag)}/spirits`, describe: (res) => saveSource(res),
+    render(body, res) {
+      const list = res.data?.spirits;
+      body.replaceChildren(h('div', { class: 'spirit-row' }, ...(!list ? [notice('warn', `National spirits unavailable: ${res.note}`)]
+        : list.length ? list.map((x) => iconTile(x)) : [h('span', { class: 'muted' }, 'No national spirits')])));
+    },
+  });
 }
 
 const pctText = (v) => `${v > 0 ? '+' : ''}${+(v * 100).toFixed(2)}%`;
@@ -116,42 +111,40 @@ function sectionIcon(name) {
   return svg;
 }
 
-/** Laws & Government, Research & Production, Military Staff (newest save), like the game's politics screen. */
+/** Laws & Government, Research & Production, Military Staff (refreshable), like the game's politics screen. */
 export function governmentPanel(ctx, tag) {
-  const bodies = Object.fromEntries(SECTIONS.map(([id]) => [id, h('div', { class: 'spirit-row gov-row' },
-    h('span', { class: 'muted' }, 'Reading…'))]));
-  const source = h('span', { class: 'hoi-status' });
-  const el = h('section', { class: 'hoi-panel gov-panel' },
-    h('div', { class: 'hoi-head' }, h('span', { class: 'hoi-head-title' }, 'Government & staff'), source),
-    SECTIONS.map(([id, title]) => h('div', { class: 'gov-section' },
-      h('div', { class: 'gov-bar' }, sectionIcon(id), h('span', null, title)), bodies[id])));
-  ctx.api.get(`/api/countries/${encodeURIComponent(tag)}/government`).then((res) => {
-    if (!res.data?.laws) {
-      Object.values(bodies).forEach((b) => b.replaceChildren(notice('warn', `Unavailable: ${res.note}`)));
-      return;
-    }
-    source.textContent = `${res.data.file.name}${res.data.in_game_date ? ` · ${res.data.in_game_date.text}` : ''}`;
-    const mioList = h('div', { class: 'mio-list', hidden: true });
-    let openSlot = null;
-    const toggle = (slot, tile) => {
-      const same = openSlot === slot;
-      bodies.research.querySelectorAll('.mio-slot').forEach((t) => t.setAttribute('aria-expanded', 'false'));
-      openSlot = same ? null : slot;
-      mioList.hidden = same;
-      if (!same) {
-        tile.setAttribute('aria-expanded', 'true');
-        mioList.replaceChildren(h('div', { class: 'mio-list-title' }, tile.getAttribute('aria-label')),
-          h('div', { class: 'spirit-row' }, res.data.mios[slot].map(mioTile)));
+  return livePanel(ctx, {
+    title: 'Government & staff', cls: 'gov-panel', url: `/api/countries/${encodeURIComponent(tag)}/government`,
+    describe: (res) => saveSource(res), unavailable: 'Government & staff',
+    render(body, res) {
+      if (!res.data?.laws) {
+        body.replaceChildren(notice('warn', `Unavailable: ${res.note}`));
+        return;
       }
-    };
-    for (const [id] of SECTIONS) {
-      bodies[id].replaceChildren(...res.data[id].map((item) => {
-        const mios = MIO_SLOTS.has(item.slot) && item.kind === 'empty' ? res.data.mios?.[item.slot] ?? [] : [];
-        return mios.length ? mioSlotTile(item, mios, (tile) => toggle(item.slot, tile))
-          : iconTile(item, { round: item.kind === 'law' || item.kind === 'company' });
-      }));
-    }
-    bodies.research.after(mioList);
-  }).catch((err) => Object.values(bodies).forEach((b) => b.replaceChildren(notice('warn', `Unavailable: ${err.message}`))));
-  return el;
+      const rows = Object.fromEntries(SECTIONS.map(([id]) => [id, h('div', { class: 'spirit-row gov-row' })]));
+      const mioList = h('div', { class: 'mio-list', hidden: true });
+      let openSlot = null;
+      const toggle = (slot, tile) => {
+        const same = openSlot === slot;
+        rows.research.querySelectorAll('.mio-slot').forEach((t) => t.setAttribute('aria-expanded', 'false'));
+        openSlot = same ? null : slot;
+        mioList.hidden = same;
+        if (!same) {
+          tile.setAttribute('aria-expanded', 'true');
+          mioList.replaceChildren(h('div', { class: 'mio-list-title' }, tile.getAttribute('aria-label')),
+            h('div', { class: 'spirit-row' }, res.data.mios[slot].map(mioTile)));
+        }
+      };
+      for (const [id] of SECTIONS) {
+        rows[id].replaceChildren(...res.data[id].map((item) => {
+          const mios = MIO_SLOTS.has(item.slot) && item.kind === 'empty' ? res.data.mios?.[item.slot] ?? [] : [];
+          return mios.length ? mioSlotTile(item, mios, (tile) => toggle(item.slot, tile))
+            : iconTile(item, { round: item.kind === 'law' || item.kind === 'company' });
+        }));
+      }
+      body.replaceChildren(...SECTIONS.map(([id, title]) => h('div', { class: 'gov-section' },
+        h('div', { class: 'gov-bar' }, sectionIcon(id), h('span', null, title)), rows[id],
+        id === 'research' ? mioList : null)));
+    },
+  });
 }
