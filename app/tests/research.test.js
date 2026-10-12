@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aheadText, bonusText, elbow, pickTab, progressText, slotSummary, speedText, techTitle, usableText } from '../renderer/views/research.js';
+import { aheadText, bonusText, pathOf, pickTab, progressText, slotSummary, speedText, techTitle, usableText } from '../renderer/views/research.js';
 
 test('research speed bonus as the game shows it', () => {
   assert.equal(speedText(1.13), '+13%');
@@ -50,11 +50,8 @@ test('selected research tab: remembered one if present, else the first', () => {
   assert.equal(pickTab([], null), null);
 });
 
-test('tree lines: straight when aligned, elbow otherwise', () => {
-  const a = { x: 0, y: 0, w: 10, h: 10 };
-  assert.equal(elbow(a, { x: 100, y: 0, w: 10, h: 10 }), 'M5,5 L105,5');
-  assert.equal(elbow(a, { x: 100, y: 40, w: 10, h: 10 }), 'M5,5 H55 V45 H105');
-  assert.equal(elbow(a, { x: 20, y: 100, w: 10, h: 10 }), 'M5,5 V55 H25 V105');
+test('routed line drawn through its points', () => {
+  assert.equal(pathOf([[0, 5], [40, 5], [40, 90], [80, 90]]), 'M0,5 L40,5 L40,90 L80,90');
 });
 
 test('tree tooltip names the state, progress and ahead-of-time year', () => {
@@ -62,4 +59,11 @@ test('tree tooltip names the state, progress and ahead-of-time year', () => {
     estimate: false }), 'Excavation I · Researching · 50.0% finished · 10 days left · excavation1');
   assert.equal(techTitle({ id: 'x', name: 'X', state: 'available', start_year: 1940, ahead: true }),
     'X · Can be researched · 1940 (ahead of time) · x');
+});
+
+test('tooltip of mutually exclusive technologies', () => {
+  assert.equal(techTitle({ id: 'dispersed_industry', name: 'Dispersed Industry I', state: 'excluded',
+    excluded_by: ['Concentrated Industry I'], excludes: [{ id: 'concentrated_industry', name: 'Concentrated Industry I' }] }),
+  'Dispersed Industry I · Excluded by a researched alternative · excluded by Concentrated Industry I · '
+    + 'mutually exclusive with Concentrated Industry I · dispersed_industry');
 });

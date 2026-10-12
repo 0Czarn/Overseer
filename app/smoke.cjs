@@ -96,7 +96,7 @@ function runSmoke(win, outDir, quit) {
             info.researchSlots = await wc.executeJavaScript(`document.querySelectorAll('.research-slot').length`);
             info.researchSwitch = await wc.executeJavaScript(`document.querySelectorAll('.hoi-mode').length`);
             if (!info.researchSlots) result.failures.push(`${size.name}/research: no research slots shown`);
-            if (info.researchSwitch < 2) result.failures.push(`${size.name}/research: ${info.researchSwitch} Live/On refresh switches`);
+            if (info.researchSwitch !== 2) result.failures.push(`${size.name}/research: ${info.researchSwitch}/2 Live/On refresh switches (slots, tabs & tree)`);
             await waitFor(wc, `!!document.querySelector('.research-tab')`, 20000);
             info.researchTabs = await wc.executeJavaScript(`document.querySelectorAll('.research-tab').length`);
             if (!info.researchTabs) result.failures.push(`${size.name}/research: no research tabs shown`);

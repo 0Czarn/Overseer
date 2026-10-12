@@ -243,3 +243,131 @@ def branch_grid(tech: str, techs: dict, folder: str, grids: dict) -> dict | None
             return grids[f"{t}_tree"]
         todo += [p for p in techs.get(t, {}).get("parents", []) if folder in (techs.get(p, {}).get("positions") or {})]
     return None
+
+
+# ---- lines between technologies that do not run through other items ----
+# Every line is an orthogonal polyline from the side of the parent that faces the child to the facing side of the
+# child. Candidates: 3 segments with the middle one in a free channel, or 5 segments (out into a channel, along a
+# channel, back towards the child). Cost: running through another item (huge), crossing / running along a line of
+# another parent, length. Lines of one parent may share their first part (a trunk, as in the game).
+MARGIN = 3
+
+
+def _box_hit(seg, box) -> bool:
+    (x1, y1), (x2, y2) = seg
+    left, top, right, bottom = box["x"] + MARGIN, box["y"] + MARGIN, box["x"] + box["w"] - MARGIN, box["y"] + box["h"] - MARGIN
+    if x1 == x2:
+        return left < x1 < right and min(y1, y2) < bottom and max(y1, y2) > top
+    return top < y1 < bottom and min(x1, x2) < right and max(x1, x2) > left
+
+
+def _segments(points):
+    return [(points[i], points[i + 1]) for i in range(len(points) - 1)
+            if points[i] != points[i + 1]]
+
+
+def _seg_cost(a, b) -> float:
+    """Crossing (10) or running along the same channel (length) of two axis-aligned segments."""
+    (ax1, ay1), (ax2, ay2) = a
+    (bx1, by1), (bx2, by2) = b
+    a_vertical, b_vertical = ax1 == ax2, bx1 == bx2
+    if a_vertical == b_vertical:
+        if a_vertical and abs(ax1 - bx1) < 4:
+            overlap = min(max(ay1, ay2), max(by1, by2)) - max(min(ay1, ay2), min(by1, by2))
+            return max(0.0, overlap)
+        if not a_vertical and abs(ay1 - by1) < 4:
+            overlap = min(max(ax1, ax2), max(bx1, bx2)) - max(min(ax1, ax2), min(bx1, bx2))
+            return max(0.0, overlap)
+        return 0.0
+    v, hz = (a, b) if a_vertical else (b, a)
+    vx, (vy1, vy2) = v[0][0], sorted((v[0][1], v[1][1]))
+    hy, (hx1, hx2) = hz[0][1], sorted((hz[0][0], hz[1][0]))
+    return 10.0 if hx1 < vx < hx2 and vy1 < hy < vy2 else 0.0
+
+
+def _candidates(a: dict, b: dict, xs: list[float], ys: list[float]):
+    acx, acy, bcx, bcy = a["x"] + a["w"] / 2, a["y"] + a["h"] / 2, b["x"] + b["w"] / 2, b["y"] + b["h"] / 2
+    horizontal = abs(bcx - acx) >= abs(bcy - acy)
+    if horizontal:
+        sx = a["x"] + a["w"] if bcx > acx else a["x"]
+        ex = b["x"] if bcx > acx else b["x"] + b["w"]
+        start, end = (sx, acy), (ex, bcy)
+        lo, hi = sorted((sx, ex))
+        if abs(acy - bcy) < 1:
+            yield [start, end]
+        for x in [x for x in xs if lo <= x <= hi]:
+            yield [start, (x, acy), (x, bcy), end]
+        for x1 in [x for x in xs if lo <= x <= hi][:12]:
+            for y in ys:
+                for x2 in [x for x in xs if lo <= x <= hi and (x >= x1 if ex >= sx else x <= x1)][-12:]:
+                    yield [start, (x1, acy), (x1, y), (x2, y), (x2, bcy), end]
+    else:
+        sy = a["y"] + a["h"] if bcy > acy else a["y"]
+        ey = b["y"] if bcy > acy else b["y"] + b["h"]
+        start, end = (acx, sy), (bcx, ey)
+        lo, hi = sorted((sy, ey))
+        if abs(acx - bcx) < 1:
+            yield [start, end]
+        for y in [y for y in ys if lo <= y <= hi]:
+            yield [start, (acx, y), (bcx, y), end]
+        for y1 in [y for y in ys if lo <= y <= hi][:12]:
+            for x in xs:
+                for y2 in [y for y in ys if lo <= y <= hi and (y >= y1 if ey >= sy else y <= y1)][-12:]:
+                    yield [start, (acx, y1), (x, y1), (x, y2), (bcx, y2), end]
+
+
+def route_lines(items: list[dict], lines: list[dict]) -> list[list[tuple[float, float]]]:
+    """Polyline (points) for every line {"from", "to"} between items {"id", "x", "y", "w", "h"}."""
+    by_id = {i["id"]: i for i in items}
+    # free channels: just outside every item and half way between neighbours
+    xs = sorted({round(v, 1) for i in items for v in (i["x"] - 7, i["x"] + i["w"] + 7)})
+    ys = sorted({round(v, 1) for i in items for v in (i["y"] - 7, i["y"] + i["h"] + 7)})
+    xs = [x for x in xs if not any(_box_hit(((x, -1e6), (x, 1e6)), {**i, "y": i["y"], "h": 0}) for i in [])] or xs
+    placed: list[tuple[str, tuple]] = []   # (parent id, segment)
+    out = []
+    # short lines first: they have the fewest ways around
+    order = sorted(range(len(lines)), key=lambda k: abs(by_id[lines[k]["from"]]["x"] - by_id[lines[k]["to"]]["x"])
+                   + abs(by_id[lines[k]["from"]]["y"] - by_id[lines[k]["to"]]["y"]))
+    result: dict[int, list] = {}
+    for k in order:
+        line = lines[k]
+        a, b = by_id[line["from"]], by_id[line["to"]]
+        others = [i for i in items if i["id"] not in (a["id"], b["id"])]
+        best, best_cost = None, None
+        for points in _candidates(a, b, xs, ys):
+            segs = _segments(points)
+            cost = 0.0
+            for seg in segs:
+                if any(_box_hit(seg, i) for i in others):
+                    cost += 100000
+                cost += sum(_seg_cost(seg, other) for parent, other in placed if parent != line["from"])
+                cost += (abs(seg[0][0] - seg[1][0]) + abs(seg[0][1] - seg[1][1])) * 0.01
+            cost += len(segs) * 2
+            if best_cost is None or cost < best_cost:
+                best, best_cost = points, cost
+                if cost < 1e-9:
+                    break
+        best = best or [(a["x"] + a["w"] / 2, a["y"] + a["h"] / 2), (b["x"] + b["w"] / 2, b["y"] + b["h"] / 2)]
+        placed += [(line["from"], seg) for seg in _segments(best)]
+        result[k] = best
+    for k in range(len(lines)):
+        out.append(result[k])
+    return out
+
+
+def line_report(items: list[dict], lines: list[dict], routes: list[list]) -> dict:
+    """{"through_items", "crossings"}: lines running through other items / crossings of lines of different parents."""
+    by_id = {i["id"]: i for i in items}
+    through, crossings = 0, 0
+    segs = []
+    for line, points in zip(lines, routes):
+        others = [i for i in items if i["id"] not in (line["from"], line["to"])]
+        for seg in _segments(points):
+            if any(_box_hit(seg, i) for i in others):
+                through += 1
+            segs.append((line["from"], seg))
+    for n, (pa, a) in enumerate(segs):
+        for pb, b in segs[n + 1:]:
+            if pa != pb and _seg_cost(a, b) == 10.0:
+                crossings += 1
+    return {"through_items": through, "crossings": crossings, "lines": len(lines)}

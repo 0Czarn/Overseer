@@ -908,14 +908,19 @@ class DebuggerService:
         return envelope(SAVE, {"tabs": tabs, "dlcs": sorted(dlcs), "mods": len(roots) - 1},
                         f"{len(tabs)} research tabs from the game files, {len(roots) - 1} mod(s), {len(dlcs)} DLC(s).")
 
-    def research_tree(self, tag: str, folder: str) -> dict:
-        """Technologies of one research tab laid out like the game (interface/countrytechtreeview.gui) with the
-        state of each one for `tag`: researched, researching (+ progress), available (ahead of time marked),
-        unavailable; lines from each technology to the ones it leads to."""
+    def research_tree(self, tag: str, folder: str = "") -> dict:
+        """Research tabs plus the technologies of one tab (default: the first) laid out like the game
+        (interface/countrytechtreeview.gui) with the state of each one for `tag`: researched, researching
+        (+ progress), available (ahead of time marked), excluded (XOR technology researched), unavailable; lines
+        from each technology to the ones it leads to, routed around the other items."""
         tag = tag.upper()
         install = self._install_path()
         if install is None:
             return envelope(UNAVAILABLE, None, "Needs the game installation")
+        tabs_res = self.research_tabs()
+        tabs = (tabs_res.get("data") or {}).get("tabs") or []
+        if tabs and folder not in {t["id"] for t in tabs}:
+            folder = tabs[0]["id"]
         roots = tuple(str(r) for r in self._game_roots(install))
         layout = techtree.folder_layout(roots, folder)
         if layout is None:
@@ -952,10 +957,13 @@ class DebuggerService:
             x, y = techtree.place(t["positions"][folder], grid)
             size = "big" if t.get("big") else "small"
             box = layout[size]
+            excluded_by = [x for x in t.get("excludes") or [] if x in researched]
             if tid in researched:
                 state = "researched"
             elif tid in slots:
                 state = "researching"
+            elif excluded_by:
+                state = "excluded"
             elif researched and usable_for({"categories": ["*"]}, {tid: {**t, "categories": ["*"]}}, researched, set()):
                 state = "available"
             else:
@@ -965,6 +973,7 @@ class DebuggerService:
                           "h": box["h"], "size": size, "state": state, "start_year": t.get("start_year"),
                           "ahead": bool(year and t.get("start_year") and t["start_year"] > year),
                           "progress": slot.get("progress"), "days_left": slot.get("days_left"),
+                          "excludes": list(t.get("excludes") or []), "excluded_by": excluded_by,
                           "icon": sprite(f"GFX_{tid}_medium")})
         # big items sit 56 px left of their slot: shift the whole tab when one would start outside
         dx = max(0.0, 10 - min([i["x"] for i in items] + [10]))
@@ -976,11 +985,27 @@ class DebuggerService:
         placed = {i["id"]: i for i in items}
         lines = [{"from": tid, "to": child} for tid in placed for child in techs[tid].get("leads_to") or []
                  if child in placed]
+        # routes depend on the layout only (not on the country): computed once per tab and layout
+        geometry = (folder, tuple((i["id"], i["x"], i["y"], i["w"], i["h"]) for i in items),
+                    tuple((ln["from"], ln["to"]) for ln in lines))
+        cache = self.__dict__.setdefault("_route_cache", {})
+        if geometry not in cache:
+            cache[geometry] = techtree.route_lines(items, lines)
+        for ln, points in zip(lines, cache[geometry]):
+            ln["points"] = [[round(x, 1), round(y, 1)] for x, y in points]
+        # mutually exclusive pairs of this tab (names for the tooltips)
+        names_of = {i["id"]: i["name"] for i in items}
+        for i in items:
+            i["excludes"] = [{"id": x, "name": names_of.get(x) or x} for x in i["excludes"]]
+            i["excluded_by"] = [names_of.get(x) or x for x in i["excluded_by"]]
         width = max([i["x"] + i["w"] for i in items] + [lb["x"] + 200 for lb in layout["labels"]] + [400]) + 20
         height = max([i["y"] + i["h"] for i in items] + [lb["y"] + 60 for lb in layout["labels"]] + [300]) + 20
         backgrounds = {f"{size}_{state}": background(size, "currently_researching" if state == "researching" else state)
                        for size in ("big", "small") for state in ("researched", "researching", "available", "unavailable")}
-        data = {"tag": tag, "folder": folder, "width": width, "height": height, "items": items, "lines": lines,
+        for size in ("big", "small"):
+            backgrounds[f"{size}_excluded"] = backgrounds[f"{size}_unavailable"]
+        data = {"tag": tag, "folder": folder, "tabs": tabs, "width": width, "height": height, "items": items,
+                "lines": lines,
                 "labels": [{**lb, "text": loc(lb["text"])} for lb in layout["labels"]],
                 "backgrounds": backgrounds, "research_source": rdata.get("research_source"),
                 "file": rdata.get("file"), "in_game_date": rdata.get("in_game_date")}

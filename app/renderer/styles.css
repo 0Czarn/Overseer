@@ -605,3 +605,11 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
 .tech-progress > div { height: 100%; background: #d9b24a; }
 .tech-year { position: absolute; right: 3px; bottom: 3px; padding: 0 3px; font-size: 10px; background: #b5423a; color: #fff;
   border-radius: 2px; }
+.tech-tree-scroll { cursor: grab; user-select: none; }
+.tech-tree-scroll.tech-dragging { cursor: grabbing; }
+.tech-legend-excluded::before { background: #6b2a24; }
+.tech-excluded { filter: grayscale(1) brightness(0.55); }
+.tech-excluded::after { content: ''; position: absolute; inset: 0; background:
+  repeating-linear-gradient(45deg, transparent 0 8px, rgba(181, 66, 58, 0.35) 8px 10px); pointer-events: none; }
+.tech-xor { position: absolute; left: 3px; bottom: 3px; padding: 0 3px; font-size: 9px; font-weight: 700; color: #fff;
+  background: #6b4a8a; border-radius: 2px; }

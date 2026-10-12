@@ -74,6 +74,20 @@ class TechTreeTests(TempDirMixin, unittest.TestCase):
         self.assertIsNone(techtree.branch_grid("lonely", techs, "infantry_folder", layout["grids"]))
         self.assertIsNone(techtree.folder_layout((str(self.tmp),), "naval_folder"))
 
+    def test_lines_go_around_items(self):
+        # a -> c on one row with b in between: the straight line would run through b
+        items = [{"id": "a", "x": 0, "y": 100, "w": 50, "h": 50}, {"id": "b", "x": 100, "y": 100, "w": 50, "h": 50},
+                 {"id": "c", "x": 200, "y": 100, "w": 50, "h": 50}, {"id": "d", "x": 200, "y": 0, "w": 50, "h": 50}]
+        lines = [{"from": "a", "to": "c"}, {"from": "a", "to": "b"}, {"from": "b", "to": "d"}]
+        routes = techtree.route_lines(items, lines)
+        self.assertEqual(techtree.line_report(items, lines, routes)["through_items"], 0)
+        straight = [[(25, 125), (225, 125)], [(50, 125), (100, 125)], [(150, 125), (200, 25)]]
+        self.assertEqual(techtree.line_report(items, lines[:1], straight[:1])["through_items"], 1)
+        self.assertEqual(routes[1], [(50, 125.0), (100, 125.0)])   # neighbours: straight
+        for points in routes:   # orthogonal polylines only
+            for (x1, y1), (x2, y2) in zip(points, points[1:]):
+                self.assertTrue(x1 == x2 or y1 == y2)
+
     def test_trigger(self):
         block = text.parse('available = { OR = { has_dlc = "A" AND = { has_dlc = "B" NOT = { has_dlc = "C" } } } }')
         avail = text.get(block, "available")

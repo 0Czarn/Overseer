@@ -133,6 +133,13 @@ ZROBIONE
             Nazwy jak w grze: własny tekst, inaczej nazwa pierwszego sprzętu (infantry_weapons1 -> Infantry
             Equipment I). Kontrola: 9 kart bez nakładania się pól (poza 2+2 w Naval support i Air).
             Brak: tło zakładki i animacja "w trakcie" (DDS skompresowane DXT - konwerter ich nie obsługuje).
+            [x] 2026-10-11 (prośby użytkownika): kafelki "Research tabs" i "Technology tree" połączone w jeden
+                ("Research tabs & technology tree": pasek kart + drzewko, jeden przełącznik Live/On refresh);
+                przesuwanie drzewka lewym przyciskiem myszy; wykluczenia XOR (np. Concentrated / Dispersed
+                Industry, Flexible / Streamlined Line): znaczek XOR, stan "wykluczona" gdy zbadano alternatywę;
+                linie trasowane łamanymi omijającymi pola (3 lub 5 odcinków w wolnych korytarzach, kara za
+                przecięcia linii innych technologii): na 9 kartach 0 linii przez pola i 0 przecięć (wcześniej 22 i 3,
+                m.in. Advanced Flamethrower); trasy liczone raz na kartę (do 4,5 s), potem z pamięci (0,16 s).
 
 [x] Nagłówki kafelków jak w Live game memory: zielone "game memory · read HH:MM:SS" (szczegóły w podpowiedzi),
             bez gry "save <plik> · read HH:MM:SS"
