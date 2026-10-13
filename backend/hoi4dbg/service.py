@@ -374,13 +374,26 @@ class DebuggerService:
             items = [s for s in items if owner in (s["owner"], s["controller"])]
         return envelope(source, items, note)
 
-    def _focus_context(self, tag: str):
-        """(state from the newest save, focuses of its tree with statuses) or None."""
+    def _focus_context(self, tag: str, live_first: bool = False):
+        """(state, focuses of its tree with statuses) or None. State from the newest save, or with `live_first`
+        from game memory (tree, completed, current focus - no save needed) when the game runs."""
         install = self._install_path()
-        picked = self._pick_save(None)
-        if install is None or picked is None:
+        if install is None:
             return None
-        state = self.saves.focus_state(picked[0], tag)
+        state = None
+        if live_first and self.live is not None:
+            try:
+                live = self.live.focus(tag)
+                if live.get("tree"):
+                    state = {"tree": live["tree"], "completed": live["completed"], "current": live["current"],
+                             "progress": live["progress_days"], "paused": False, "analysis": None, "source": "live"}
+            except Exception:  # game not running, main menu, other version: the save is the fallback
+                state = None
+        if state is None:
+            picked = self._pick_save(None)
+            if picked is None:
+                return None
+            state = {**self.saves.focus_state(picked[0], tag), "source": "save"}
         userdata = (self.detect().get("userdata") or {}).get("path")
         folders = focus_mod.focus_folders(install, gamefiles.enabled_mods(Path(userdata)) if userdata else [])
         focuses = focus_mod.statuses(focus_mod.tree(folders, state["tree"]), state) if state["tree"] else []
@@ -391,11 +404,36 @@ class DebuggerService:
             f["name"] = name if name and "[" not in name else f["id"].split("_", 1)[-1].replace("_", " ").capitalize()
         return state, focuses
 
+    def _focus_graphics(self, focuses: list[dict]) -> dict:
+        """Icons (by sprite), name plate backgrounds (by status) and the exclusive link of the game's focus screen,
+        plus each focus's description; sets f["icon_key"] and f["desc"]."""
+        install = self._install_path()
+        roots = self._game_roots(install)
+        sprites = gfx.sprites(roots)
+        icons = {}
+        for f in focuses:
+            sprite = f.get("icon") if f.get("icon") in sprites else "GFX_goal_unknown"
+            if sprite not in icons and sprite in sprites:
+                icons[sprite] = gfx.icon_data_uri(sprites[sprite])
+            f["icon_key"] = sprite if icons.get(sprite) else None
+        descs = focus_mod.loc_names(install, {f"{f['id']}_desc" for f in focuses})
+        for f in focuses:
+            d = descs.get(f"{f['id']}_desc")
+            f["desc"] = clean_loc(d, descs) if d and "[" not in d else None
+        plate = {"completed": "GFX_focus_completed", "in_progress": "GFX_focus_can_start",
+                 "available": "GFX_focus_can_start", "blocked": "GFX_focus_unavailable",
+                 "excluded": "GFX_focus_unavailable"}
+        link = sprites.get("GFX_focus_link_exclusive")
+        return {"icons": icons,
+                "plates": {k: gfx.icon_data_uri(sprites[v]) if sprites.get(v) else None for k, v in plate.items()},
+                "exclusive_icon": gfx.frame_data_uri(link, 1, 3) if link else None}
+
     def focus(self, tag: str) -> dict:
-        """Focus tree of `tag` (game/mod files) with statuses from the newest save; the queue is a plan."""
+        """Focus tree of `tag` (game/mod files) laid out like the game's focus screen, with statuses from game
+        memory while the game runs (else the newest save); the queue is a plan."""
         tag = tag.upper()
         try:
-            ctx = self._focus_context(tag)
+            ctx = self._focus_context(tag, live_first=True)
         except SaveFormatError as exc:
             ctx, note = None, f"Focus state not read: {exc}"
         else:
@@ -404,17 +442,42 @@ class DebuggerService:
             return envelope(DEMO, {"tag": tag, "focuses": demo.focuses(tag), "queue_supported": False},
                             f"{note} {DEMO_NOTE}" if note else DEMO_NOTE)
         state, focuses = ctx
-        analysis = state["analysis"]
-        header = analysis.get("header") or {}
         queue = self._focus_queues().get(f"{tag}:{state['tree']}", [])
-        return envelope(SAVE, {
+        data = {
             "tag": tag, "tree": state["tree"], "current": state["current"], "progress_days": state["progress"],
             "paused": state["paused"], "completed": len(state["completed"]), "focuses": focuses,
             "queue": focus_mod.validate_queue(focuses, state, queue), "queue_supported": False,
-            "file": analysis["file"], "in_game_date": header.get("date"),
-            "freshness": save_freshness(analysis["file"]["mtime"], self.detect()),
-        }, f"Focus tree {state['tree']} from the game files; state of {tag} from {analysis['file']['name']} "
-           f"({(header.get('date') or {}).get('text') or '?'}). Snapshot - not live.")
+            "focus_source": state["source"], "layout": focus_mod.layout(focuses), **self._focus_graphics(focuses)}
+        if state["source"] == "live":
+            return envelope(LIVE, data, f"Focus tree {state['tree']} from the game files; state of {tag} from game memory.")
+        analysis = state["analysis"]
+        header = analysis.get("header") or {}
+        data.update(file=analysis["file"], in_game_date=header.get("date"),
+                    freshness=save_freshness(analysis["file"]["mtime"], self.detect()))
+        return envelope(SAVE, data, f"Focus tree {state['tree']} from the game files; state of {tag} from "
+                                    f"{analysis['file']['name']} ({(header.get('date') or {}).get('text') or '?'}). "
+                                    "Snapshot - not live.")
+
+    def focus_state(self, tag: str) -> dict:
+        """State of `tag`'s focus tree without the graphics (for Live / On refresh updates of the tree): tree id,
+        current focus and progress, each focus's status and progress, the checked plan and its next focus."""
+        tag = tag.upper()
+        try:
+            ctx = self._focus_context(tag, live_first=True)
+        except SaveFormatError as exc:
+            return envelope(UNAVAILABLE, None, f"Focus state not read: {exc}")
+        if ctx is None:
+            return envelope(UNAVAILABLE, None, "Needs the running game or a save")
+        state, focuses = ctx
+        queue = focus_mod.validate_queue(focuses, state, self._focus_queues().get(f"{tag}:{state['tree']}", []))
+        by_id = {f["id"]: f for f in focuses}
+        nxt = next((q for q in queue if q["ok"]), None)
+        return envelope(LIVE if state["source"] == "live" else SAVE, {
+            "tag": tag, "tree": state["tree"], "current": state["current"], "progress_days": state["progress"],
+            "focus_source": state["source"], "queue": queue,
+            "statuses": {f["id"]: {"status": f["status"], "progress": f["progress"], "missing": f["missing"]} for f in focuses},
+            "next": {"id": nxt["id"], "name": by_id[nxt["id"]]["name"], "days": by_id[nxt["id"]]["days"]} if nxt else None,
+        }, "Focus state from game memory." if state["source"] == "live" else "Focus state from the newest save.")
 
     def _focus_context_cached(self, tag: str, wait: bool = True):
         """_focus_context() cached per newest save (parsing a binary save takes seconds). With wait=False a

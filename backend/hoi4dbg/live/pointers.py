@@ -663,9 +663,14 @@ def read_field(memory, country: int, field: str) -> float:
 # National focus of a country: [country + 0x1380] = focus state; +0x10 -> focus definition whose id (MSVC
 # std::string) is at +0x18; +0x38 = progress in days (fixed64_100000). Verified 2026-10-09 (wariant3.hoi4):
 # progress 99/99 countries (incl. SIA 23 vs 30 elsewhere), current focus id 99/99 countries.
-# +0x40 -> array of completed focus definitions, +0x48 = count (int32): after 5 game days the list of every
-# country contained all completed focuses of the save (99/99), the new ones being mostly the save's current focus.
-FOCUS = {"state": 0x1380, "definition": 0x10, "id": 0x18, "progress": 0x38, "completed": 0x40, "completed_count": 0x48}
+# +0x40 -> array of completed focus definitions, +0x48 = capacity, +0x4c = count (int32). FIX 2026-10-13 (user: USA
+# showed 30 completed focuses without any taken): the count was read from the capacity (+0x48, e.g. 42), so stale
+# slots behind the real entries counted as completed; with +0x4c 15/15 countries equal the save's completed focuses
+# (SPR one more: completed after the autosave).
+# [country + 0x1370] = CNationalFocusTree of the country, + 0x8 = its id (std::string, the focus_tree id of
+# common/national_focus; 439/439 countries known, 2026-10-13: usa_focus, german_focus, mexico_focus_tree ...).
+FOCUS = {"state": 0x1380, "definition": 0x10, "id": 0x18, "progress": 0x38, "completed": 0x40, "completed_count": 0x4C,
+         "tree": 0x1370, "tree_id": 0x8}
 MAX_COMPLETED = 2000
 
 
@@ -681,7 +686,7 @@ def _msvc_string(memory, address: int, max_len: int = 200) -> str | None:
 
 
 def read_focus(memory, country: int) -> dict:
-    """{"current": focus id or None, "progress_days": float, "completed": [focus ids]}."""
+    """{"tree": focus tree id or None, "current": focus id or None, "progress_days": float, "completed": [ids]}."""
     state = _ptr(memory, country + FOCUS["state"])
     if state is None:
         raise PointerError("unreadable", "Focus state of the country is not readable")
@@ -703,7 +708,11 @@ def read_focus(memory, country: int) -> dict:
         fid = _msvc_string(memory, definition_i + FOCUS["id"]) if 0x10000 <= definition_i < 0x7FFF_FFFF_FFFF else None
         if fid:
             completed.append(fid)
-    return {"current": current or None, "progress_days": progress, "completed": completed}
+    tree = _ptr(memory, country + FOCUS["tree"])
+    tree_id = _msvc_string(memory, tree + FOCUS["tree_id"]) if tree else None
+    if tree_id is not None and not re.fullmatch(r"[A-Za-z0-9_.\-]{1,200}", tree_id):
+        raise PointerError("implausible", f"Focus tree id {tree_id!r} does not look like an id - layout does not match")
+    return {"tree": tree_id, "current": current or None, "progress_days": progress, "completed": completed}
 
 
 # Equipment stockpile: [country + 0xf68] = production object; +0x220 -> array of {variant*, amount (fixed64_100000)}
@@ -902,3 +911,27 @@ def read_relation(memory, country: int, other_slot: int, module_base: int) -> di
         if kind:
             links[kind] = struct.unpack_from("<ii", head, 0x10)
     return {"opinion": opinion, "links": links}
+
+
+# Wargoal justifications (2026-10-13, GER justifying against USA in the game; every other country empty):
+# [country + 0xf90] CPoliticalStatus + 0x8 = array of CTimedWargoalActivity* (read_array); activity + 0x10 / + 0x14 =
+# slots of the justifying country and of its target (1 GER -> 68 USA).
+JUSTIFICATIONS = 0x8
+JUSTIFICATION_SIDES = 0x10
+
+
+def read_justifications(memory, country: int) -> list[tuple[int, int]]:
+    """[(slot of the justifying country, slot of the target)] of a country's wargoal justifications in progress."""
+    pol = _ptr(memory, country + POLITICS)
+    if pol is None:
+        raise PointerError("no_politics", "The country's politics object is not readable")
+    out = []
+    for act in read_array(memory, pol + JUSTIFICATIONS, 200):
+        raw = memory.read(act + JUSTIFICATION_SIDES, 8) if act else None
+        if raw is None:
+            raise PointerError("unreadable", "A wargoal justification is not readable")
+        sides = struct.unpack("<ii", raw)
+        if not all(0 < s < 5000 for s in sides):
+            raise PointerError("implausible", "Wargoal justification sides out of range - layout does not match")
+        out.append(sides)
+    return out

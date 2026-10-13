@@ -22,9 +22,10 @@ DEFAULT_LIMIT = 0.25
 # points of a seller (higher = better): each rule outweighs every rule below it; the current seller bonus only
 # breaks ties between otherwise equal sellers
 SCORE = {"puppet": 64, "ally": 32, "ideology": 16, "opinion": 8, "non_aggression_pact": 4, "border": 2,
-         "continent": 1, "current": 0.5, "overlord": -200, "enemy_faction": -200}
+         "continent": 1, "current": 0.5, "overlord": -200, "enemy_faction": -200, "preparing_war": -200,
+         "your_target": -200}
 GOOD_OPINION = 1   # opinion of the player from this value up counts as good
-UNCHECKED = ("countries preparing war (wargoals)", "volunteers", "convoys for sea routes")
+UNCHECKED = ("volunteers fighting you", "convoys for sea routes")
 
 
 def seller_score(seller: str, info: dict, player: dict, resource: str) -> tuple[int, list[str]]:
@@ -57,9 +58,18 @@ def seller_score(seller: str, info: dict, player: dict, resource: str) -> tuple[
         points += SCORE["overlord"]
         reasons.append("your overlord")
     enemies = {w["enemy"] for w in player.get("wars") or []}
-    if enemies & set(info.get("faction") or []):
+    justifying = player.get("justifications") or []
+    mine = {tag, *(player.get("puppets") or [])}
+    against_us = {a for a, b in justifying if b in mine}   # preparing war against the player or its puppets
+    if enemies & set(info.get("faction") or []) or (against_us - {seller}) & set(info.get("faction") or []):
         points += SCORE["enemy_faction"]
-        reasons.append("its faction is at war with you")
+        reasons.append("its faction is at war with you or preparing it")
+    if seller in against_us:
+        points += SCORE["preparing_war"]
+        reasons.append("preparing war against you or your puppets")
+    if [tag, seller] in justifying or (tag, seller) in justifying:
+        points += SCORE["your_target"]
+        reasons.append("you are preparing war against it")
     if any(d["seller"] == seller and d["resource"] == resource for d in player.get("imports") or []):
         points += SCORE["current"]
         reasons.append("current seller")

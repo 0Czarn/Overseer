@@ -661,7 +661,9 @@ class CountryTableTests(TempDirMixin, unittest.TestCase):
         self.put_string(cur_def + pointers.FOCUS["id"], "ITA_preservation_of_independence", BASE + 0x2800)
         self.mem.put(state + pointers.FOCUS["completed"], "Q", array)
         self.mem.put(state + pointers.FOCUS["completed_count"], "I", 1)
+        self.mem.put(state + pointers.FOCUS["completed_count"] - 4, "I", 42)   # capacity: stale slots after the entry
         self.mem.put(array, "Q", done_def)
+        self.mem.put(array + 8, "Q", cur_def)   # a stale slot (USA 1936: 30 "completed" read from the capacity)
         self.put_string(done_def + pointers.FOCUS["id"], "ITA_army", BASE + 0x2900)  # short: inline
         self.assertEqual(self.svc.focus()["current"], "ITA_preservation_of_independence")
         res = self.svc.focus("ITA")
@@ -1130,6 +1132,21 @@ class IdeaPointerTests(unittest.TestCase):
         self.assertEqual(pointers.read_relation(mem, country, 68, module), {"opinion": 100, "links": {"subject": (68, 58)}})
         with self.assertRaises(pointers.PointerError):   # slot beyond the array
             pointers.read_relation(mem, country, 80, module)
+
+    def test_read_justifications(self):
+        mem = FakeMemory(0x4000)
+        country, pol, array, act = BASE + 0x100, BASE + 0x400, BASE + 0x500, BASE + 0x800
+        mem.put(country + pointers.POLITICS, "Q", pol)
+        mem.put(pol + pointers.JUSTIFICATIONS, "Q", array)
+        mem.put(pol + pointers.JUSTIFICATIONS + 8, "i", 1)
+        mem.put(pol + pointers.JUSTIFICATIONS + 12, "i", 1)
+        mem.put(array, "Q", act)
+        mem.put(act + pointers.JUSTIFICATION_SIDES, "i", 1)       # GER
+        mem.put(act + pointers.JUSTIFICATION_SIDES + 4, "i", 68)  # against USA
+        self.assertEqual(pointers.read_justifications(mem, country), [(1, 68)])
+        mem.put(act + pointers.JUSTIFICATION_SIDES + 4, "i", -5)
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_justifications(mem, country)
 
     def test_read_research(self):
         mem = FakeMemory(0x4000)

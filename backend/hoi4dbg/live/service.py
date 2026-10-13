@@ -687,6 +687,28 @@ class LiveService:
                     sellers[t] = {"market": free, "ideology": ruling, "faction": faction["members"] if faction else [],
                                   "opinion": relation["opinion"], "links": links}
                 player["ideology"] = pointers.read_parties(mem, countries[tag], ideologies)["ruling"]
+                # who prepares war against whom (every country), the player's puppets (its relations)
+                slot_tag = lambda s: order[s - 1] if 0 < s <= len(order) else None  # noqa: E731
+                justifying = []
+                for t, c in countries.items():
+                    try:
+                        justifying += [[slot_tag(a), slot_tag(b)] for a, b in pointers.read_justifications(mem, c)]
+                    except pointers.PointerError:   # tags without a country
+                        continue
+                player["justifications"] = justifying
+                own_slot = order.index(tag) + 1
+                puppets = []
+                for t in countries:
+                    if t == tag:
+                        continue
+                    try:
+                        sub = pointers.read_relation(mem, countries[tag], order.index(t) + 1,
+                                                     self._module_base[key])["links"].get("subject")
+                    except pointers.PointerError:
+                        continue
+                    if sub and sub[0] == own_slot:
+                        puppets.append(t)
+                player["puppets"] = puppets
         except pointers.PointerError as exc:
             raise LiveError(exc.code, str(exc)) from exc
         except (MemoryAccessError, OSError, KeyError) as exc:

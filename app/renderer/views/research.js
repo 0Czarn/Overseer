@@ -155,6 +155,10 @@ export function dragToScroll(el) {
   });
   const stop = (e) => {
     if (!start) return;
+    if (start.moved) {   // the click that ends a drag must not act on the item under the mouse
+      el.dataset.dragged = '1';
+      setTimeout(() => { delete el.dataset.dragged; }, 0);
+    }
     start = null;
     el.classList.remove('tech-dragging');
     if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);

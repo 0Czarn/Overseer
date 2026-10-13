@@ -538,6 +538,36 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
 .hoi-mode-btn:focus-visible, .hoi-refresh:focus-visible { outline: 1px solid var(--hoi-trim-hi); outline-offset: 1px; }
 .hoi-refresh[hidden] { display: none; }
 
+/* National focus tree (game style) */
+.ftree-scroll { overflow: auto; max-height: 72vh; border: 1px solid var(--hoi-trim); border-radius: 3px;
+  background: radial-gradient(ellipse at top, #2a2a22 0%, #15140f 70%); cursor: grab; user-select: none; }
+.ftree-scroll.tech-dragging { cursor: grabbing; }
+.ftree { position: relative; }
+.ftree-lines { position: absolute; left: 0; top: 0; pointer-events: none; }
+.ftree-line { fill: none; stroke: #6d6650; stroke-width: 3; }
+.ftree-line-done { stroke: #d6b25e; }
+.ftree-line-alt { stroke-dasharray: 7 5; }
+.ftree-exclusive { fill: none; stroke: #b52a1f; stroke-width: 3; }
+.ftree-xicon { position: absolute; width: 32px; height: 32px; pointer-events: auto; }
+.ftree-xicon-text { width: 16px; height: 20px; color: #fff; background: #b52a1f; border-radius: 50%; text-align: center; font-weight: 700; }
+.fnode { position: absolute; padding: 0; border: 0; background: none; color: #f2ead2; cursor: pointer; text-align: center; }
+.fnode:focus-visible { outline: 2px solid var(--hoi-trim-hi); outline-offset: 2px; }
+.fnode-icon { display: block; margin: 0 auto; max-width: 100%; object-fit: contain; filter: drop-shadow(0 2px 2px #000); }
+.fnode-plate { position: absolute; left: -10px; right: -10px; display: flex; align-items: center; justify-content: center;
+  background-size: 100% 100%; padding: 0 12px; }
+.fnode-name { font-size: 11px; line-height: 1.1; font-weight: 600; text-shadow: 0 1px 2px #000; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.fnode-blocked .fnode-icon, .fnode-excluded .fnode-icon { filter: grayscale(0.85) brightness(0.7); }
+.fnode-excluded { opacity: 0.55; }
+.fnode-in_progress .fnode-icon { animation: fnode-pulse 1.6s ease-in-out infinite; }
+@keyframes fnode-pulse { 50% { filter: drop-shadow(0 0 10px #f3d36b) brightness(1.15); } }
+.fnode-progress { position: absolute; left: 4px; right: 4px; bottom: -2px; height: 5px; background: #0e100c; border: 1px solid #4a4430; }
+.fnode-progress > span { display: block; height: 100%; background: #f3d36b; }
+.fnode-qn { position: absolute; right: 4px; top: 0; min-width: 20px; height: 20px; border-radius: 10px; background: #2f6fb0;
+  color: #fff; font-size: 12px; font-weight: 700; line-height: 20px; }
+.fnode-queued-bad .fnode-qn { background: #b52a1f; }
+.fnode:hover .fnode-icon { transform: scale(1.06); }
+
 /* Construction view */
 .construction-lines { display: flex; flex-direction: column; gap: 6px; }
 .construction-line { display: grid; grid-template-columns: 22px minmax(90px, 150px) 56px 1fr auto; align-items: center; gap: 10px;

@@ -71,7 +71,7 @@ def _dds_rgba(data: bytes, max_side: int) -> tuple[int, int, bytes] | None:
     return width, height, bytes(out)
 
 
-@lru_cache(maxsize=512)
+@lru_cache(maxsize=4096)
 def icon_data_uri(texture: str) -> str | None:
     """data: URI of a texture file (.dds or .png), cached."""
     path = Path(texture)

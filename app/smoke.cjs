@@ -7,6 +7,8 @@ const path = require('node:path');
 
 const TABS = ['dashboard', 'countries', 'country-editor', 'research', 'construction', 'state-editor', 'focus', 'equipment', 'tools',
   'intel', 'logs'];
+// HOI4DBG_SMOKE_TABS=focus,construction checks only these tabs
+const ONLY = (process.env.HOI4DBG_SMOKE_TABS || '').split(',').filter(Boolean);
 const SIZES = [{ name: 'wide', width: 1320, height: 860 }, { name: 'narrow', width: 480, height: 820 }];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -37,7 +39,7 @@ function runSmoke(win, outDir, quit) {
       for (const size of SIZES) {
         win.setContentSize(size.width, size.height);
         await sleep(300);
-        for (const tab of TABS) {
+        for (const tab of TABS.filter((t) => !ONLY.length || ONLY.includes(t))) {
           await wc.executeJavaScript(`location.hash = '#/${tab}'`);
           // the first read of a new 40 MB binary save takes a few seconds per view (pure Python parser)
           const ok = await waitFor(wc,
@@ -52,7 +54,7 @@ function runSmoke(win, outDir, quit) {
             hScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth,
             // focus tree checked in the DOM (a hidden window may not repaint a very large tree for the screenshot)
             focusNodes: Object.fromEntries(['completed', 'in_progress', 'available', 'blocked', 'excluded'].map(
-              (s) => [s, document.querySelectorAll('.focus-node.focus-' + s).length])),
+              (s) => [s, document.querySelectorAll('.fnode.fnode-' + s).length])),
           })`);
           if (tab === 'countries') {
             // Live tab: switch, wait for the memory read (countries table or a reason), switch back
@@ -96,6 +98,13 @@ function runSmoke(win, outDir, quit) {
             if (!info.resources) result.failures.push(`${size.name}/country-editor: no resources`);
             info.editableChips = await wc.executeJavaScript(`document.querySelectorAll('.hoi-chip .hoi-chip-input').length`);
             if (info.editableChips !== 6) result.failures.push(`${size.name}/country-editor: ${info.editableChips}/6 editable live values`);
+          }
+          if (tab === 'focus') {
+            // the tree's own Live / On refresh switch and the state read after it (game memory or save)
+            await waitFor(wc, `/read|not read/.test(document.querySelector('.card .hoi-status')?.textContent ?? '')`, 20000);
+            info.focusState = await wc.executeJavaScript(`({ switches: document.querySelectorAll('.card .hoi-mode').length,
+              status: document.querySelector('.card .hoi-status')?.textContent ?? null })`);
+            if (info.focusState.switches !== 1) result.failures.push(`${size.name}/focus: tree has no Live / On refresh switch`);
           }
           if (tab === 'construction') {
             // queue rows, the empty-queue line, or the reason (game not running)

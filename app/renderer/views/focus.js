@@ -1,7 +1,8 @@
 import { h, card, demoBanner, meter, notice, sourceBadge, toast, viewHeader } from '../lib/dom.js';
 import { FOCUS_COLUMNS, formatAge, freshnessInfo, groupFocuses } from '../lib/format.js';
-import { focusStatuses } from '../lib/focus-status.js';
 import { countryPicker } from './shared.js';
+import { dragToScroll, pathOf } from './research.js';
+import { dataKey, refreshControl } from '../lib/refresh.js';
 
 const CELL_W = 118;
 const CELL_H = 74;
@@ -22,53 +23,76 @@ function demoView(res) {
     groups[col.status].length ? groups[col.status].map(demoCard) : h('p', { class: 'muted' }, 'None'))));
 }
 
-/** The tree laid out like in game (x/y from the focus files); click a focus to add it to / remove it from the queue. */
-function treeView(focuses, queue, onToggle) {
-  const minX = Math.min(...focuses.map((f) => f.x));
-  const maxX = Math.max(...focuses.map((f) => f.x));
-  const maxY = Math.max(...focuses.map((f) => f.y));
-  const pos = new Map(focuses.map((f) => [f.id, { left: (f.x - minX) * CELL_W, top: f.y * CELL_H }]));
+/** Tooltip text of a focus: name, description from the game, time, prerequisites, exclusions, plan position. */
+export function focusTitle(f, q, byId = new Map()) {
+  const name = (id) => byId.get(id)?.name ?? id;
+  return [
+    `${f.name} (${STATUS_LABEL[f.status] ?? f.status})`,
+    f.desc,
+    `${f.days} days`,
+    f.missing?.length ? `Needs: ${f.missing.map((g) => g.map(name).join(' or ')).join(' and ')}` : '',
+    f.exclusive?.length ? `Mutually exclusive with: ${f.exclusive.map(name).join(', ')}` : '',
+    f.has_conditions ? 'Has game conditions the app cannot check' : '',
+    q ? `Plan #${q.n}${q.ok ? '' : ` - ${q.reason}`}` : '',
+    f.id,
+  ].filter(Boolean).join('\n');
+}
+
+/** The tree laid out like the game's focus screen (positions, lines and exclusive links from the backend);
+ *  drag with the left mouse button to move around; click a focus to add it to / remove it from the plan. */
+function treeView(d, queue, onToggle) {
+  const L = d.layout;
+  const N = L.node;
+  const byId = new Map(d.focuses.map((f) => [f.id, f]));
   const queued = new Map(queue.map((q, i) => [q.id, { ...q, n: i + 1 }]));
-  const width = (maxX - minX + 1) * CELL_W;
-  const height = (maxY + 1) * CELL_H;
   const svgNS = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(svgNS, 'svg');
-  svg.setAttribute('class', 'focus-lines');
-  svg.setAttribute('width', String(width));
-  svg.setAttribute('height', String(height));
-  for (const f of focuses) {
-    for (const group of f.prerequisites) {
-      for (const p of group) {
-        const a = pos.get(p);
-        const b = pos.get(f.id);
-        if (!a || !b) continue;
-        const line = document.createElementNS(svgNS, 'line');
-        line.setAttribute('x1', String(a.left + CELL_W / 2));
-        line.setAttribute('y1', String(a.top + CELL_H - 14));
-        line.setAttribute('x2', String(b.left + CELL_W / 2));
-        line.setAttribute('y2', String(b.top + 6));
-        if (group.length > 1) line.setAttribute('stroke-dasharray', '4 3'); // one of several
-        svg.append(line);
-      }
-    }
+  svg.setAttribute('class', 'ftree-lines');
+  svg.setAttribute('width', String(L.width));
+  svg.setAttribute('height', String(L.height));
+  for (const l of L.lines) {
+    const path = document.createElementNS(svgNS, 'path');
+    path.setAttribute('d', pathOf(l.points));
+    const done = byId.get(l.from)?.status === 'completed';
+    path.setAttribute('class', `ftree-line${done ? ' ftree-line-done' : ''}${l.alternative ? ' ftree-line-alt' : ''}`);
+    svg.append(path);
   }
-  const nodes = focuses.map((f) => {
+  for (const x of L.exclusive) {
+    const path = document.createElementNS(svgNS, 'path');
+    path.setAttribute('d', pathOf(x.points));
+    path.setAttribute('class', 'ftree-exclusive');
+    svg.append(path);
+  }
+  const links = L.exclusive.map((x) => (d.exclusive_icon
+    ? h('img', { class: 'ftree-xicon', src: d.exclusive_icon, alt: '', draggable: 'false',
+      title: `Mutually exclusive: ${byId.get(x.a)?.name ?? x.a} / ${byId.get(x.b)?.name ?? x.b}`,
+      style: { left: `${x.at[0] - 16}px`, top: `${x.at[1] - 16}px` } })
+    : h('span', { class: 'ftree-xicon ftree-xicon-text', style: { left: `${x.at[0] - 8}px`, top: `${x.at[1] - 10}px` } }, '!')));
+  const nodes = L.items.map((it) => {
+    const f = byId.get(it.id);
     const q = queued.get(f.id);
-    const p = pos.get(f.id);
+    const icon = f.icon_key ? d.icons[f.icon_key] : null;
+    const plate = d.plates?.[f.status];
     return h('button', {
-      class: `focus-node focus-${f.status}${q ? (q.ok ? ' focus-queued' : ' focus-queued-bad') : ''}`,
-      style: { left: `${p.left + 4}px`, top: `${p.top + 4}px`, width: `${CELL_W - 8}px`, height: `${CELL_H - 18}px` },
-      title: `${f.name}\n${f.id}\n${STATUS_LABEL[f.status] ?? f.status} · ${f.days} days`
-        + (f.missing?.length ? `\nneeds ${f.missing.map((g) => g.join(' or ')).join(' and ')}` : '')
-        + (f.exclusive?.length ? `\nexcludes ${f.exclusive.join(', ')}` : '')
-        + (f.has_conditions ? '\nhas game conditions the app cannot check' : '')
-        + (q ? `\nqueue #${q.n}${q.ok ? '' : ` - ${q.reason}`}` : ''),
-      onClick: () => onToggle(f),
-    }, q ? h('span', { class: 'focus-qn' }, String(q.n)) : null, h('span', { class: 'focus-node-name' }, f.name),
-    f.status === 'in_progress' ? meter(f.progress ?? 0) : null);
+      type: 'button',
+      class: `fnode fnode-${f.status}${q ? (q.ok ? ' fnode-queued' : ' fnode-queued-bad') : ''}`,
+      'data-focus': f.id,
+      style: { left: `${it.left}px`, top: `${it.top}px`, width: `${N.w}px`, height: `${N.h}px` },
+      title: focusTitle(f, q, byId),
+      onClick: (e) => { if (!e.currentTarget.closest('.ftree-scroll')?.dataset.dragged) onToggle(f); },
+    },
+    icon ? h('img', { class: 'fnode-icon', src: icon, alt: '', draggable: 'false', style: { height: `${N.icon_h}px` } })
+      : h('span', { class: 'fnode-icon fnode-icon-none', style: { height: `${N.icon_h}px` } }),
+    h('span', { class: 'fnode-plate', style: { top: `${N.plate_top}px`, height: `${N.plate_h}px`,
+      backgroundImage: plate ? `url(${plate})` : 'none' } }, h('span', { class: 'fnode-name' }, f.name)),
+    f.status === 'in_progress' ? h('span', { class: 'fnode-progress' },
+      h('span', { style: { width: `${Math.min(100, (f.progress ?? 0) * 100)}%` } })) : null,
+    q ? h('span', { class: 'fnode-qn' }, String(q.n)) : null);
   });
-  return h('div', { class: 'focus-tree-scroll' },
-    h('div', { class: 'focus-tree', style: { width: `${width}px`, height: `${height}px` } }, svg, ...nodes));
+  const view = h('div', { class: 'ftree-scroll' },
+    h('div', { class: 'ftree', style: { width: `${L.width}px`, height: `${L.height}px` } }, svg, ...links, ...nodes));
+  dragToScroll(view);
+  return view;
 }
 
 function queueList(byId, queue, save, move, remove) {
@@ -91,7 +115,7 @@ export default {
     const [res, picker] = await Promise.all([ctx.api.get(`/api/focus/${encodeURIComponent(tag)}`), countryPicker(ctx)]);
     const header = viewHeader('National Focus Manager', 'Focus tree of the selected country, its state and your planned order.',
       picker, sourceBadge(res.source, res.note));
-    if (res.source !== 'save') {
+    if (res.source !== 'save' && res.source !== 'live') {
       root.append(...[header, demoBanner(res.note), res.data.focuses.length ? demoView(res) : notice('muted', `No focus data for ${tag}.`)]);
       return undefined;
     }
@@ -100,7 +124,7 @@ export default {
     let queue = d.queue;
     const treeHost = h('div');
     const queueHost = h('div');
-    const fresh = freshnessInfo(d.freshness?.category);
+    const fresh = freshnessInfo(d.freshness?.category ?? 'current_session');
     const currentHost = h('div');
     const showCurrent = (live) => {
       const id = live ? live.current : d.current;
@@ -116,17 +140,6 @@ export default {
       ].flat().filter(Boolean));
     };
     showCurrent(null);
-    let liveTimer = null;
-    const pollLive = async () => {
-      try {
-        const live = (await ctx.api.get(`/api/live/focus?tag=${encodeURIComponent(tag)}`)).data;
-        showCurrent(live);
-        applyLive(live);
-      } catch { /* live reading unavailable - keep the save snapshot */ }
-      liveTimer = setTimeout(pollLive, 4000);
-    };
-    pollLive();
-
     const save = async (ids) => {
       try {
         queue = (await ctx.api.post(`/api/focus/${encodeURIComponent(tag)}/queue`, { queue: ids })).data;
@@ -140,49 +153,83 @@ export default {
     };
     const move = (i, step) => { const next = ids(); [next[i], next[i + step]] = [next[i + step], next[i]]; save(next); };
     const remove = (i) => save(ids().filter((_, j) => j !== i));
-    // Live memory: focuses completed since the save turn green and their successors silver without a new save.
-    const savedCompleted = new Set(d.focuses.filter((f) => f.status === 'completed').map((f) => f.id));
-    let liveKey = null;
-    function applyLive(live) {
-      if (live.loading) return;
-      const key = `${live.current}|${(live.completed_since_save ?? []).join(',')}`;
-      if (key === liveKey) return;
-      liveKey = key;
-      const completed = new Set([...savedCompleted, ...(live.completed_since_save ?? [])]);
-      const statuses = focusStatuses(d.focuses, completed, live.current);
-      for (const f of d.focuses) f.status = statuses.get(f.id);
-      render();
+    // Live / On refresh: re-reads only the state of the tree (statuses, current focus, plan) - the graphics stay.
+    // Another tree (e.g. the country switched trees) reloads the whole view.
+    let stateKey = null;
+    const sourceText = h('span', { class: 'hoi-status' });
+    async function refreshState(force) {
+      try {
+        const r = await ctx.api.get(`/api/focus/${encodeURIComponent(tag)}/state`);
+        const st = r.data;
+        if (!st) { sourceText.textContent = r.note ?? ''; return; }
+        if (st.tree !== d.tree) { ctx.rerender(); return; }
+        sourceText.textContent = `${st.focus_source === 'live' ? 'game memory' : 'save'} · read ${new Date().toLocaleTimeString()}`;
+        sourceText.className = `hoi-status ${st.focus_source === 'live' ? 'hoi-status-on' : ''}`.trim();
+        showCurrent(st.focus_source === 'live' ? st : null);
+        const key = dataKey({ s: st.statuses, q: st.queue, c: st.current, p: Math.round(st.progress_days) });
+        if (!force && key === stateKey) return;
+        stateKey = key;
+        for (const f of d.focuses) Object.assign(f, st.statuses[f.id] ?? {});
+        d.current = st.current;
+        d.progress_days = st.progress_days;
+        queue = st.queue;
+        render();
+        countsHost.textContent = treeTitle();
+      } catch (err) {
+        sourceText.textContent = `not read: ${err.message}`;
+        sourceText.className = 'hoi-status';
+      }
+    }
+    const control = refreshControl('Focus tree', 'Focus tree', refreshState);
+    const countsHost = h('span');
+    const treeTitle = () => {
+      const c = groupFocuses(d.focuses);
+      return `Tree ${d.tree} - ${d.focuses.length} focuses (${c.completed?.length ?? 0} completed, ${c.available?.length ?? 0} available)`;
+    };
+    // first view: the focus in progress (else the first available one) in the middle, like the game opens
+    function centreOnCurrent(el) {
+      const f = d.focuses.find((x) => x.status === 'in_progress') ?? d.focuses.find((x) => x.status === 'available');
+      const it = f && d.layout.items.find((i) => i.id === f.id);
+      if (!it) return;
+      requestAnimationFrame(() => {
+        el.scrollLeft = Math.max(0, it.left - el.clientWidth / 2 + d.layout.node.w / 2);
+        el.scrollTop = Math.max(0, it.top - 40);
+      });
     }
     function render() {
-      const scroller = treeHost.querySelector('.focus-tree-scroll');
+      const scroller = treeHost.querySelector('.ftree-scroll');
       const keep = scroller ? [scroller.scrollLeft, scroller.scrollTop] : null;
-      treeHost.replaceChildren(treeView(d.focuses, queue, toggle));
-      if (keep) { const s2 = treeHost.querySelector('.focus-tree-scroll'); [s2.scrollLeft, s2.scrollTop] = keep; }
+      treeHost.replaceChildren(treeView(d, queue, toggle));
+      const s2 = treeHost.querySelector('.ftree-scroll');
+      if (keep) [s2.scrollLeft, s2.scrollTop] = keep;
+      else centreOnCurrent(s2);
       queueHost.replaceChildren(queueList(byId, queue, save, move, remove));
     }
     render();
-    const counts = groupFocuses(d.focuses);
+    countsHost.textContent = treeTitle();
 
     root.append(
       header,
-      h('div', { class: `save-banner ${fresh.cls}`, role: 'note' },
+      d.file ? h('div', { class: `save-banner ${fresh.cls}`, role: 'note' },
         h('div', { class: 'save-banner-line' }, sourceBadge('save'), h('strong', null, d.file.name),
           d.in_game_date ? h('span', null, 'In-game date ', h('b', null, d.in_game_date.text)) : null,
           h('span', { class: 'muted' }, `file written ${new Date(d.file.modified).toLocaleString()} (${formatAge(d.freshness?.age_s)})`)),
-        h('div', { class: 'fresh' }, `SNAPSHOT - ${d.freshness?.label ?? fresh.short}`)),
+        h('div', { class: 'fresh' }, `SNAPSHOT - ${d.freshness?.label ?? fresh.short}`))
+        : h('p', { class: 'hint' }, h('span', { class: 'badge badge-live' }, 'LIVE'), ` Tree ${d.tree} and its state read from game memory - no save needed.`),
       h('div', { class: 'split' },
         card('Current focus', currentHost),
         card(`Planned order (${queue.length})`, [queueHost,
           notice('info', 'The plan is checked against prerequisites and exclusions. When the current focus ends, the app '
             + 'notifies you which one to start next (the game has no command that starts a focus; focuses are never '
             + 'completed instantly).')])),
-      card(`Tree ${d.tree} - ${d.focuses.length} focuses (${counts.completed?.length ?? 0} completed, `
-        + `${counts.available?.length ?? 0} available)`, [
-        h('p', { class: 'hint' }, 'Green: completed · pulsing yellow: in progress · silver: can be taken next · grey: not yet '
-          + 'possible (dark grey: excluded by an earlier choice). Click a focus to add it to the plan or remove it. Dashed '
-          + 'lines: one of several prerequisites. Silver means the prerequisites are met - the game may still require other conditions.'),
-        treeHost]),
+      card(countsHost, [
+        h('p', { class: 'hint' }, 'Laid out like the game. Gold name plate: completed · pulsing: in progress · silver-blue plate: can be '
+          + 'taken next · red plate: not yet possible (darker: excluded by an earlier choice). Red link: mutually exclusive '
+          + 'focuses. Dashed lines: one of several prerequisites. Drag to move around; click a focus to add it to the plan or '
+          + 'remove it; hover for its description. The game may still require conditions the app cannot check.'),
+        treeHost], { extra: h('span', { class: 'hoi-head-right' }, sourceText, control.el) }),
     );
-    return () => clearTimeout(liveTimer);
+    refreshState(true);
+    return () => control.stop();
   },
 };

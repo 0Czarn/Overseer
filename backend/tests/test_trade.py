@@ -52,6 +52,20 @@ class TradePlanTest(unittest.TestCase):
         self.assertEqual(rubber["buy"][0]["seller"], "PUP")
         self.assertIn("your overlord", rubber["candidates"][-1]["reasons"])
 
+    def test_preparing_war(self):
+        # GER justifies a wargoal against USA (1936 game); SPR against the USA's puppet PHI; USA against CUB;
+        # ITA is in a faction with GER
+        p = player(rubber=-1)
+        p["justifications"] = [["GER", "USA"], ["SPR", "PHI"], ["USA", "CUB"]]
+        p["puppets"] = ["PHI"]
+        sellers = {"GER": seller(500), "SPR": seller(500), "CUB": seller(500), "ITA": seller(500, faction=["GER", "ITA"]),
+                   "SWE": seller(10)}
+        p["wars"] = []
+        rubber = next(r for r in trade.plan(p, sellers, CIC)["resources"] if r["resource"] == "rubber")
+        self.assertEqual(rubber["buy"][0]["seller"], "SWE")
+        score = {t: trade.seller_score(t, info, p, "rubber")[0] for t, info in sellers.items()}
+        self.assertEqual((score["GER"], score["SPR"], score["CUB"], score["ITA"]), (-200, -200, -200, -200))
+
     def test_current_seller_breaks_ties_only(self):
         p = player(rubber=-1)
         p["imports"] = [{"seller": "B", "resource": "rubber", "amount": 8.0}]

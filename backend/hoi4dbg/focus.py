@@ -40,7 +40,11 @@ def _focus(block: list) -> dict:
             return float(text.get(block, key) or 0)
         except ValueError:
             return 0.0
+    icon = text.get(block, "icon")
+    if isinstance(icon, list):   # conditional icons: { key = GFX_... trigger = ... } - the first one is the default
+        icon = next((v for k, v in icon if k == "key" and isinstance(v, str)), None)
     return {"id": text.get(block, "id"), "days": round(cost * DAYS_PER_COST), "x": num("x"), "y": num("y"),
+            "icon": icon if isinstance(icon, str) and icon.startswith("GFX_") else None,
             "relative_to": text.get(block, "relative_position_id"), "prerequisites": [p for p in prereqs if p],
             "exclusive": exclusive, "has_conditions": any(k in ("available", "bypass") for k, _ in block)}
 
@@ -193,3 +197,50 @@ def validate_queue(focuses: list[dict], state: dict, queue: list[str]) -> list[d
         result.append({"id": fid, "ok": True, "reason": None,
                        "conditions": f["has_conditions"]})
     return result
+
+
+# Layout like the game's focus screen (interface/nationalfocusview.gui: focus_spacing x = 96, y = 130): each focus is
+# an icon with its name plate below; prerequisite lines go down from the parent, across just above the child and down
+# into it (dashed when the parent is one of several alternatives); mutually exclusive focuses are joined by the
+# game's red exclusive link.
+SPACING = (96, 130)
+NODE = {"w": 92, "h": 118, "icon_h": 78, "plate_top": 80, "plate_h": 34}
+PAD = 24
+
+
+def layout(focuses: list[dict]) -> dict:
+    """{"items": [{id, left, top}], "lines": [{from, to, points, alternative}], "exclusive": [{a, b, points, at}],
+    "width", "height"} in pixels."""
+    if not focuses:
+        return {"items": [], "lines": [], "exclusive": [], "width": 0, "height": 0}
+    min_x = min(f["x"] for f in focuses)
+    pos = {f["id"]: (PAD + (f["x"] - min_x) * SPACING[0], PAD + f["y"] * SPACING[1]) for f in focuses}
+    cx = lambda fid: pos[fid][0] + NODE["w"] / 2  # noqa: E731
+    lines = []
+    for f in focuses:
+        for group in f["prerequisites"]:
+            for p in group:
+                if p not in pos:
+                    continue
+                x1, y1 = cx(p), pos[p][1] + NODE["plate_top"] + NODE["plate_h"]
+                x2, y2 = cx(f["id"]), pos[f["id"]][1]
+                mid = y2 - 10 if y2 - 10 > y1 else (y1 + y2) / 2
+                pts = [[x1, y1], [x1, mid], [x2, mid], [x2, y2]] if x1 != x2 else [[x1, y1], [x2, y2]]
+                lines.append({"from": p, "to": f["id"], "points": pts, "alternative": len(group) > 1})
+    exclusive, seen = [], set()
+    for f in focuses:
+        for e in f["exclusive"]:
+            pair = tuple(sorted((f["id"], e)))
+            if e not in pos or pair in seen:
+                continue
+            seen.add(pair)
+            a, b = sorted(pair, key=lambda i: pos[i][0])
+            y_a = pos[a][1] + NODE["icon_h"] / 2
+            y_b = pos[b][1] + NODE["icon_h"] / 2
+            pts = [[pos[a][0] + NODE["w"] - 8, y_a], [pos[b][0] + 8, y_b]]
+            exclusive.append({"a": a, "b": b, "points": pts,
+                              "at": [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2]})
+    width = max(left for left, _ in pos.values()) + NODE["w"] + PAD
+    height = max(top for _, top in pos.values()) + NODE["h"] + PAD
+    return {"items": [{"id": fid, "left": left, "top": top} for fid, (left, top) in pos.items()],
+            "lines": lines, "exclusive": exclusive, "width": width, "height": height, "node": NODE}

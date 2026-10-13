@@ -121,7 +121,14 @@ ZROBIONE
                 Mapa: sąsiedztwo prowincji z map/provinces.bmp (numpy 0,8 s, bez numpy czysty Python; cache JSON),
                 kontynent z definition.csv (główny kontynent państwa); właściciele stanów z najnowszego save'a.
                 Pakt o nieagresji i embargo: klasy i vtable potwierdzone, ale w grze 1936 nie było przykładu.
-            [ ] etap 3: przygotowania wojny (cele wojenne), ochotnicy, konwoje na trasy morskie.
+            [x] etap 3a (2026-10-13): przygotowania wojny - [country+0xF90] CPoliticalStatus +0x8 = tablica
+                CTimedWargoalActivity* (+0x10 kto, +0x14 przeciw komu; GER->USA = gra, reszta pusta). Kara -200:
+                sprzedawca szykuje wojnę przeciw tobie lub twoim marionetkom (marionetki z relacji gracza: PHI),
+                ty szykujesz wojnę przeciw niemu, jego frakcja w wojnie z tobą lub ją szykuje.
+            [ ] ochotnicy: CVolunteerForceTransfer (country+0x13B0: +0x8 odbiorca, +0xC nadawca; ENG->MEX) jest
+                tylko na czas przerzutu - po dotarciu tablica pusta; trwały ślad ochotników nieznaleziony
+                (potrzebny kontrolowany test: wysłanie/wycofanie ochotników przy zatrzymanej grze).
+            [ ] konwoje na trasy morskie.
 [x] ZAKŁADKA CONSTRUCTION (2026-10-13, nowa, na życzenie użytkownika; wzór: construction.png): wybór państwa +
             kafelek "Construction queue" [Live | On refresh] - kolejka budowy NA ŻYWO w kolejności gry: stan, ikona
             budynku z gry (GFX_buildings_strip, icon_frame) z liczbą poziomów, przydzielone fabryki x/15, postęp
@@ -264,6 +271,21 @@ DO ZROBIENIA (w tej kolejności)
             [x] kolory: ukończone zielone, w trakcie pulsujący żółty, dostępne srebrne,
                 niemożliwe szare (wykluczone ciemnoszare) - odświeżane na żywo
             [ ] potwierdzenie powiadomienia Windows w grze (po poprawce)
+            [x] DRZEWKO JAK W GRZE (2026-10-13, prośba użytkownika): drzewko, ukończone i bieżący cel NA ŻYWO z pamięci
+                (bez save'a; save tylko gdy gra nie działa): [country+0x1370] CNationalFocusTree +0x8 = id drzewka
+                (439/439 państw zgodne z plikami gry). Układ jak w grze (focus_spacing 96 x 130 z
+                nationalfocusview.gui), ikony celów (icon = GFX_..., także warunkowe), tabliczki z grafiki gry
+                (completed / can_start / unavailable), linie: w dół od rodzica, poziomo nad dzieckiem, w dół
+                (przerywane = jedna z kilku opcji), wykluczenia: czerwona linia + znacznik GFX_focus_link_exclusive.
+                Przeciąganie myszą, na start widok na bieżącym/dostępnym celu, tooltip: nazwa, opis z gry, czas,
+                wymagania, wykluczenia, pozycja w planie; kliknięcie = plan (bez działania po przeciągnięciu).
+                Smoke: HOI4DBG_SMOKE_SHOW=1 (widoczne okno - zrzuty dużych widoków), HOI4DBG_SMOKE_TABS=focus,...
+                Przełącznik Live | On refresh na kafelku drzewka (prośba użytkownika): /api/focus/<TAG>/state co 2 s
+                (0,04 s; tylko stan - statusy, bieżący cel, postęp, plan - bez grafik), inne drzewko = przeładowanie.
+                POPRAWKA (2026-10-13, zgłoszenie użytkownika: USA pokazywało 30 ukończonych celów, choć żadnego nie
+                zrobił): liczba ukończonych była czytana z pojemności tablicy (+0x48, np. 42) zamiast z rozmiaru
+                (+0x4C) - liczyły się stare sloty. Teraz 15/15 państw = ukończone z save'a (USA 0). Błąd dotyczył też
+                wcześniejszych funkcji na żywo (kolory drzewka, powiadomienie o ukończonym celu).
 [ ] Krok G  Intelligence Lab (poziomy wywiadu) i Game Tools (narzędzia lokalne)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)
             -> wymaga drugiego komputera/konta

@@ -70,7 +70,7 @@ function createWindow() {
     backgroundColor: '#0f1318',
     title: 'HOI4 Debugger',
     autoHideMenuBar: true,
-    show: !SMOKE_DIR,
+    show: !SMOKE_DIR || process.env.HOI4DBG_SMOKE_SHOW === '1',   // visible smoke run: screenshots of large views
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
