@@ -1244,6 +1244,43 @@ class IdeaPointerTests(unittest.TestCase):
         with self.assertRaises(pointers.PointerError):
             pointers.read_doctrine_state(mem, module, tags, "SOV")
 
+    def test_read_army_and_plane_stats(self):
+        # SOV 1941 (Army.png): divisions counted per template; the battalion grid skips empty slots
+        mem = FakeMemory(0x4000)
+        country, divs, temps, t1, grid, inf, empty, d1, d2 = (BASE + 0x100, BASE + 0x400, BASE + 0x500, BASE + 0x800,
+                                                             BASE + 0xC00, BASE + 0xD00, BASE + 0xE00, BASE + 0xF00, BASE + 0xF80)
+        for at, data, n in ((country + pointers.ARMY["divisions"], divs, 2), (country + pointers.ARMY["templates"], temps, 1),
+                            (t1 + pointers.DIVISION_TEMPLATE["battalions"], grid, 3)):
+            mem.put(at, "Q", data)
+            mem.put(at + 8, "i", n)
+            mem.put(at + 12, "i", n)
+        mem.put(divs, "Q", d1)
+        mem.put(divs + 8, "Q", d2)
+        mem.put(d1 + pointers.ARMY["division_template"], "Q", t1)
+        mem.put(d2 + pointers.ARMY["division_template"], "Q", t1)
+        mem.put(temps, "Q", t1)
+        mem.put(t1 + pointers.DIVISION_TEMPLATE["name"], "16s", b"Strelkovaya")
+        mem.put(t1 + pointers.DIVISION_TEMPLATE["name"] + 16, "Q", 11)
+        mem.put(t1 + pointers.DIVISION_TEMPLATE["name"] + 24, "Q", 15)
+        for k, unit in enumerate((inf, empty, inf)):
+            mem.put(grid + 8 * k, "Q", unit)
+        mem.put(inf + pointers.SUBUNIT_ID, "16s", b"infantry")
+        mem.put(inf + pointers.SUBUNIT_ID + 16, "Q", 8)
+        mem.put(inf + pointers.SUBUNIT_ID + 24, "Q", 15)
+        mem.put(empty + pointers.SUBUNIT_ID + 24, "Q", 15)   # an empty slot: empty id
+        mem.put(country + pointers.ARMY["manpower_field"], "i", 4345676)
+        army = pointers.read_army(mem, country)
+        self.assertEqual((army["divisions"], army["manpower_field"]), (2, 4345676))
+        self.assertEqual((army["templates"][0]["name"], army["templates"][0]["count"], army["templates"][0]["battalions"]),
+                         ("Strelkovaya", 2, ["infantry", "infantry"]))
+        # I-16 design stats (Air.png)
+        variant = BASE + 0x2000
+        for key, value in (("range", 550), ("air_agility", 43), ("maximum_speed", 425), ("reliability", 0.8)):
+            mem.put(variant + pointers.PLANE_STATS[key], "q", round(value * 100000))
+        stats = pointers.plane_stats(mem, variant)
+        self.assertEqual((stats["range"], stats["air_agility"], stats["reliability"]), (550.0, 43.0, 0.8))
+        self.assertIsNone(pointers.plane_stats(mem, BASE + 0x2800))   # no agility / speed: not a plane
+
     def test_read_research(self):
         mem = FakeMemory(0x4000)
         country, status, array = BASE + 0x100, BASE + 0x400, BASE + 0x600

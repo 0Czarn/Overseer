@@ -14,10 +14,9 @@ import stateEditor from './views/state-editor.js';
 import focus from './views/focus.js';
 import equipment from './views/equipment.js';
 import tools from './views/tools.js';
-import intel from './views/intel.js';
 import logs from './views/logs.js';
 
-const VIEWS = [dashboard, countries, countryEditor, research, construction, doctrines, stateEditor, focus, equipment, tools, intel, logs];
+const VIEWS = [dashboard, countries, countryEditor, research, construction, doctrines, stateEditor, focus, equipment, tools, logs];
 const STATUS_INTERVAL_MS = 3000;
 const PREFS_KEY = 'hoi4dbg.prefs';
 

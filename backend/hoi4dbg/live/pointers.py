@@ -1080,3 +1080,140 @@ def read_doctrine_state(memory, module_base: int, tags: list[str], tag: str) -> 
             items.append(item)
         out.append({"grand": name(grand), "tracks": items})
     return out
+
+
+# Army, navy and air force (2026-10-13, SOV 1941 equal to the game's military overview, Army.png / Navy.png /
+# Air.png). Army: country + 0x290 = array of CArmy* - one per division (390); division + 0x3b8 = its
+# CReferencedDivisionTemplate; country + 0x1b8 = array of the country's templates: + 0x20 name (std::string),
+# + 0x68 battalion grid (CSubUnitDefinition*, empty slots have an empty id), + 0x88 support companies, + 0xa8
+# regimental support; CSubUnitDefinition + 0x18 = its id ("infantry"). Strelkovaya Diviziya 350 / NKVD 15 /
+# Gornostrelkovaya 13 / Mekhanizirovaniy Korpus 12 as the game; country + 0x348 = manpower in the field (4.35M,
+# "4M"). Navy: country + 0x278 = array of CFleet* (5), fleet + 0xb8 = CTaskForce* (9), task force + 0x348 =
+# CShip* (119: 93 submarines, 18 destroyers, 5 light cruisers, 3 battleships); ship + 0x98 = type id, + 0x60 =
+# variants (CEquipmentVariant*, its name = the class). Air: [game state + 0x690] = CStrategicAirManager, + 0x30 =
+# array of CStrategicAir* by country slot; + 0x58 = its pools (CAirWingPool*): + 0x20 the role (CSubUnitDefinition,
+# "fighter"), + 0x28 the wings (CAirWing*): + 0x1f8 = entries of 16 bytes (CEquipmentVariant*, planes fixed64) -
+# I-16 100 fighters and DB-3 100 tactical bombers (an I-15 wing at the same air base is SIK's). A plane design's
+# stats are fixed64 in the variant (PLANE_STATS, all equal to the game's design tooltip of the I-16).
+ARMY = {"divisions": 0x290, "templates": 0x1B8, "division_template": 0x3B8, "manpower_field": 0x348}
+DIVISION_TEMPLATE = {"name": 0x20, "battalions": 0x68, "support": 0x88, "regimental": 0xA8}
+SUBUNIT_ID = 0x18
+NAVY = {"fleets": 0x278, "task_forces": 0xB8, "ships": 0x348, "ship_type": 0x98, "ship_variants": 0x60}
+AIR = {"manager": 0x690, "by_country": 0x30, "pools": 0x58, "role": 0x20, "wings": 0x28, "wing_variants": 0x1F8}
+PLANE_STATS = {"range": 0x270, "air_defence": 0x278, "air_attack": 0x280, "air_agility": 0x288,
+               "air_superiority": 0x298, "naval_strike_attack": 0x2A0, "naval_strike_targetting": 0x2A8,
+               "maximum_speed": 0x2F0, "reliability": 0x308, "weight": 0x318, "thrust": 0x320,
+               "fuel_consumption": 0x328, "build_cost_ic": 0x368}
+
+
+def _id_list(memory, address: int) -> list[str]:
+    """Ids of the CSubUnitDefinition* array at `address` (empty grid slots left out)."""
+    out = []
+    for item in read_array(memory, address, 200):
+        name = _msvc_string(memory, item + SUBUNIT_ID) if item else None
+        if name:
+            out.append(name)
+    return out
+
+
+def read_army(memory, country: int) -> dict:
+    """{"divisions", "manpower_field", "templates": [{"name", "count", "battalions", "support", "regimental"}]}."""
+    divisions = read_array(memory, country + ARMY["divisions"], 20_000)
+    counts: dict[int, int] = {}
+    for d in divisions:
+        t = _ptr(memory, d + ARMY["division_template"]) if d else None
+        if t:
+            counts[t] = counts.get(t, 0) + 1
+    templates = []
+    for t in read_array(memory, country + ARMY["templates"], 2000):
+        if not t:
+            continue
+        name = _msvc_string(memory, t + DIVISION_TEMPLATE["name"])
+        if name is None:
+            raise PointerError("implausible", "A division template has no readable name - layout does not match")
+        templates.append({"name": name, "count": counts.get(t, 0),
+                          **{k: _id_list(memory, t + DIVISION_TEMPLATE[k]) for k in ("battalions", "support", "regimental")}})
+    raw = memory.read(country + ARMY["manpower_field"], 4)
+    field = struct.unpack("<i", raw)[0] if raw else None   # int32 (the next 4 bytes are another field)
+    if field is not None and not 0 <= field < 10**10:
+        raise PointerError("implausible", "Manpower in the field out of range - layout does not match")
+    return {"divisions": len(divisions), "manpower_field": field, "templates": templates}
+
+
+def _variant_entries(memory, address: int, limit: int = 20) -> list[tuple[int, float]]:
+    """[(CEquipmentVariant*, amount)] of a 16-byte entry array (pointer, fixed64) at `address`."""
+    raw = memory.read(address, 16)
+    data, _cap, size = struct.unpack("<Qii", raw) if raw else (0, 0, 0)
+    if not 0 <= size <= limit:
+        raise PointerError("implausible", "Equipment entries out of range - layout does not match")
+    items = memory.read(data, 16 * size) if size else b""
+    if size and not items:
+        raise PointerError("unreadable", "Equipment entries are not readable")
+    return [(struct.unpack_from("<Q", items, 16 * k)[0], struct.unpack_from("<q", items, 16 * k + 8)[0] / 100000)
+            for k in range(size)]
+
+
+def read_navy(memory, country: int) -> dict:
+    """{"fleets", "task_forces", "ships": [{"type", "class", "count"}]}."""
+    fleets = read_array(memory, country + NAVY["fleets"], 2000)
+    task_forces, ships = 0, {}
+    for f in fleets:
+        for tf in read_array(memory, f + NAVY["task_forces"], 2000) if f else []:
+            task_forces += 1
+            for s in read_array(memory, tf + NAVY["ships"], 2000) if tf else []:
+                kind = _msvc_string(memory, s + NAVY["ship_type"]) if s else None
+                variants = _variant_entries(memory, s + NAVY["ship_variants"]) if s else []
+                cls = _msvc_string(memory, variants[0][0] + VARIANT["name"], 120) if variants and variants[0][0] else None
+                key = (kind or "unknown", cls or "")
+                ships[key] = ships.get(key, 0) + 1
+    return {"fleets": len(fleets), "task_forces": task_forces,
+            "ships": [{"type": k, "class": c, "count": n} for (k, c), n in sorted(ships.items(), key=lambda x: -x[1])]}
+
+
+def plane_stats(memory, variant: int) -> dict[str, float] | None:
+    """Design stats of a plane variant (None when it is not a plane: no agility or no speed)."""
+    raw = memory.read(variant, 0x370)
+    if not raw:
+        return None
+    stats = {k: round(struct.unpack_from("<q", raw, off)[0] / 100000, 4) for k, off in PLANE_STATS.items()}
+    return stats if stats["air_agility"] > 0 and stats["maximum_speed"] > 0 else None
+
+
+def read_air(memory, module_base: int, tags: list[str], tag: str) -> list[dict]:
+    """[{"role", "design", "planes", "wings", "stats"}] of the country's air wings, grouped by role and design."""
+    table = _ptr(memory, module_base + COUNTRY_TABLE[0])
+    manager = _ptr(memory, table + AIR["manager"]) if table else None
+    if manager is None:
+        raise PointerError("unreadable", "The air manager is not readable")
+    per_country = read_array(memory, manager + AIR["by_country"], 5000)
+    slot = tags.index(tag) + 1
+    if slot >= len(per_country):
+        raise PointerError("implausible", "No air data for the country - layout does not match")
+    air = per_country[slot]
+    groups: dict[tuple[str, str], dict] = {}
+    for pool in read_array(memory, air + AIR["pools"], 2000) if air else []:
+        if not pool:
+            continue
+        role_def = _ptr(memory, pool + AIR["role"])
+        role = _msvc_string(memory, role_def + SUBUNIT_ID) if role_def else None
+        for wing in read_array(memory, pool + AIR["wings"], 2000):
+            for variant, planes in _variant_entries(memory, wing + AIR["wing_variants"]) if wing else []:
+                design = _msvc_string(memory, variant + VARIANT["name"], 120) if variant else None
+                g = groups.setdefault((role or "unknown", design or ""), {
+                    "role": role or "unknown", "design": design or "", "planes": 0.0, "wings": 0,
+                    "stats": plane_stats(memory, variant) if variant else None})
+                g["planes"] += planes
+                g["wings"] += 1
+    # wings without planes (being refilled, Bf 109 D 0) are not shown by the game
+    return sorted((g for g in groups.values() if g["planes"] >= 1), key=lambda g: (g["role"], -g["planes"]))
+
+
+def read_stockpile_planes(memory, country: int) -> list[dict]:
+    """[{"design", "amount", "stats"}] of the plane designs in the country's stockpile (planes in reserve)."""
+    out = []
+    for e in read_stockpile(memory, country):
+        variant = _ptr(memory, e["address"] - 8)
+        stats = plane_stats(memory, variant) if variant else None
+        if stats and e["amount"] >= 1:
+            out.append({"design": e["name"] or "", "amount": e["amount"], "stats": stats})
+    return sorted(out, key=lambda x: -x["amount"])

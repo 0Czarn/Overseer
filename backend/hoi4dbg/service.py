@@ -51,7 +51,6 @@ CAPABILITIES: dict[str, dict] = {
     "states": {"source": DEMO, "write": False, "note": WRITE_NOTE},
     "focus": {"source": DEMO, "write": False, "note": "Read-only preview. Queueing is not implemented."},
     "equipment": {"source": DEMO, "write": False, "note": WRITE_NOTE},
-    "intel": {"source": DEMO, "write": False, "note": DEMO_NOTE},
 }
 
 # Game Tools catalogue. scope: "local" = only this app / this client; "shared" = would change the
@@ -106,6 +105,14 @@ def save_freshness(save_mtime: float, game: dict, now: float | None = None) -> d
     else:
         category, label = "previous_session", "From an EARLIER session - NOT the current game state"
     return {"category": category, "label": label, "age_s": age_s, "is_live": False}
+
+
+# plane design stats as the game's design tooltip names them (Air.png)
+PLANE_STAT_LABELS = {"range": "Range", "air_defence": "Air Defense", "air_attack": "Air Attack", "air_agility": "Agility",
+                     "air_superiority": "Air Superiority", "naval_strike_attack": "Naval Attack",
+                     "naval_strike_targetting": "Naval Targeting", "maximum_speed": "Max Speed",
+                     "reliability": "Reliability", "weight": "Weight", "thrust": "Thrust", "fuel_consumption": "Fuel Usage",
+                     "build_cost_ic": "Production Cost"}
 
 
 @functools.lru_cache(maxsize=2)
@@ -709,21 +716,6 @@ class DebuggerService:
         return envelope(DEMO, {"tag": tag, "items": demo.equipment(tag), "editable": False},
                         f"{note} {DEMO_NOTE}" if note else DEMO_NOTE)
 
-    def intel(self, observer: str, target: str) -> dict:
-        target_country = demo.country(target)
-        if target_country is None or demo.country(observer) is None:
-            raise NotFound("Unknown country tag")
-        levels = demo.intel(observer, target) or {"civilian": 0.0, "army": 0.0, "navy": 0.0, "airforce": 0.0}
-        return envelope(DEMO, {
-            "observer": observer.upper(),
-            "target": target.upper(),
-            "intel_levels": levels,
-            # "actual" is what the debugger can see; "visible" is what the observer would see in game.
-            "actual": target_country["values"],
-            "visible_rule": "DEMO rule: a value is shown to the observer when civilian intel >= 30%.",
-            "visible": target_country["values"] if levels["civilian"] >= 0.30 else None,
-        }, DEMO_NOTE)
-
     # -- save files ---------------------------------------------------------------------
     def saves_list(self) -> dict:
         directory = self.integration.saves_dir()
@@ -1225,6 +1217,56 @@ class DebuggerService:
             })
         return envelope(LIVE, {"tag": tag, "folders": folders, "doctrine_source": "live"},
                         "Doctrines from game memory; names, texts and icons from the game files.")
+
+    def military(self, tag: str) -> dict:
+        """Army, air force and navy of `tag` like the game's military overview (game memory): divisions per template
+        with what they are made of and manpower in the field; planes per role and design with the design stats and
+        planes in the stockpile; fleets, task forces and ships per type and class. Names from the game files."""
+        tag = tag.upper()
+        install = self._install_path()
+        if install is None:
+            return envelope(UNAVAILABLE, None, "Needs the game installation")
+        if self.live is None:
+            return envelope(UNAVAILABLE, None, "Needs the running game")
+        try:
+            found = self.live.military(tag)
+        except Exception as exc:  # game not running, main menu, other version
+            return envelope(UNAVAILABLE, None, f"Needs the running game: {exc}")
+        army, navy, air, reserve = found["army"], found["navy"], found["air"], found["air_reserve"]
+        ids = {u for t in army["templates"] for k in ("battalions", "support", "regimental") for u in t[k]}
+        ids |= {sh["type"] for sh in navy["ships"]} | {g["role"] for g in air}
+        stat_keys = {k for g in air + reserve for k in (g["stats"] or {})}
+        names = focus_mod.loc_names(install, ids | {f"{i}_short" for i in ids} | {f"STAT_{k.upper()}" for k in stat_keys}
+                                    | {f"EQUIPMENT_STAT_{k.upper()}" for k in stat_keys} | set(stat_keys))
+        loc = lambda k: clean_loc(names[k], names) if names.get(k) else None  # noqa: E731
+        label = lambda i: loc(i) or i.replace("_", " ").capitalize()  # noqa: E731
+
+        def grouped(units):
+            out = {}
+            for u in units:
+                out[u] = out.get(u, 0) + 1
+            return [{"id": u, "name": label(u), "count": n} for u, n in out.items()]
+        for t in army["templates"]:
+            for k in ("battalions", "support", "regimental"):
+                t[k] = grouped(t[k])
+        army["templates"].sort(key=lambda t: -t["count"])
+        stat_label = {k: PLANE_STAT_LABELS.get(k) or (loc(f"STAT_{k.upper()}") or loc(k) or k.replace("_", " ")).rstrip(":")
+                      for k in stat_keys}
+        for g in air:
+            g["role_name"] = label(g["role"])
+        types: dict[str, dict] = {}
+        for sh in navy["ships"]:
+            ty = types.setdefault(sh["type"], {"type": sh["type"], "name": label(sh["type"]), "count": 0, "classes": []})
+            ty["count"] += sh["count"]
+            ty["classes"].append({"name": sh["class"] or "?", "count": sh["count"]})
+        navy_out = {"fleets": navy["fleets"], "task_forces": navy["task_forces"],
+                    "ships": sum(t["count"] for t in types.values()),
+                    "types": sorted(types.values(), key=lambda t: -t["count"])}
+        return envelope(LIVE, {
+            "tag": tag, "military_source": "live",
+            "army": army, "navy": navy_out,
+            "air": {"planes": sum(g["planes"] for g in air), "wings": air, "reserve": reserve, "stat_labels": stat_label},
+        }, "Army, air force and navy from game memory.")
 
     def research_tabs(self) -> dict:
         """Tabs of the research screen (technology folders) for the installed game, enabled mods and owned DLCs,

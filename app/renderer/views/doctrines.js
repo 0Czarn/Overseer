@@ -5,6 +5,7 @@ import { h, notice, viewHeader } from '../lib/dom.js';
 import { livePanel } from '../lib/refresh.js';
 import { countryPicker, tagChip } from './shared.js';
 import { formatModifier } from './spirits.js';
+import { airPanel, armyPanel, navyPanel } from './military.js';
 
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'];
 const TAB_KEY = 'hoi4dbg.doctrineFolder';
@@ -119,16 +120,16 @@ export function doctrinesPanel(ctx, tag) {
 
 export default {
   id: 'doctrines',
-  title: 'Doctrines',
-  short: 'DC',
+  title: 'Army/Air/Navy',
+  short: 'AN',
   async render(root, ctx) {
     const tag = ctx.state.selectedCountry;
     const picker = await countryPicker(ctx);
-    const tile = doctrinesPanel(ctx, tag);
+    const tiles = [armyPanel(ctx, tag), airPanel(ctx, tag), navyPanel(ctx, tag), doctrinesPanel(ctx, tag)];
     root.append(
-      viewHeader('Doctrines', 'Grand doctrine, subdoctrines and their mastery of the selected country (game memory).', picker),
+      viewHeader('Army/Air/Navy', 'Divisions, air wings, ships and doctrines of the selected country (game memory).', picker),
       h('div', { class: 'country-head research-head' }, tagChip(tag, 'tag-chip-lg')),
-      tile.el);
-    return () => tile.stop();
+      ...tiles.map((t) => t.el));
+    return () => tiles.forEach((t) => t.stop());
   },
 };

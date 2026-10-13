@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const TABS = ['dashboard', 'countries', 'country-editor', 'research', 'construction', 'doctrines', 'state-editor', 'focus', 'equipment', 'tools',
-  'intel', 'logs'];
+  'logs'];
 // HOI4DBG_SMOKE_TABS=focus,construction checks only these tabs
 const ONLY = (process.env.HOI4DBG_SMOKE_TABS || '').split(',').filter(Boolean);
 const SIZES = [{ name: 'wide', width: 1320, height: 860 }, { name: 'narrow', width: 480, height: 820 }];
@@ -130,6 +130,8 @@ function runSmoke(win, outDir, quit) {
           }
           if (tab === 'doctrines') {
             await waitFor(wc, `!!document.querySelector('.doc-tab, .live-panel-body .notice')`, 20000);
+            await waitFor(wc, `!!document.querySelector('.mil-bigs, .live-panel-body .notice')`, 20000);
+            info.military = await wc.executeJavaScript(`[...document.querySelectorAll('.mil-big-value')].map((e) => e.textContent)`);
             info.doctrines = await wc.executeJavaScript(`({ tabs: document.querySelectorAll('.doc-tab').length,
               tracks: document.querySelectorAll('.doc-track').length,
               notice: document.querySelector('.live-panel-body .notice')?.textContent ?? null })`);

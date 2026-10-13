@@ -2,7 +2,7 @@ import { h, card, clear, errorBox, keyValues, notice, select, sourceBadge, toast
 
 const SEVERITIES = ['info', 'minor', 'major', 'critical'];
 const AREAS = ['Dashboard', 'Countries & Players', 'Country Editor', 'State Editor', 'National Focus Manager',
-  'Equipment Manager', 'Game Tools', 'Intelligence Lab', 'Logs & Test Reports', 'Game / multiplayer'];
+  'Equipment Manager', 'Game Tools', 'Logs & Test Reports', 'Game / multiplayer'];
 
 function appLogPanel(ctx) {
   let level = 'debug';

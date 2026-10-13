@@ -93,13 +93,6 @@ EQUIPMENT: dict[str, list[dict]] = {
     ],
 }
 
-# Intelligence categories as presented in the UI. Values are DEMO percentages.
-INTEL: dict[tuple[str, str], dict] = {
-    ("GER", "SOV"): {"civilian": 0.35, "army": 0.20, "navy": 0.10, "airforce": 0.15},
-    ("SOV", "GER"): {"civilian": 0.25, "army": 0.30, "navy": 0.05, "airforce": 0.10},
-}
-
-
 def countries() -> list[dict]:
     return copy.deepcopy(COUNTRIES)
 
@@ -123,7 +116,3 @@ def focuses(tag: str) -> list[dict]:
 def equipment(tag: str) -> list[dict]:
     return copy.deepcopy(EQUIPMENT.get(tag.upper(), []))
 
-
-def intel(observer: str, target: str) -> dict | None:
-    levels = INTEL.get((observer.upper(), target.upper()))
-    return dict(levels) if levels else None

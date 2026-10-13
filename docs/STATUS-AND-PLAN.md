@@ -34,7 +34,7 @@ Każdy krok ma kryterium „zrobione”.
 | D ✅ | **State Editor (odczyt)** (zrobione: stany z zapisu + manpower państwa; na żywo – później): stany z zapisu (właściciel, kontroler, budynki, zasoby, rdzenie/roszczenia) + nazwy z plików gry/modów; potem tablica stanów jak państw | 1 zapis | zakładka bez DEMO, zgodna z zapisem |
 | E ✅ | **Equipment Manager** (zrobione: odczyt + dodawanie ze sprawdzeniem; bez usuwania): zapasy i warianty z zapisu → zmiana przez `add_equipment` z weryfikacją | 1 runda komend | zmiana potwierdzona w grze |
 | F | **National Focus Manager (odczyt)**: aktualny/ukończone/postęp z zapisu, drzewo z plików gry; kolejkowanie tylko jeśli gra to umożliwia; bez natychmiastowego kończenia | 1 zapis | zakładka bez DEMO |
-| G | **Intelligence Lab + Game Tools**: poziomy wywiadu z zapisu (jeśli są), narzędzia lokalne vs wspólne | brak / 1 zapis | zakładki bez DEMO |
+| G | **Game Tools**: narzędzia lokalne vs wspólne (Intelligence Lab usunięty 2026-10-13 na prośbę użytkownika) | brak / 1 zapis | zakładka bez DEMO |
 | H | **Test MP** na 2 klientach: czy konsola u nie-hosta działa i synchronizuje; jeśli nie → decyzja o modzie pomocniczym | drugi komputer/konto | raport: działa / co zamiast |
 | I | **Etap 8**: raport kompatybilności (wersja gry, mody), instrukcja użytkownika, narzędzie do ponownego znalezienia ścieżek po aktualizacji gry | brak | dokumenty + działająca instrukcja |
 

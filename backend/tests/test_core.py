@@ -57,7 +57,7 @@ class ServiceTests(TempDirMixin, unittest.TestCase):
     def test_game_data_is_always_marked_demo(self):
         svc = make_service(self.tmp)
         for payload in (svc.countries(), svc.country("ger"), svc.states(), svc.focus("GER"),
-                        svc.equipment("GER"), svc.intel("GER", "SOV")):
+                        svc.equipment("GER")):
             self.assertEqual(payload["source"], DEMO)
             self.assertIn("DEMO", payload["note"])
 
@@ -90,16 +90,6 @@ class ServiceTests(TempDirMixin, unittest.TestCase):
         svc = make_service(self.tmp)
         with self.assertRaises(NotFound):
             svc.country("XXX")
-        with self.assertRaises(NotFound):
-            svc.intel("GER", "XXX")
-
-    def test_intel_separates_actual_from_visible(self):
-        svc = make_service(self.tmp)
-        hidden = svc.intel("GER", "FRA")["data"]  # no DEMO intel -> nothing visible
-        self.assertIsNone(hidden["visible"])
-        self.assertIsNotNone(hidden["actual"])
-        shown = svc.intel("GER", "SOV")["data"]
-        self.assertEqual(shown["visible"], shown["actual"])
 
     def test_tools_have_explicit_scope(self):
         svc = make_service(self.tmp)

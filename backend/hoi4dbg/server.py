@@ -99,6 +99,7 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("GET", f"/api/countries/{tag}/research", lambda q, b, tag: svc.research(tag)),
         r("GET", f"/api/countries/{tag}/trade-advice", lambda q, b, tag: svc.trade_advice(
             tag, _str(q, "mode") or "surplus", _int(q, "limit", 25, 10, 100) / 100)),
+        r("GET", f"/api/countries/{tag}/military", lambda q, b, tag: svc.military(tag)),
         r("GET", f"/api/countries/{tag}/doctrines", lambda q, b, tag: svc.doctrines(tag)),
         r("GET", f"/api/countries/{tag}/factories", lambda q, b, tag: svc.factories(tag)),
         r("GET", f"/api/countries/{tag}/construction", lambda q, b, tag: svc.construction(tag)),
@@ -114,8 +115,6 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("POST", f"/api/equipment/{tag}/changes", lambda q, b, tag: changes.create(
             tag, str(b.get("archetype", "")), b.get("amount"), str(b.get("variant", "")))),
         r("GET", r"/api/equipment/changes/(?P<op>eq-[0-9]{1,9})", lambda q, b, op: changes.poll(op)),
-        r("GET", f"/api/intel/(?P<observer>[A-Za-z0-9_]{{1,8}})/{tag}",
-          lambda q, b, observer, tag: svc.intel(observer, tag)),
         r("GET", "/api/tools", lambda q, b: svc.tools()),
         r("GET", "/api/saves", lambda q, b: svc.saves_list()),
         r("GET", "/api/saves/analysis", lambda q, b: svc.save_analysis(_str(q, "name") or None)),

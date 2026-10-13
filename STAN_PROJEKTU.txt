@@ -102,6 +102,21 @@ ZROBIONE
             WZÓR "At war" USTALONY (2026-10-13): -20% + war_stability_factor (DODAWANY, nie mnożony); suma z gry =
             numer 145 (SOV 0,02195 -> -17,80%; z POL 0,0025 -> -19,75%), bez zmian po miesiącu gry (kapitulacja
             18% bez wpływu). SOV 1941-10-21: wszystkie linie ST = podpowiedź gry (st3.png), bez UNKNOWN.
+[~] ZAKŁADKA "ARMY/AIR/NAVY" (2026-10-13, dawniej Doctrines; prośba użytkownika, Army.png / Air.png / Navy.png SOV
+            1941 - wszystko = gra): kafelki Army, Air Force, Navy (każdy Live | On refresh) + kafelek doktryn.
+            Army: 390 dywizji, szablony z liczbą dywizji (Strelkovaya 350, NKVD 15, Gornostrelkovaya 13, Mekh. Korpus 12),
+            skład (bataliony, wsparcie, wsparcie pułkowe - nazwy z gry), ludzie w polu 4,35M ("4M").
+            Air: samoloty wg roli i projektu (I-16 100 myśliwce, DB-3 100 bombowce taktyczne = 200), statystyki
+            projektu jak podpowiedź gry (13 pól), samoloty w magazynie (I-15 470, DB-3 215, ...).
+            Navy: 5 flot, 9 zespołów, 119 statków: 93 OP, 18 niszczycieli, 5 lekkich krążowników, 3 pancerniki, z
+            klasami (Series II Leninets 43, Orfey 11, Marat 3, ...). Pamięć: country +0x290 dywizje (CArmy, +0x3B8
+            szablon), +0x1B8 szablony (+0x20 nazwa, +0x68 bataliony, +0x88 wsparcie, +0xA8 pułkowe), +0x348 ludzie w
+            polu (int32), +0x278 floty -> +0xB8 zespoły -> +0x348 statki (+0x98 typ, +0x60 klasa); [stan gry+0x690]
+            CStrategicAirManager +0x30[numer państwa] -> CStrategicAir (+0x90 właściciel) +0x58 pule -> +0x20 rola,
+            +0x28 skrzydła -> +0x1F8 (projekt, liczba). Właściciel skrzydła ≠ projektant (I-15 SIK na lotnisku SOV).
+            [ ] bazowe statystyki szablonu dywizji (jak projektant dywizji) - do zrobienia
+            [ ] dostępna siła ludzka (manpower) - pole nieustalone, potrzebna wartość z gry
+            [ ] ludzie w lotnictwie / marynarce (6K / 38K), wyposażenie armii (90%)
 [x] ZAKŁADKA DOCTRINES (2026-10-13, nowa, prośba użytkownika, Doktryny.png SOV 1941 - wartości = gra): foldery jak
             w grze (Land / Naval / Air / Special Forces), główna doktryna (ikona, nazwa, opis, efekty, taktyki), tory z
             subdoktryną, biegłością, biegłością w banku ("+68"), przyrostem dziennym i drabinką nagród I-V (próg,
@@ -330,7 +345,8 @@ DO ZROBIENIA (w tej kolejności)
                 100%, poziom 25-200% zapamiętany per widok (lib/zoom.js); przeciąganie bez zmian.
                 Smoke: przy filtrze zakładek pierwsza zakładka była nieprzeładowana - poprawione. Zrzuty przy zasłoniętym
                 oknie (gra na pełnym ekranie) pokazują stary obraz - sprawdzać DOM, nie zrzut.
-[ ] Krok G  Intelligence Lab (poziomy wywiadu) i Game Tools (narzędzia lokalne)
+[ ] Krok G  Game Tools (narzędzia lokalne)
+            (zakładka Intelligence Lab USUNIĘTA 2026-10-13 na prośbę użytkownika - była tylko na danych DEMO)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)
             -> wymaga drugiego komputera/konta
 [ ] Krok I  Raport kompatybilności, instrukcja użytkownika, narzędzie na aktualizację gry,

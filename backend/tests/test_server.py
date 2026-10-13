@@ -52,7 +52,7 @@ class ServerTests(TempDirMixin, unittest.TestCase):
 
     def test_all_get_endpoints(self):
         for path in ("/api/status", "/api/countries", "/api/countries/GER", "/api/states?owner=SOV",
-                     "/api/focus/GER", "/api/equipment/GER", "/api/intel/GER/SOV", "/api/tools",
+                     "/api/focus/GER", "/api/equipment/GER", "/api/tools",
                      "/api/logs/app?limit=5&level=info", "/api/logs/game", "/api/reports"):
             with self.subTest(path=path):
                 status, payload = self.call(path)

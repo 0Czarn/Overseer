@@ -646,6 +646,19 @@ class LiveService:
             mem, self._module_base[key], self._tags[process.get("install") or ""], tag))
         return {"folders": folders, "tag": tag, "read_at": self._clock()}
 
+    def military(self, tag: str) -> dict:
+        """Live army (divisions, templates, manpower in the field), navy (fleets, task forces, ships) and air force
+        (wings by role and design, planes in the stockpile) of `tag` (game memory)."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Live military reading is only verified for 1.19.3.0.c01a")
+        key = (process["pid"], process.get("started"))
+        tags = self._tags.setdefault(process.get("install") or "", pointers.tag_order(Path(process.get("install") or "")))
+        army, navy, air, reserve = self._with_country(process, tag, lambda mem, c: (
+            pointers.read_army(mem, c), pointers.read_navy(mem, c),
+            pointers.read_air(mem, self._module_base[key], tags, tag), pointers.read_stockpile_planes(mem, c)))
+        return {"army": army, "navy": navy, "air": air, "air_reserve": reserve, "tag": tag, "read_at": self._clock()}
+
     def advisors(self, tag: str) -> dict:
         """Live hired advisors and staff of `tag`: [{"slot", "id": character id}] (game memory)."""
         process = self._process()

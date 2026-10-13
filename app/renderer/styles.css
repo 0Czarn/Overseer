@@ -207,9 +207,6 @@ textarea.input { resize: vertical; width: 100%; }
 .meter-good .meter-fill { background: var(--ok); }
 .meter-bad .meter-fill { background: var(--bad); }
 .balance { display: flex; align-items: center; gap: 8px; min-width: 140px; }
-.intel-bars { display: flex; flex-direction: column; gap: 10px; }
-.intel-bar { display: grid; grid-template-columns: 90px 1fr 48px; align-items: center; gap: 12px; }
-.intel-bar b { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* --- focus kanban ------------------------------------------------------- */
 .kanban { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: var(--gap); align-items: start; }
@@ -537,6 +534,31 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
 .hoi-mode-btn.hoi-mode-on { background: #4a3f24; color: var(--hoi-trim-hi); opacity: 1; font-weight: 600; }
 .hoi-mode-btn:focus-visible, .hoi-refresh:focus-visible { outline: 1px solid var(--hoi-trim-hi); outline-offset: 1px; }
 .hoi-refresh[hidden] { display: none; }
+
+/* Army / Air / Navy tiles */
+.mil-bigs { display: flex; flex-wrap: wrap; gap: 10px 24px; margin-bottom: 10px; }
+.mil-big { display: flex; flex-direction: column; }
+.mil-big-value { font-size: 22px; font-weight: 700; color: #f0c060; font-variant-numeric: tabular-nums; }
+.mil-big-label { font-size: 12px; color: var(--hoi-muted, #9a917a); }
+.mil-templates { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; }
+.mil-template { border: 1px solid var(--hoi-trim); border-radius: 3px; background: #1c1a12; padding: 8px 10px; color: var(--hoi-text); }
+.mil-unused { opacity: 0.7; }
+.mil-template-head, .mil-role-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 700; }
+.mil-count { min-width: 40px; text-align: center; padding: 1px 8px; border-radius: 3px; background: #0e100c; border: 1px solid #4a4430;
+  color: #f2ead2; font-variant-numeric: tabular-nums; }
+.mil-part { margin-top: 6px; }
+.mil-part-title { font-size: 12px; font-weight: 700; color: #7fbf4f; }
+.mil-part-list { display: flex; flex-direction: column; font-size: 12px; }
+.mil-roles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.mil-role { border: 1px solid var(--hoi-trim); border-radius: 3px; background: #1c1a12; padding: 8px 10px; color: var(--hoi-text);
+  display: flex; flex-direction: column; gap: 4px; }
+.mil-role-head { padding-bottom: 4px; border-bottom: 1px solid #3a3628; }
+.mil-plane summary { display: flex; justify-content: space-between; align-items: center; gap: 8px; cursor: pointer; }
+.mil-plane-name { font-weight: 600; }
+.mil-stats { padding: 4px 0 4px 10px; font-size: 12px; }
+.mil-stats .hoi-line, .mil-class { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.mil-more { margin-top: 8px; }
+.mil-more summary { cursor: pointer; font-weight: 600; margin-bottom: 6px; }
 
 /* Doctrines view (game style) */
 .doc-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
