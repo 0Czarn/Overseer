@@ -987,13 +987,14 @@ class IdeaPointerTests(unittest.TestCase):
         header = country + pointers.COUNTRY_MODIFIER + 0x10
         mem.put(header, "Q", entries)
         mem.put(header + 8, "i", 4)   # capacity
-        mem.put(header + 12, "i", 2)  # size
-        for i, (index, value) in enumerate([(141, -13500), (500, 950000000)]):   # ITA 2026-10-13: -0.135
+        mem.put(header + 12, "i", 3)  # size
+        for i, (index, value) in enumerate([(141, -13500), (145, 2195), (500, 950000000)]):   # ITA -0.135, SOV 0.02195
             mem.put(entries + 16 * i, "i", index)
             mem.put(entries + 16 * i + 8, "q", value)
-        mem.put(entries + 32, "i", 149)   # beyond the size: stale, not read
-        mem.put(entries + 40, "q", 5000)
-        self.assertEqual(pointers.read_modifier_sums(mem, country), {"stability_factor": -0.135, "war_support_factor": 0.0})
+        mem.put(entries + 48, "i", 149)   # beyond the size: stale, not read
+        mem.put(entries + 56, "q", 5000)
+        self.assertEqual(pointers.read_modifier_sums(mem, country),
+                         {"stability_factor": -0.135, "war_stability_factor": 0.02195, "war_support_factor": 0.0})
         mem.put(header + 12, "i", 9)   # size above capacity: wrong layout
         with self.assertRaises(pointers.PointerError):
             pointers.read_modifier_sums(mem, country)
@@ -1018,6 +1019,62 @@ class IdeaPointerTests(unittest.TestCase):
         mem.put(wars[1] + pointers.WAR_SIDES, "i", 4); mem.put(wars[1] + pointers.WAR_SIDES + 4, "i", 3)   # war of other countries: wrong layout
         with self.assertRaises(pointers.PointerError):
             pointers.read_wars(mem, country, order, "ENG")
+
+    def test_read_construction(self):
+        mem = FakeMemory(0x4000)
+        module = 0x7FF0_0000_0000
+        country, status, array = BASE + 0x100, BASE + 0x400, BASE + 0x500
+        lines, buildings = [BASE + 0x800, BASE + 0x900, BASE + 0xA00], [BASE + 0x1000, BASE + 0x1400]
+        state_status, template, path = BASE + 0x2000, BASE + 0x2400, BASE + 0x2800
+        mem.put(country + pointers.PRODUCTION_STATUS, "Q", status)
+        mem.put(status + pointers.CONSTRUCTION_LINES, "Q", array)
+        mem.put(status + pointers.CONSTRUCTION_LINES + 8, "i", 4)    # capacity
+        mem.put(status + pointers.CONSTRUCTION_LINES + 12, "i", 3)   # size
+        mem.put(state_status + pointers.STATUS_LOCATION, "i", 568)   # SOV Krasnoyarsk
+        mem.put(template + pointers.BUILDING_NAME, "16s", b"arms_factory")
+        mem.put(template + pointers.BUILDING_NAME + 16, "Q", 12)
+        mem.put(template + pointers.BUILDING_NAME + 24, "Q", 15)
+        vtable = {kind: off for off, kind in pointers.LINE_VTABLES.items()}
+        # SOV 1941: 15 factories at 183.75 a day, 6309.79 of 7200 points; a repair (0 levels to build, 2 to repair);
+        # GER railway of level 3 along 4 provinces
+        for i, (line, kind, line_id, factories, speed, produced, levels, repair) in enumerate(zip(
+                lines, ("building", "building", "railway"), (2, 1, 9), (15, 0, 0), (18375000, 0, 0),
+                (630979000, 0, 0), (1, 0, 3), (0, 2, 0))):
+            mem.put(array + 8 * i, "Q", line)
+            mem.put(line, "Q", module + vtable[kind])
+            mem.put(line + pointers.LINE["id"], "i", line_id)
+            mem.put(line + pointers.LINE["factories"], "i", factories)
+            mem.put(line + pointers.LINE["cost"], "q", 720000000 if kind == "building" else 129000000)
+            mem.put(line + pointers.LINE["speed"], "q", speed)
+            mem.put(line + pointers.LINE["produced"], "q", produced)
+            mem.put(line + pointers.LINE["levels"], "i", levels)
+            if kind == "building":
+                mem.put(line + pointers.LINE["repair"], "i", repair)
+                mem.put(line + pointers.LINE["building"], "Q", buildings[i])
+                mem.put(buildings[i] + pointers.BUILDING["status"], "Q", state_status)
+                mem.put(buildings[i] + pointers.BUILDING["template"], "Q", template)
+            else:
+                mem.put(line + pointers.LINE["path"], "Q", path)
+                mem.put(line + pointers.LINE["path"] + 8, "i", 4)
+                mem.put(line + pointers.LINE["path"] + 12, "i", 4)
+                mem.put(line + pointers.LINE["from_level"], "i", 2)
+                mem.put(line + pointers.LINE["to_level"], "i", 3)
+                for k, prov in enumerate((11370, 277, 9236, 9304)):
+                    mem.put(path + 4 * k, "i", prov)
+        base = {"building": "arms_factory", "location": 568, "path": [], "factories": 0, "cost": 7200.0, "speed": 0.0,
+                "produced": 0.0, "kind": "building", "railway_levels": None}
+        self.assertEqual(pointers.read_construction(mem, country, module), [
+            {**base, "id": 2, "levels": 1, "repair": 0, "factories": 15, "speed": 183.75, "produced": 6309.79},
+            {**base, "id": 1, "levels": 0, "repair": 2},
+            {**base, "id": 9, "kind": "railway", "building": "rail_way", "location": None, "path": [11370, 277, 9236, 9304],
+             "levels": 3, "repair": 0, "cost": 1290.0, "railway_levels": (2, 3)}])
+        mem.put(lines[0], "Q", module + 0x10)   # unknown line class: wrong layout
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_construction(mem, country, module)
+        mem.put(lines[0], "Q", module + vtable["building"])
+        mem.put(lines[1] + pointers.LINE["produced"], "q", 900000000)   # more done than the cost: wrong layout
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_construction(mem, country, module)
 
     def test_read_research(self):
         mem = FakeMemory(0x4000)

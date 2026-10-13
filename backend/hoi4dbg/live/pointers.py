@@ -479,13 +479,15 @@ PENALTIES = {"bombing_penalty": 0x14C8, "casualties_penalty": 0x14D0}
 # 16 bytes (int32 modifier index, int64 value fixed64 / 100000) sorted by index, + 0x18 int32 capacity, + 0x1c int32
 # size. Index 141 = stability_factor without the ruling party popularity term (93/99 countries equal to the app's
 # known modifiers), 149 = war_support_factor incl. world tension (95/99); the rest differed by modifiers the app
-# does not know. Indices are the engine's modifier order of 1.19.3 (mods append their own definitions after it).
+# does not know. 145 = war_stability_factor (SOV 1941: 0.02195, "At war" -20 % + 2.195 % = -17.80 % in the game
+# tooltip, unchanged a month later). Indices are the engine's modifier order of 1.19.3 (mods append their own
+# definitions after it).
 COUNTRY_MODIFIER = 0x5A8
-MODIFIER_INDEX = {"stability_factor": 141, "war_support_factor": 149}
+MODIFIER_INDEX = {"stability_factor": 141, "war_stability_factor": 145, "war_support_factor": 149}
 
 
 def read_modifier_sums(memory, country: int) -> dict[str, float]:
-    """{"stability_factor", "war_support_factor"}: the game's own sums of these modifiers (0 when none)."""
+    """{"stability_factor", "war_stability_factor", "war_support_factor"}: the game's own sums (0 when none)."""
     raw = memory.read(country + COUNTRY_MODIFIER + 0x10, 16)
     if not raw:
         raise PointerError("unreadable", "Country modifiers are not readable")
@@ -733,4 +735,75 @@ def read_stockpile(memory, country: int) -> list[dict]:
         out.append({"id": str(struct.unpack("<i", raw_id)[0]),
                     "name": _msvc_string(memory, variant + VARIANT["name"], 120),
                     "amount": amount / 100000, "address": array + STOCKPILE["entry"] * i + STOCKPILE["amount"]})
+    return out
+
+
+# Construction queue (2026-10-13, FRA 1936 / SOV 1941 equal to the game's construction screen: lines in its order,
+# state, levels, factories 15/15, 4/15 ..., progress and speed as the tooltip): [country + 0xf68] = CProductionStatus,
+# + 0x70 = array of line pointers (read_array) in queue order, two classes told apart by their vtable (offset from the
+# module base, 1.19.3):
+# - CBuildingProductionLine: + 0xc = id (the save's general_lines id, type 59), + 0x18 = factories assigned (int32),
+#   + 0x28 = cost of one level, + 0x30 = construction speed per day, + 0x38 = progress of the current level (fixed64
+#   / 100000; SOV Krasnoyarsk 6309.79 / 7200 at 183.75 a day as the game tooltip), + 0x48 = levels still to build
+#   (the save's amount), + 0x78 = levels to repair (the save's to_repair: 0 when building, SOV rail_way 1, infra 2 -
+#   those lines have 0 levels to build), + 0x70 = CBuilding; CBuilding + 0x1d8 = CBuildingStatus (+ 0x6c = state id,
+#   province id for province buildings: rail_way 11490, bunker), + 0x1e0 = CBuildingTemplate (+ 0x270 = its id,
+#   std::string, e.g. "arms_factory");
+# - CRailwayProductionLine (railway along a path): same fields up to + 0x48 (railways still needed, one per segment),
+#   + 0x70 / + 0x74 = railway level from / to (int32), + 0x80 = path (int32 province ids, size at + 0x8c). FRA 1941
+#   "Constantine - Algiers" as the game tooltip: upgrading level 2 railways to level 3, 4 railways needed, 6 provinces.
+PRODUCTION_STATUS = 0xF68
+CONSTRUCTION_LINES = 0x70
+LINE_VTABLES = {0x297B958: "building", 0x2A2BE90: "railway"}
+LINE = {"id": 0xC, "factories": 0x18, "cost": 0x28, "speed": 0x30, "produced": 0x38, "levels": 0x48, "building": 0x70,
+        "repair": 0x78, "path": 0x80, "from_level": 0x70, "to_level": 0x74}
+BUILDING = {"status": 0x1D8, "template": 0x1E0}
+STATUS_LOCATION = 0x6C
+BUILDING_NAME = 0x270
+
+
+def read_construction(memory, country: int, module_base: int) -> list[dict]:
+    """[{"id", "kind": "building" | "railway", "building", "location", "path", "levels", "repair", "factories", "cost",
+    "speed", "produced", "railway_levels"}] in queue order. speed = construction points a day; location = state id, or
+    province id for province buildings (None for a railway); path = province ids of a railway ([] otherwise); levels of
+    a railway = railways still needed; railway_levels = (from, to) of a railway, else None."""
+    status = _ptr(memory, country + PRODUCTION_STATUS)
+    if status is None:
+        raise PointerError("no_production", "The country's production status is not readable")
+    out = []
+    for line in read_array(memory, status + CONSTRUCTION_LINES, 5000):
+        raw = memory.read(line, 0x90) if line else None
+        if raw is None:
+            raise PointerError("unreadable", "A construction line is not readable")
+        kind = LINE_VTABLES.get(struct.unpack_from("<Q", raw, 0)[0] - module_base)
+        if kind is None:
+            raise PointerError("implausible", "Unknown construction line type - layout does not match")
+        i32 = lambda key: struct.unpack_from("<i", raw, LINE[key])[0]  # noqa: E731
+        cost, speed, produced = (struct.unpack_from("<q", raw, LINE[k])[0] / 100000 for k in ("cost", "speed", "produced"))
+        name, location, path, repair, railway_levels = "rail_way", None, [], 0, None
+        if kind == "building":
+            building = struct.unpack_from("<Q", raw, LINE["building"])[0]
+            template = _ptr(memory, building + BUILDING["template"])
+            name = _msvc_string(memory, template + BUILDING_NAME) if template else None
+            status_obj = _ptr(memory, building + BUILDING["status"])
+            loc = memory.read(status_obj + STATUS_LOCATION, 4) if status_obj else None
+            location = struct.unpack("<i", loc)[0] if loc else None
+            repair = i32("repair")
+        else:
+            provinces = memory.read(line + LINE["path"], 16)
+            data, _cap, size = struct.unpack("<Qii", provinces) if provinces else (0, 0, -1)
+            items = memory.read(data, 4 * size) if 0 < size <= 10_000 else None
+            path = list(struct.unpack(f"<{size}i", items)) if items else []
+            railway_levels = (i32("from_level"), i32("to_level"))
+            if (not path or not all(0 < p < 100_000 for p in path)
+                    or not 0 <= railway_levels[0] <= railway_levels[1] <= 100):
+                raise PointerError("implausible", "Railway line is not readable - layout does not match")
+        if (not name or not re.fullmatch(r"[A-Za-z0-9_.\-]+", name) or not 0 <= i32("factories") <= 1000
+                or not 0 < cost < 10_000_000 or not 0 <= produced <= cost or not 0 <= speed < 1_000_000
+                or not 0 <= i32("levels") <= 1000 or not 0 <= repair <= 1000
+                or location is not None and not 0 < location < 100_000):
+            raise PointerError("implausible", "A construction line is out of range - layout does not match")
+        out.append({"id": i32("id"), "kind": kind, "building": name, "location": location, "path": path,
+                    "levels": i32("levels"), "repair": repair, "factories": i32("factories"), "cost": cost,
+                    "speed": speed, "produced": produced, "railway_levels": railway_levels})
     return out

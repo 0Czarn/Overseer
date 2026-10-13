@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 
-from . import __version__, deficit, demo, equipment_changes, gamefiles, gfx, modifiers
+from . import __version__, construction as construction_mod, deficit, demo, equipment_changes, gamefiles, gfx, modifiers
 from . import government as government_mod
 from . import mio as mio_mod
 from . import focus as focus_mod
@@ -899,6 +899,36 @@ class DebuggerService:
             out[t] = text or t.replace("_", " ").capitalize()
         return out
 
+    def construction(self, tag: str) -> dict:
+        """Construction queue of `tag` as the game's construction screen shows it (game memory): building, state,
+        levels, factories assigned and progress of the current level; names and icons from the game files."""
+        tag = tag.upper()
+        install = self._install_path()
+        if install is None:
+            return envelope(UNAVAILABLE, None, "Needs the game installation")
+        if self.live is None:
+            return envelope(UNAVAILABLE, None, "Needs the running game")
+        try:
+            found = self.live.construction(tag)
+        except Exception as exc:  # game not running, main menu, other version
+            return envelope(UNAVAILABLE, None, f"Needs the running game: {exc}")
+        roots = self._game_roots(install)
+        defs = construction_mod.buildings(roots)
+        strip = construction_mod.icon_strip(roots)
+        lines = found["lines"]
+        ends = {p for line in lines for p in (line["path"][:1] + line["path"][-1:])}
+        names = focus_mod.loc_names(install, {line["building"] for line in lines} | {f"VICTORY_POINTS_{p}" for p in ends})
+        provinces = {p: sid for sid, d in gamefiles.state_definitions(install).items() for p in d["provinces"]}
+        out = construction_mod.rows(lines, {k: clean_loc(v, names) for k, v in names.items()},
+                                    gamefiles.state_names(install), construction_mod.max_factories(roots),
+                                    found.get("date"), defs, provinces,
+                                    {p: names[f"VICTORY_POINTS_{p}"] for p in ends if f"VICTORY_POINTS_{p}" in names})
+        for row in out:
+            frame = (defs.get(row["building"]) or {}).get("icon_frame")
+            row["icon"] = gfx.frame_data_uri(strip[0], frame, strip[1]) if strip and frame else None
+        return envelope(LIVE, {"tag": tag, "lines": out, "construction_source": "live", "game_date": found.get("date")},
+                        "Construction queue from game memory.")
+
     def research_tabs(self) -> dict:
         """Tabs of the research screen (technology folders) for the installed game, enabled mods and owned DLCs,
         with the number of technologies in each tab."""
@@ -1165,6 +1195,16 @@ class DebuggerService:
             b["clamped"] = raw is not None and not 0.0 <= raw <= 1.0
         return sums.get("date")
 
+    def _live_war_stability(self, tag: str, state: dict) -> bool:
+        """Sets state["war_stability_factor"] to the game's own sum (memory): "At war" uses it."""
+        if self.live is None:
+            return False
+        try:
+            state["war_stability_factor"] = self.live.modifier_sums(tag)["war_stability_factor"]
+        except Exception:  # live data is optional: the app's known sources stay
+            return False
+        return True
+
     def _live_wars(self, tag: str, state: dict) -> bool:
         """Replaces state["wars"] with the live wars of `tag` (binary saves have none: tokens unknown)."""
         if self.live is None:
@@ -1383,7 +1423,8 @@ class DebuggerService:
         live_doctrines = self._live_doctrines(tag, state, defs, everyone)
         live_penalties = self._live_penalties(tag, state)
         live_wars = self._live_wars(tag, state)
-        names = focus_mod.loc_names(install, modifiers.loc_keys(state, defs))
+        self._live_war_stability(tag, state)
+        names =focus_mod.loc_names(install, modifiers.loc_keys(state, defs))
         base_source = {}
         for field in modifiers.KEYS:
             base_source[field] = "save"

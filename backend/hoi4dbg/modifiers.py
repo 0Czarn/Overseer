@@ -316,13 +316,17 @@ def breakdown(state: dict, defs: dict, names: dict[str, str] | None = None) -> d
             sources.append(("doctrine", reward, f"{label}: {names.get(reward, reward)}", mods))
 
     # war (2026-10-11, SOV at war with POL, checked against the game tooltip): offensive / defensive war support
-    # from the defines; "At war" = BASE_STABILITY_WAR_FACTOR x (1 + war_stability_factor) - the game showed -19.75 %
-    # where this gives -20 % (source of the difference not found yet); penalties that build up weekly from the save
+    # from the defines; "At war" = BASE_STABILITY_WAR_FACTOR + war_stability_factor (2026-10-13, SOV 1941: game sum
+    # 0.02195 -> -17.80 % as the game shows, unchanged a month later; with POL 0.0025 -> -19.75 %), the game's own sum
+    # in state["war_stability_factor"] when read from memory, else the app's known sources; penalties that build up
+    # weekly from the save
     wars = state.get("wars") or []
     if wars:
-        factor = sum(mods.get("war_stability_factor", 0) for *_rest, mods in sources)
+        factor = state.get("war_stability_factor")
+        if factor is None:
+            factor = sum(mods.get("war_stability_factor", 0) for *_rest, mods in sources)
         sources.append(("war", "at_war", "At war",
-                        {KEYS["stability"]: defs["defines"].get("BASE_STABILITY_WAR_FACTOR", -0.2) * (1 + factor)}))
+                        {KEYS["stability"]: defs["defines"].get("BASE_STABILITY_WAR_FACTOR", -0.2) + factor}))
         if any(w["offensive"] for w in wars):
             sources.append(("war", "offensive_war", "Offensive war",
                             {KEYS["war_support"]: defs["defines"].get("WAR_SUPPORT_OFFNSIVE_WAR", -0.2)}))

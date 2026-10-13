@@ -4,7 +4,12 @@ Safety rules enforced here:
 - the process is opened with PROCESS_QUERY_INFORMATION | PROCESS_VM_READ only. No write, no
   VM_OPERATION, no thread or handle rights. This module has no code path that writes memory;
 - only committed, writable, non-guard private pages are scanned (where game state lives);
-- every read is bounded (MAX_READ) and failures return None instead of raising.
+- every read is bounded (MAX_READ) and failures return None instead of raising;
+- every read first checks the pages it covers (VirtualQueryEx): only committed, readable pages without PAGE_GUARD
+  and PAGE_NOCACHE / WRITECOMBINE are read. ReadProcessMemory on a guard page consumes the guard (Windows treats it
+  like the owner touching it): a thread stack then cannot grow and the game crashes later with an access violation.
+  Following stale pointers while the game loads a save (objects freed) can land anywhere, so this check is on every
+  read (2026-10-13: two game crashes C0000005 in worker threads while loading a save with the app open).
 
 Value encodings are hypotheses to be confirmed by calibration (see hoi4dbg/live/calibration.py), never assumed.
 """
@@ -26,6 +31,8 @@ MEM_COMMIT = 0x1000
 MEM_PRIVATE = 0x20000
 MEM_IMAGE = 0x1000000
 PAGE_GUARD = 0x100
+UNSAFE_PROTECT = PAGE_GUARD | 0x200 | 0x400   # guard, no-cache, write-combine
+READABLE_PROTECT = {0x02, 0x04, 0x08, 0x20, 0x40, 0x80}  # READONLY, READWRITE, WRITECOPY, EXECUTE_READ(WRITE/COPY)
 WRITABLE_PROTECT = {0x04, 0x08, 0x40, 0x80}  # READWRITE, WRITECOPY, EXECUTE_READWRITE, EXECUTE_WRITECOPY
 MAX_READ = 64 << 20
 USER_SPACE_END = 0x7FFF_FFFF_FFFF
@@ -208,8 +215,25 @@ class ProcessMemory:
                 break
             addr = next_addr
 
+    def readable(self, address: int, size: int) -> bool:
+        """True when every page of [address, address + size) is committed, readable and not a guard page."""
+        end, addr, mbi = address + size, address, MEMORY_BASIC_INFORMATION()
+        while addr < end:
+            if not _k32.VirtualQueryEx(self._handle, addr, ctypes.byref(mbi), ctypes.sizeof(mbi)):
+                return False
+            if (mbi.State != MEM_COMMIT or mbi.Protect & UNSAFE_PROTECT
+                    or (mbi.Protect & 0xFF) not in READABLE_PROTECT):
+                return False
+            next_addr = mbi.BaseAddress + mbi.RegionSize
+            if next_addr <= addr:
+                return False
+            addr = next_addr
+        return True
+
     def read(self, address: int, size: int) -> bytes | None:
-        if size <= 0 or size > MAX_READ or address <= 0:
+        if size <= 0 or size > MAX_READ or address <= 0 or address + size > USER_SPACE_END:
+            return None
+        if not self.readable(address, size):
             return None
         buf = ctypes.create_string_buffer(size)
         done = ctypes.c_size_t()

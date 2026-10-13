@@ -127,7 +127,10 @@ export function livePanel(ctx, { title, url, render, liveParts, cls = '', unavai
 
 /** Header line of a tile: { text, title, live } - see livePanel. */
 export function sourceLine(res, live, time) {
-  if (!res.data?.file) return { text: '', title: '', live: false };
+  if (!res.data?.file) {   // game memory only (no save behind it)
+    return live.length ? { text: `game memory · read ${time}`, title: `LIVE: ${live.join(', ')}`, live: true }
+      : { text: '', title: '', live: false };
+  }
   return { text: live.length ? `game memory · read ${time}` : `save ${res.data.file.name} · read ${time}`,
     title: saveSource(res, live), live: live.length > 0 };
 }

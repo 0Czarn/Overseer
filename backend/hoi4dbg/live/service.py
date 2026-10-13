@@ -539,6 +539,17 @@ class LiveService:
         return {"slots": slots, "date": date, "bonuses": bonuses, "researched": researched, "tag": tag,
                 "read_at": self._clock()}
 
+    def construction(self, tag: str) -> dict:
+        """Live construction queue of `tag` in queue order (game memory)."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Live construction reading is only verified for 1.19.3.0.c01a")
+        key = (process["pid"], process.get("started"))
+        lines, date = self._with_country(process, tag, lambda mem, c: (
+            pointers.read_construction(mem, c, self._module_base[key]),
+            pointers.read_date(mem, self._module_base[key])))
+        return {"lines": lines, "date": date, "tag": tag, "read_at": self._clock()}
+
     def advisors(self, tag: str) -> dict:
         """Live hired advisors and staff of `tag`: [{"slot", "id": character id}] (game memory)."""
         process = self._process()

@@ -1,5 +1,5 @@
 HOI4 DEBUGGER - STAN PROJEKTU
-Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-13 (ST/WS z sumy modyfikatorów gry + UNKNOWN)
+Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-13 (zakładka Construction, wzór "At war")
 Szczegóły i dowody: docs/PROGRESS.md, plan: docs/STATUS-AND-PLAN.md
 
 ======================================================================
@@ -98,8 +98,34 @@ ZROBIONE
             +0x10/+0x14 sloty stron, atakujący pierwszy (GER-SOV, ENG-GER, JAP-CHI). 439 państw spójnych z obu
             stron, 0,8 s dla wszystkich. Zasila "At war", "Offensive/Defensive war", "War Support".
             Wynik SOV: poparcie wojny 98,53% = gra. Stabilność 69,56% vs gra 71,76%: "At war" gra -17,80%,
-            aplikacja -20% (czynnik 0,89 nieznany; war_stability_factor z gry = numer 145, SOV 0,02195 - nie
-            wyjaśnia całości). [ ] do ustalenia wzór "At war" (potrzebny drugi pomiar).
+            aplikacja -20%.
+            WZÓR "At war" USTALONY (2026-10-13): -20% + war_stability_factor (DODAWANY, nie mnożony); suma z gry =
+            numer 145 (SOV 0,02195 -> -17,80%; z POL 0,0025 -> -19,75%), bez zmian po miesiącu gry (kapitulacja
+            18% bez wpływu). SOV 1941-10-21: wszystkie linie ST = podpowiedź gry (st3.png), bez UNKNOWN.
+[x] ZAKŁADKA CONSTRUCTION (2026-10-13, nowa, na życzenie użytkownika; wzór: construction.png): wybór państwa +
+            kafelek "Construction queue" [Live | On refresh] - kolejka budowy NA ŻYWO w kolejności gry: stan, ikona
+            budynku z gry (GFX_buildings_strip, icon_frame) z liczbą poziomów, przydzielone fabryki x/15, postęp
+            bieżącego poziomu (pasek, %, punkty budowy).
+            Pamięć: [country+0xF68] CProductionStatus, +0x70 = tablica CBuildingProductionLine* (read_array);
+            linia +0xC id (jak general_lines w zapisie), +0x18 fabryki, +0x28 koszt poziomu, +0x30 szybkość budowy
+            na dzień, +0x38 postęp poziomu (fixed64),
+            +0x48 poziomy, +0x70 CBuilding: +0x1D8 CBuildingStatus (+0x6C numer stanu), +0x1E0 CBuildingTemplate
+            (+0x270 nazwa, np. arms_factory). Sprawdzone: FRA 1936 = ekran budowy gry (12 pozycji, stany, 15/15, 4/15,
+            poziomy 1/1/2/1...), 439 państw bez błędu. Zapis tekstowy: countries/<TAG>/production/general_lines.
+            POPRAWKA (2026-10-13, zgłoszenie użytkownika: SOV 1941 postęp jakby od zera, cons_sov.png): +0x30 to
+            szybkość (183,75/dzień), postęp jest pod +0x38 (Krasnojarsk 6309,79/7200 = podpowiedź gry). Dodane: dni do
+            końca poziomu i data "Next complete" (2 Oct 1941 = gra), szybkość na dzień; punkty i % obcięte jak w grze.
+            NAPRAWA vs BUDOWA (2026-10-13, prośba użytkownika): linia +0x78 = poziomy do naprawy (zapis: to_repair;
+            naprawa ma 0 poziomów do budowy = amount=0). Etykieta CONSTRUCTION / REPAIR / CONSTRUCTION + REPAIR,
+            liczba napraw w podsumowaniu. 439 państw: 197 budów, 122 naprawy, 17 tras kolei - bez błędów.
+            Budynki prowincji (kolej, bunkry, bazy): CBuildingStatus +0x6C to numer PROWINCJI -> stan z history/states.
+            Trasy kolei: osobna klasa CRailwayProductionLine (rozpoznawana po vtable: moduł+0x2A2BE90, zwykła linia
+            moduł+0x297B958), +0x80 tablica prowincji trasy -> "stan początkowy -> stan końcowy". Wcześniej te linie
+            psuły odczyt GER/ENG/FRA i 10 innych państw ("out of range") - naprawione.
+            Kolej wg podpowiedzi gry (cons_fra.png, FRA "Constantine - Algiers"): +0x48 = "Railways needed" (4),
+            +0x70/+0x74 = poziom kolei z/do (2 -> 3), czas 67 dni = gra; końce trasy nazwane jak w grze:
+            VICTORY_POINTS_<prowincja>, bez nazwy - stan ("Bizerte - Tunis", "Tunis - Tunisia").
+            [ ] odczyt z zapisu, gdy gra nie działa.
 [x] ZAKŁADKA RESEARCH (2026-10-11, nowa, na życzenie użytkownika): wybór państwa + kafelek "Research slots"
             [Live | On refresh]: liczba slotów, co bada każdy slot (nazwa, ikona z gry, id), premia szybkości slotu.
             Pamięć: [country+0xF60] = CTechnologyStatus, tablica +0xA0 = CResearchSlot (+0x18 CTechnology lub 0,
@@ -216,6 +242,14 @@ DO ZROBIENIA (w tej kolejności)
 ======================================================================
 ZNANE OGRANICZENIA
 ======================================================================
+- CRASH GRY PRZY WCZYTYWANIU SAVE'A z otwartą aplikacją (2026-10-13, zgłoszenie użytkownika; crashes/hoi4_20261013_115105
+  i _115158: C0000005 w wątku roboczym tbb podczas wczytywania). Podejrzenie: odczyt pod starym wskaźnikiem (obiekty
+  zwalniane przy wczytywaniu) trafia w stronę ochronną stosu (PAGE_GUARD) - ReadProcessMemory ją zdejmuje i stos
+  wątku gry nie może rosnąć. POPRAWKA: każdy odczyt najpierw sprawdza strony (VirtualQueryEx): tylko zatwierdzone,
+  czytelne, bez PAGE_GUARD/NOCACHE/WRITECOMBINE (~5 us na odczyt) - zostaje jako zabezpieczenie.
+  PRZYCZYNA USTALONA: gra crashuje też BEZ aplikacji. Save'y ("Jeden z lepszych soveitow", SOV_1937_10_15_10) są
+  z innym zestawem modów: brak teraz Expert AI 5.0, Modifier Icons, Player-Led Peace Conferences, The Road to 56,
+  Toolpack+ (w logu cechy r56 "not in DB"), dodatkowo włączony Descriptive Icons. To nie wina aplikacji.
 - Odczyt na żywo tylko dla wersji gry 1.19.3.0.c01a (po aktualizacji gry: do ponownego ustalenia).
 - Stany, manpower - z ostatniego zapisu (migawka); lista państw i magazyn sprzętu także na żywo.
 - Live: pozostali gracze sesji multiplayer nie są jeszcze czytani z pamięci (wymaga testu MP, Krok H).

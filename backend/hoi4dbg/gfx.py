@@ -40,11 +40,17 @@ def _png(width: int, height: int, rgba: bytes) -> bytes:
 
 def dds_to_png(data: bytes) -> bytes | None:
     """Uncompressed 16/24/32-bit DDS (channel order and widths from its masks) -> PNG bytes; None otherwise."""
+    decoded = _dds_rgba(data, MAX_SIDE)
+    return _png(*decoded) if decoded else None
+
+
+def _dds_rgba(data: bytes, max_side: int) -> tuple[int, int, bytes] | None:
+    """(width, height, RGBA bytes) of an uncompressed 16/24/32-bit DDS; None otherwise."""
     if len(data) < 128 or data[:4] != b"DDS ":
         return None
     height, width = struct.unpack_from("<II", data, 12)
     pf_flags, _fourcc, bits, rm, gm, bm, am = struct.unpack_from("<I4sIIIII", data, 80)
-    if pf_flags & 0x4 or bits not in (16, 24, 32) or not (0 < width <= MAX_SIDE and 0 < height <= MAX_SIDE):
+    if pf_flags & 0x4 or bits not in (16, 24, 32) or not (0 < width <= max_side and 0 < height <= max_side):
         return None
     if not (pf_flags & 0x1):   # DDPF_ALPHAPIXELS not set: the alpha mask is not used
         am = 0
@@ -62,7 +68,7 @@ def dds_to_png(data: bytes) -> bytes | None:
         v = int.from_bytes(pixels[i * size:(i + 1) * size], "little")
         for c, (mask, shift, top) in enumerate(channels):
             out[i * 4 + c] = ((v & mask) >> shift) * 255 // top if mask else 0xFF
-    return _png(width, height, bytes(out))
+    return width, height, bytes(out)
 
 
 @lru_cache(maxsize=512)
@@ -78,3 +84,19 @@ def icon_data_uri(texture: str) -> str | None:
     else:
         png = dds_to_png(raw)
     return "data:image/png;base64," + base64.b64encode(png).decode() if png else None
+
+
+@lru_cache(maxsize=128)
+def frame_data_uri(texture: str, frame: int, frames: int) -> str | None:
+    """data: URI of one frame (1-based, as the game's icon_frame) of a horizontal sprite strip of `frames` frames."""
+    try:
+        decoded = _dds_rgba(Path(texture).read_bytes(), 4096)
+    except OSError:
+        return None
+    if not decoded or not 1 <= frame <= frames:
+        return None
+    width, height, rgba = decoded
+    w = width // frames
+    x = (frame - 1) * w
+    rows = b"".join(rgba[(y * width + x) * 4:(y * width + x + w) * 4] for y in range(height))
+    return "data:image/png;base64," + base64.b64encode(_png(w, height, rows)).decode()

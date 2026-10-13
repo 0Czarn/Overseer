@@ -306,7 +306,11 @@ class ModifierTests(TempDirMixin, unittest.TestCase):
         ws = b["war_support"]["total"]
         self.assertAlmostEqual(ws, 0.3 + 0.06764 - 0.2 - 0.05664 - 0.00521)
         self.assertEqual([p["name"] for p in b["stability"]["parts"]], ["At war", "War Support"])
+        self.assertEqual(b["stability"]["parts"][0]["value"], -0.2)
         self.assertAlmostEqual(b["stability"]["parts"][1]["value"], -0.3 * (1 - ws), places=6)
+        # the game's own war_stability_factor is added to the base (SOV 1941: 0.02195 -> -17.80 % in the game)
+        game = modifiers.breakdown({**state, "war_stability_factor": 0.02195}, self.defs)
+        self.assertAlmostEqual(game["stability"]["parts"][0]["value"], -0.17805)
         peace = modifiers.breakdown({**state, "wars": []}, self.defs)
         self.assertEqual([p["name"] for p in peace["stability"]["parts"]], [])   # no war: no war lines
 

@@ -5,7 +5,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const TABS = ['dashboard', 'countries', 'country-editor', 'research', 'state-editor', 'focus', 'equipment', 'tools',
+const TABS = ['dashboard', 'countries', 'country-editor', 'research', 'construction', 'state-editor', 'focus', 'equipment', 'tools',
   'intel', 'logs'];
 const SIZES = [{ name: 'wide', width: 1320, height: 860 }, { name: 'narrow', width: 480, height: 820 }];
 
@@ -90,6 +90,14 @@ function runSmoke(win, outDir, quit) {
             if (!info.resources) result.failures.push(`${size.name}/country-editor: no resources`);
             info.editableChips = await wc.executeJavaScript(`document.querySelectorAll('.hoi-chip .hoi-chip-input').length`);
             if (info.editableChips !== 6) result.failures.push(`${size.name}/country-editor: ${info.editableChips}/6 editable live values`);
+          }
+          if (tab === 'construction') {
+            // queue rows, the empty-queue line, or the reason (game not running)
+            await waitFor(wc, `!!document.querySelector('.construction-line, .research-summary, .live-panel-body .notice')`, 20000);
+            info.construction = await wc.executeJavaScript(`({
+              lines: document.querySelectorAll('.construction-line').length,
+              text: document.querySelector('.research-summary, .live-panel-body .notice')?.textContent ?? null })`);
+            if (!info.construction.lines && !info.construction.text) result.failures.push(`${size.name}/construction: shows nothing`);
           }
           if (tab === 'research') {
             await waitFor(wc, `!!document.querySelector('.research-slot, .live-panel-body .notice')`, 20000);
