@@ -981,6 +981,44 @@ class IdeaPointerTests(unittest.TestCase):
         with self.assertRaises(pointers.PointerError):
             pointers.read_penalties(mem, country)
 
+    def test_read_modifier_sums(self):
+        mem = FakeMemory(0x4000)
+        country, entries = BASE + 0x100, BASE + 0x1000
+        header = country + pointers.COUNTRY_MODIFIER + 0x10
+        mem.put(header, "Q", entries)
+        mem.put(header + 8, "i", 4)   # capacity
+        mem.put(header + 12, "i", 2)  # size
+        for i, (index, value) in enumerate([(141, -13500), (500, 950000000)]):   # ITA 2026-10-13: -0.135
+            mem.put(entries + 16 * i, "i", index)
+            mem.put(entries + 16 * i + 8, "q", value)
+        mem.put(entries + 32, "i", 149)   # beyond the size: stale, not read
+        mem.put(entries + 40, "q", 5000)
+        self.assertEqual(pointers.read_modifier_sums(mem, country), {"stability_factor": -0.135, "war_support_factor": 0.0})
+        mem.put(header + 12, "i", 9)   # size above capacity: wrong layout
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_modifier_sums(mem, country)
+
+    def test_read_wars(self):
+        mem = FakeMemory(0x4000)
+        order = ["GER", "ENG", "SOV", "ITA"]
+        country, dip, array = BASE + 0x100, BASE + 0x400, BASE + 0x500
+        relations, wars = [BASE + 0x800 + 0x300 * i for i in range(3)], [BASE + 0x1800, BASE + 0x1900]
+        mem.put(country + pointers.DIPLOMACY, "Q", dip)
+        mem.put(dip + pointers.RELATIONS, "Q", array)
+        mem.put(dip + pointers.RELATIONS + 8, "i", 3)
+        mem.put(dip + pointers.RELATIONS + 12, "i", 3)
+        for i, (rel, slot, war) in enumerate(zip(relations, (1, 3, 4), (wars[0], 0, wars[1]))):
+            mem.put(array + 8 * i, "Q", rel)
+            mem.put(rel + pointers.RELATION_SLOT, "i", slot)
+            mem.put(rel + pointers.RELATION_WAR, "Q", war)
+        mem.put(wars[0] + pointers.WAR_SIDES, "i", 2); mem.put(wars[0] + pointers.WAR_SIDES + 4, "i", 1)   # ENG declared on GER (1941 game)
+        mem.put(wars[1] + pointers.WAR_SIDES, "i", 4); mem.put(wars[1] + pointers.WAR_SIDES + 4, "i", 2)   # ITA declared on ENG
+        self.assertEqual(pointers.read_wars(mem, country, order, "ENG"),
+                         [{"enemy": "GER", "offensive": True}, {"enemy": "ITA", "offensive": False}])
+        mem.put(wars[1] + pointers.WAR_SIDES, "i", 4); mem.put(wars[1] + pointers.WAR_SIDES + 4, "i", 3)   # war of other countries: wrong layout
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_wars(mem, country, order, "ENG")
+
     def test_read_research(self):
         mem = FakeMemory(0x4000)
         country, status, array = BASE + 0x100, BASE + 0x400, BASE + 0x600

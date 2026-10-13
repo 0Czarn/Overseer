@@ -363,6 +363,40 @@ def read_leader(memory, country: int) -> dict | None:
     return {"id": str(struct.unpack("<i", raw)[0]), "ideology": name}
 
 
+# Wars (2026-10-13, SOV 1941 at war with GER, 439 countries consistent from both sides, e.g. ENG-GER in both):
+# CDiplomacyStatus + 0x8 = array of CRelationStatus* (read_array), one per country slot; relation + 0x50 = slot of
+# the other country (int32), + 0x2e8 = CWarRelation or 0 in peace; CWarRelation + 0x10 / + 0x14 = slots of the
+# two sides (slot = index in the tag order + 1), the attacker first: GER-SOV, GER-POL, ENG-GER, JAP-CHI (the
+# saves' war_relation first="..." with first_was_instigator=yes, the only value seen in 10 text saves).
+RELATIONS = 0x8
+RELATION_SLOT = 0x50
+RELATION_WAR = 0x2E8
+WAR_SIDES = 0x10
+
+
+def read_wars(memory, country: int, order: list[str], tag: str) -> list[dict]:
+    """[{"enemy": tag, "offensive": bool}] of the country's wars."""
+    dip = _ptr(memory, country + DIPLOMACY)
+    if dip is None:
+        raise PointerError("unreadable", "The country's diplomacy object is not readable")
+    own = order.index(tag) + 1
+    out = []
+    for relation in read_array(memory, dip + RELATIONS, 2000):
+        raw = memory.read(relation, RELATION_WAR + 8) if relation else None
+        if raw is None:
+            raise PointerError("unreadable", "A diplomatic relation is not readable")
+        war = struct.unpack_from("<Q", raw, RELATION_WAR)[0]
+        if not war:
+            continue
+        other = struct.unpack_from("<i", raw, RELATION_SLOT)[0]
+        sides = memory.read(war + WAR_SIDES, 8)
+        first, second = struct.unpack("<ii", sides) if sides else (0, 0)
+        if {first, second} != {own, other} or not 0 < other <= len(order):
+            raise PointerError("implausible", "War sides do not match the relation - layout does not match")
+        out.append({"enemy": order[other - 1], "offensive": first == own})
+    return out
+
+
 def read_faction(memory, country: int, tags: dict[int, str]) -> dict | None:
     """{"name", "icon", "members": [tag]} of the country's faction (None outside one); `tags` = {object: tag}."""
     dip = _ptr(memory, country + DIPLOMACY)
@@ -439,6 +473,33 @@ def read_doctrines(memory, module_base: int, tags: list[str], tag: str) -> list[
 # being_bombed_support_penalty / heroes_dying_war_support_penalty to the 5th decimal in 2 saves (SOV and POL),
 # 0 for the 96 countries at peace.
 PENALTIES = {"bombing_penalty": 0x14C8, "casualties_penalty": 0x14D0}
+
+
+# Summed country modifiers (2026-10-13, RTTI CModifier embedded at country + 0x5a8): + 0x10 pointer to entries of
+# 16 bytes (int32 modifier index, int64 value fixed64 / 100000) sorted by index, + 0x18 int32 capacity, + 0x1c int32
+# size. Index 141 = stability_factor without the ruling party popularity term (93/99 countries equal to the app's
+# known modifiers), 149 = war_support_factor incl. world tension (95/99); the rest differed by modifiers the app
+# does not know. Indices are the engine's modifier order of 1.19.3 (mods append their own definitions after it).
+COUNTRY_MODIFIER = 0x5A8
+MODIFIER_INDEX = {"stability_factor": 141, "war_support_factor": 149}
+
+
+def read_modifier_sums(memory, country: int) -> dict[str, float]:
+    """{"stability_factor", "war_support_factor"}: the game's own sums of these modifiers (0 when none)."""
+    raw = memory.read(country + COUNTRY_MODIFIER + 0x10, 16)
+    if not raw:
+        raise PointerError("unreadable", "Country modifiers are not readable")
+    data, capacity, size = struct.unpack("<Qii", raw)
+    if size == 0:
+        return dict.fromkeys(MODIFIER_INDEX, 0.0)
+    if not 0 < size <= min(capacity, 5000) or not 0x10000 <= data < 0x7FFF_FFFF_FFFF:
+        raise PointerError("implausible", f"Country modifiers {size}/{capacity} - layout does not match")
+    entries = memory.read(data, 16 * size)
+    if not entries:
+        raise PointerError("unreadable", "Country modifier entries are not readable")
+    values = {struct.unpack_from("<i", entries, i)[0]: struct.unpack_from("<q", entries, i + 8)[0] / 100000
+              for i in range(0, len(entries), 16)}
+    return {name: values.get(index, 0.0) for name, index in MODIFIER_INDEX.items()}
 
 
 def read_penalties(memory, country: int) -> dict[str, float]:

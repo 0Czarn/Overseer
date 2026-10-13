@@ -7,7 +7,8 @@ import { FIELD_LABELS, changeSection, directEnabled } from './live-ui.js';
 
 const STRIP = ['political_power', 'command_power', 'fuel', 'army_experience', 'navy_experience', 'air_experience'];
 const GAUGES = { stability: 'Stability', war_support: 'War Support' };
-const KIND_LABEL = { party: 'Politics', idea: 'National spirit / law', leader: 'Country leader', advisor: 'Advisor', dynamic: 'Dynamic modifier' };
+const KIND_LABEL = { party: 'Politics', idea: 'National spirit / law', leader: 'Country leader', advisor: 'Advisor', dynamic: 'Dynamic modifier',
+  unknown: 'Not identified by the app: the game’s own modifier sum (game memory) minus the modifiers the app knows' };
 
 const pct = (v, sign = false) => (Number.isFinite(v)
   ? `${sign && v > 0 ? '+' : ''}${(v * 100).toFixed(1).replace(/\.0$/, '')}%` : '—');
@@ -96,6 +97,7 @@ function gauge(ctx, tag, field) {
   const input = h('input', { class: 'input input-small hoi-input', type: 'number', step: '1', min: '0', max: '100',
     'aria-label': `New base ${GAUGES[field]} in percent` });
   const unknownLine = h('div', { class: 'hoi-line hoi-line-unknown' });
+  let matchRow = null;
   const gameInput = h('input', { class: 'input input-small hoi-input', type: 'number', step: '0.1', min: '0', max: '100',
     'aria-label': `${GAUGES[field]} shown in game, percent` });
   let base = null;
@@ -140,16 +142,20 @@ function gauge(ctx, tag, field) {
       unknownLine,
       h('div', { class: 'hoi-line hoi-line-total' }, h('span', null, 'Total'), totalCell),
       clampNote),
-    h('div', { class: 'hoi-match', title: 'Type what the game shows: the difference to the known modifiers is kept as "UNKNOWN"' },
+    matchRow = h('div', { class: 'hoi-match', title: 'Type what the game shows: the difference to the known modifiers is kept as "UNKNOWN"' },
       h('span', null, 'In game'), gameInput, h('span', { class: 'muted' }, '%'),
       h('button', { class: 'btn btn-small', onClick: match }, 'Match')),
     h('div', { class: 'hoi-edit' }, h('span', null, 'Set base'), input, h('span', { class: 'muted' }, '%'),
       h('button', { class: 'btn btn-small btn-primary', onClick: set }, 'Set')));
 
   const render = () => {
-    const mods = breakdown ? breakdown.modifiers + (unknown?.value ?? 0) : null;
-    unknownLine.hidden = !unknown;
-    if (unknown) {
+    // game memory gives the game's own sum: the UNKNOWN part comes with it, the manual match is not needed
+    const fromGame = breakdown?.modifiers_source === 'live';
+    const manual = fromGame ? null : unknown;
+    const mods = breakdown ? breakdown.modifiers + (manual?.value ?? 0) : null;
+    matchRow.hidden = fromGame;
+    unknownLine.hidden = !manual;
+    if (manual) {
       unknownLine.replaceChildren(
         h('span', { title: `Not identified by the app; matched with the game ${new Date(unknown.at).toLocaleString()}` },
           'UNKNOWN ', h('button', { class: 'hoi-x', type: 'button', title: 'Remove', onClick: () => {
@@ -182,7 +188,7 @@ function gauge(ctx, tag, field) {
     },
     setBreakdown(b) {
       breakdown = b;
-      lines.replaceChildren(...(b?.parts?.length ? b.parts.map((p) => h('div', { class: 'hoi-line', title: KIND_LABEL[p.kind] ?? p.kind },
+      lines.replaceChildren(...(b?.parts?.length ? b.parts.map((p) => h('div', { class: `hoi-line${p.kind === 'unknown' ? ' hoi-line-unknown' : ''}`, title: KIND_LABEL[p.kind] ?? p.kind },
         h('span', null, p.name), h('span', { class: `hoi-num ${p.value > 0 ? 'hoi-pos' : 'hoi-neg'}` }, pct(p.value, true))))
         : [h('div', { class: 'hoi-line muted' }, b ? 'No modifiers' : 'Modifiers not loaded')]));
       render();
@@ -229,10 +235,11 @@ export function countryLivePanel(ctx, tag, { isPlayer = false } = {}) {
       });
       sourceLine.replaceChildren(
         h('span', null, d.ideas_source === 'live'
-          ? `Spirits, laws${d.advisors_source === 'live' ? ', advisors' : ''}${d.doctrines_source === 'live' ? ', doctrines' : ''}${d.penalties_source === 'live' ? ', bombing, casualties' : ''} LIVE; other modifiers from ` : 'Modifiers from ',
+          ? `Spirits, laws${d.advisors_source === 'live' ? ', advisors' : ''}${d.doctrines_source === 'live' ? ', doctrines' : ''}${d.penalties_source === 'live' ? ', bombing, casualties' : ''}${d.wars_source === 'live' ? ', wars' : ''} LIVE; other modifiers from ` : 'Modifiers from ',
           d.file.name, d.in_game_date ? ` (${d.in_game_date.text})` : '',
           d.freshness?.category === 'current_session' ? '' : ' - an older session: save again if the leader changed. '),
-        h('span', { class: 'muted' }, ` Not read yet: ${d.not_read.join(', ')}. `));
+        h('span', { class: 'muted' }, ` Not read yet: ${d.not_read.join(', ')}. `),
+        d.save_mismatch ? notice('warn', d.save_mismatch) : '');
     } catch (err) {
       if (!stopped) sourceLine.replaceChildren(notice('warn', `Modifiers unavailable: ${err.message}`));
     }

@@ -144,7 +144,24 @@ def usable_for(bonus: dict, techs: dict, researched: set[str], in_progress: set[
     return sorted(out, key=lambda tid: (techs[tid].get("start_year") or 0, tid))
 
 
+# Breakdown parts the game adds to stability / war support outside its summed country modifiers (2026-10-13, SOV
+# 1941 tooltips): the ruling party term, world tension, at war, offensive / defensive war, bombing and casualty
+# penalties. "War Support" (war_support_during_war) is inside the sum.
+OUTSIDE_GAME_SUM = {"tension", "at_war", "offensive_war", "defensive_war", "bombing_penalty", "casualties_penalty"}
 MONTH_START = (0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334)   # the game has no leap years
+
+
+def save_mismatch(save_date: dict | None, game_date: dict | None) -> str | None:
+    """Message when the save is not from the running game: dated after it, or more than 31 days before it (e.g. a
+    save of another campaign), else None."""
+    if not save_date or not game_date or not save_date.get("year"):
+        return None
+    saved = save_date["year"] * 365 + MONTH_START[(save_date.get("month") or 1) - 1] + (save_date.get("day") or 1) - 1
+    running = game_date["year"] * 365 + game_date["day"]
+    if 0 <= running - saved <= 31:
+        return None
+    return (f"The newest save ({save_date.get('text') or save_date['year']}) is not from the running game "
+            f"({game_date['year']}, day {game_date['day'] + 1}): save the game to read wars and other modifiers")
 
 
 def _tech_xy(position, consts: dict) -> tuple[float, float]:
@@ -1124,6 +1141,40 @@ class DebuggerService:
             return False
         return True
 
+    def _game_totals(self, tag: str, result: dict) -> dict | None:
+        """Adds the game's own modifier sums (memory) to `result`: the value the game shows on its top bar is base +
+        those (+ the ruling party term for stability, which the game keeps apart), capped. What the app's known
+        modifiers miss becomes an "UNKNOWN" part, so parts always add up to what the game shows."""
+        if self.live is None:
+            return None
+        try:
+            sums = self.live.modifier_sums(tag)
+        except Exception:  # game not running / other version: the app's own sum stays
+            return None
+        for field, key in modifiers.KEYS.items():
+            b = result[field]
+            outside = sum(p["value"] for p in b["parts"] if p["kind"] == "party" or p["id"] in OUTSIDE_GAME_SUM)
+            game = sums[key] + outside
+            unknown = round(game - b["modifiers"], 6)
+            if abs(unknown) >= 0.0005:
+                b["parts"].append({"kind": "unknown", "id": "unknown", "name": "UNKNOWN", "value": unknown})
+            b["modifiers"] = round(game, 6)
+            b["modifiers_source"] = "live"
+            raw = None if b["base"] is None else b["base"] + game
+            b["total"] = None if raw is None else min(1.0, max(0.0, raw))
+            b["clamped"] = raw is not None and not 0.0 <= raw <= 1.0
+        return sums.get("date")
+
+    def _live_wars(self, tag: str, state: dict) -> bool:
+        """Replaces state["wars"] with the live wars of `tag` (binary saves have none: tokens unknown)."""
+        if self.live is None:
+            return False
+        try:
+            state["wars"] = self.live.wars(tag)["wars"]
+        except Exception:  # live data is optional: the save values stay
+            return False
+        return True
+
     def _live_doctrines(self, tag: str, state: dict, defs: dict, everyone: dict) -> bool:
         """Replaces state["doctrines"] with the live ones of `tag`. A name key shared by variants (e.g. x and
         x_no_lar) resolves to the variant this game uses in the save, else the first defined; unlocked rewards stay
@@ -1331,6 +1382,7 @@ class DebuggerService:
         self._live_leadership(tag, tuple(str(r) for r in [install, *mods]), state)
         live_doctrines = self._live_doctrines(tag, state, defs, everyone)
         live_penalties = self._live_penalties(tag, state)
+        live_wars = self._live_wars(tag, state)
         names = focus_mod.loc_names(install, modifiers.loc_keys(state, defs))
         base_source = {}
         for field in modifiers.KEYS:
@@ -1344,12 +1396,14 @@ class DebuggerService:
         result = modifiers.breakdown(state, defs, names)
         for field in modifiers.KEYS:
             result[field]["base_source"] = base_source[field]
+        game_date = self._game_totals(tag, result)
         game = self.detect()
+        header_date = (analysis.get("header") or {}).get("date")
         return envelope(SAVE, {
-            "tag": tag, **result, "ideas_source": "live" if live_ideas else "save",
+            "tag": tag, **result, "save_mismatch": save_mismatch(header_date, game_date), "ideas_source": "live" if live_ideas else "save",
             "advisors_source": "live" if live_advisors else "save",
             "doctrines_source": "live" if live_doctrines else "save",
-            "penalties_source": "live" if live_penalties else "save", "file": analysis["file"],
+            "penalties_source": "live" if live_penalties else "save", "wars_source": "live" if live_wars else "save", "file": analysis["file"],
             "in_game_date": (analysis.get("header") or {}).get("date"),
             "freshness": save_freshness(analysis["file"]["mtime"], game),
             "not_read": ["core coastal states protection", "foreign propaganda", "convoys raided", "attache sent",

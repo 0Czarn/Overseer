@@ -508,6 +508,25 @@ class LiveService:
             raise LiveError("unsupported_version", "Live penalty reading is only verified for 1.19.3.0.c01a")
         return {**self._with_country(process, tag, pointers.read_penalties), "tag": tag, "read_at": self._clock()}
 
+    def modifier_sums(self, tag: str) -> dict:
+        """Live sums of the stability / war support modifiers of `tag` as the game keeps them (game memory)."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Live modifier reading is only verified for 1.19.3.0.c01a")
+        key = (process["pid"], process.get("started"))
+        sums, date = self._with_country(process, tag, lambda mem, c: (
+            pointers.read_modifier_sums(mem, c), pointers.read_date(mem, self._module_base[key])))
+        return {**sums, "date": date, "tag": tag, "read_at": self._clock()}
+
+    def wars(self, tag: str) -> dict:
+        """Live wars of `tag`: [{"enemy", "offensive"}] (game memory)."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Live war reading is only verified for 1.19.3.0.c01a")
+        return {"wars": self._with_country(process, tag, lambda mem, c: pointers.read_wars(
+                    mem, c, self._tags[process.get("install") or ""], tag)),
+                "tag": tag, "read_at": self._clock()}
+
     def research(self, tag: str) -> dict:
         """Live research slots of `tag`: [{"slot", "technology", "speed"}] (game memory)."""
         process = self._process()

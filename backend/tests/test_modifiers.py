@@ -322,5 +322,36 @@ class ModifierTests(TempDirMixin, unittest.TestCase):
         self.assertIn("head_of_the_nkvd", keys)
 
 
+class GameTotalsTest(unittest.TestCase):
+    """Stability / war support from the game's own modifier sums; what the app misses becomes UNKNOWN."""
+
+    def test_unknown_part(self):
+        from types import SimpleNamespace
+        from hoi4dbg.service import DebuggerService
+        live = SimpleNamespace(modifier_sums=lambda tag: {"stability_factor": -0.085, "war_support_factor": 0.1})
+        result = {   # ITA 2026-10-13: the app knew +0.05 stability, the game had -0.085 (+ the party term)
+            "stability": {"base": 0.6, "modifiers": 0.1595, "total": 0.7595, "clamped": False, "parts": [
+                {"kind": "party", "id": "fascism", "name": "Ruling party", "value": 0.1095},
+                {"kind": "idea", "id": "x", "name": "X", "value": 0.05}]},
+            "war_support": {"base": 0.65, "modifiers": 0.1, "total": 0.75, "clamped": False, "parts": [
+                {"kind": "idea", "id": "y", "name": "Y", "value": 0.1}]},
+        }
+        DebuggerService._game_totals(SimpleNamespace(live=live), "ITA", result)
+        st, ws = result["stability"], result["war_support"]
+        self.assertEqual(st["parts"][-1], {"kind": "unknown", "id": "unknown", "name": "UNKNOWN", "value": -0.135})
+        self.assertAlmostEqual(st["modifiers"], 0.0245)
+        self.assertAlmostEqual(st["total"], 0.6245)
+        self.assertEqual(st["modifiers_source"], "live")
+        self.assertFalse(any(p["kind"] == "unknown" for p in ws["parts"]))   # all known: no UNKNOWN line
+        self.assertAlmostEqual(ws["total"], 0.75)
+
+    def test_without_game(self):
+        from types import SimpleNamespace
+        from hoi4dbg.service import DebuggerService
+        result = {"stability": {"base": 0.5, "modifiers": 0.1, "total": 0.6, "parts": []}}
+        DebuggerService._game_totals(SimpleNamespace(live=None), "SOV", result)
+        self.assertNotIn("modifiers_source", result["stability"])
+
+
 if __name__ == "__main__":
     unittest.main()

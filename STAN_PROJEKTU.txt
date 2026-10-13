@@ -1,5 +1,5 @@
 HOI4 DEBUGGER - STAN PROJEKTU
-Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-09 (Equipment: deficyt, magazyn na żywo)
+Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-13 (ST/WS z sumy modyfikatorów gry + UNKNOWN)
 Szczegóły i dowody: docs/PROGRESS.md, plan: docs/STATUS-AND-PLAN.md
 
 ======================================================================
@@ -81,6 +81,25 @@ ZROBIONE
             Wojny zostają z zapisu (nowa wojna widoczna po autozapisie). Flaga "kto zaczął" w pamięci nieznaleziona.
             Do zrobienia: źródło -19,75%, propaganda, ochrona wybrzeża, napadane konwoje,
             attaché, zatopiony Pride of the Fleet.
+[x] ST/WS JAK W GRZE + "UNKNOWN" (2026-10-13, prośba użytkownika): gra trzyma sumy modyfikatorów państwa w
+            CModifier (RTTI) w country+0x5A8: +0x10 tablica wpisów po 16 B (int32 numer modyfikatora, int64
+            fixed64/1e5), rozmiar +0x1C. Numer 141 = stability_factor BEZ członu partii rządzącej (93/99 państw
+            równe znanym modyfikatorom aplikacji), 149 = war_support_factor z napięciem światowym (95/99).
+            Wynik = baza + suma z gry (+ człon partii dla stabilności), obcięte do 0-100%. Różnica do modyfikatorów
+            znanych aplikacji = linia "UNKNOWN" (np. ITA -13,5%, HOL +15%, ETH -11,4%, FIN -5%/-5%, SWI WS -30%).
+            Bez gry - jak wcześniej (ręczne "In game / Match").
+            POPRAWKA (2026-10-13, zgłoszenie użytkownika: gra 1941, SOV w wojnie z GER, gra 71,76% / 98,53%,
+            aplikacja 89,6% / 40%; podpowiedzi gry st.png / ws.png): poza sumą gry są człony partii, napięcia,
+            "At war", wojny zaczepnej/obronnej, bombardowań i strat - aplikacja dolicza je osobno (wcześniej
+            odejmowała je jako UNKNOWN). "War Support" (-0,44%) jest w sumie gry. Ostrzeżenie, gdy najnowszy zapis
+            nie jest z wczytanej gry (np. ENG 1936 przy grze z 1941).
+[x] WOJNY NA ŻYWO (2026-10-13): [country+0xF88] CDiplomacyStatus +0x8 = tablica CRelationStatus* (po jednej na
+            slot państwa), relacja +0x50 slot drugiego państwa, +0x2E8 CWarRelation (0 w pokoju); CWarRelation
+            +0x10/+0x14 sloty stron, atakujący pierwszy (GER-SOV, ENG-GER, JAP-CHI). 439 państw spójnych z obu
+            stron, 0,8 s dla wszystkich. Zasila "At war", "Offensive/Defensive war", "War Support".
+            Wynik SOV: poparcie wojny 98,53% = gra. Stabilność 69,56% vs gra 71,76%: "At war" gra -17,80%,
+            aplikacja -20% (czynnik 0,89 nieznany; war_stability_factor z gry = numer 145, SOV 0,02195 - nie
+            wyjaśnia całości). [ ] do ustalenia wzór "At war" (potrzebny drugi pomiar).
 [x] ZAKŁADKA RESEARCH (2026-10-11, nowa, na życzenie użytkownika): wybór państwa + kafelek "Research slots"
             [Live | On refresh]: liczba slotów, co bada każdy slot (nazwa, ikona z gry, id), premia szybkości slotu.
             Pamięć: [country+0xF60] = CTechnologyStatus, tablica +0xA0 = CResearchSlot (+0x18 CTechnology lub 0,

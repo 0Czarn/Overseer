@@ -424,7 +424,7 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
   font: inherit; font-size: 11px; padding: 0 6px; cursor: pointer; }
 .hoi-chip-btn:hover { background: #5d4f2c; }
 .hoi-line-unknown { color: #e0b341; font-style: italic; }
-.hoi-line-unknown[hidden] { display: none; }
+.hoi-line-unknown[hidden], .hoi-match[hidden] { display: none; }
 .hoi-x { background: none; border: none; color: var(--hoi-muted); cursor: pointer; font-size: 11px; padding: 0 2px; }
 .hoi-x:hover { color: var(--hoi-neg); }
 .hoi-match { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--hoi-muted); }
