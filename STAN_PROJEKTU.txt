@@ -369,6 +369,40 @@ DO ZROBIENIA (w tej kolejności)
                 100%, poziom 25-200% zapamiętany per widok (lib/zoom.js); przeciąganie bez zmian.
                 Smoke: przy filtrze zakładek pierwsza zakładka była nieprzeładowana - poprawione. Zrzuty przy zasłoniętym
                 oknie (gra na pełnym ekranie) pokazują stary obraz - sprawdzać DOM, nie zrzut.
+[~] ZAKŁADKA "GAME SUMMARY" (2026-10-13, prośba użytkownika; wzór: github.com/otti086-Org/HOI4-IC-Graphs - tamto
+            narzędzie wstrzykuje DLL do gry; u nas odczyt pamięci: bez ryzyka crasha, jedno miejsce na offsety)
+            REJESTRATOR (backend, wątek w tle, ic_history.py): raz na dzień gry dla KAŻDEGO państwa IC/dzień: MIL (produkcja
+            wojskowa), NAV (morska + przezbrojenia), CIV (budowa). Pamięć: [produkcja]+0x58 linie (+0x8: 56 wojskowa, 57 morska,
+            71 przezbrojenie okrętów), +0x30 = IC wyprodukowane danego dnia (test 1 dnia SOV 1941-11-01 -> 11-02: postęp +0x38
+            rośnie dokładnie o tę wartość), linie budowy (+0x70) też +0x30. Wszystkie państwa w ~20 ms; frakcje co 7 dni.
+            Plik na kampanię: %LOCALAPPDATA%/HOI4Debugger/ic-history/<gracz>_<data>_<czas>.jsonl. Kampania trwa, gdy
+            państwo gracza to samo i data idzie do przodu; wczytanie wcześniejszego save'a w tej sesji ucina "przyszłe" dni;
+            pliki starszych sesji nigdy nie są ucinane; nagrywa tylko jedna instancja aplikacji (blokada pliku).
+            ZAKŁADKA: kampania + porównanie z drugą (linie przerywane), Military / Naval / Civilian, Countries / Factions,
+            wybór do 8 państw pogrupowanych wg frakcji (kolor zostaje przy państwie), wykres dzienny i narastający (dni
+            pominięte przy dużej prędkości liczone wartością ostatniego odczytu), podpowiedź z krzyżem, tabela; odświeżanie
+            co 5 s, gdy kampania jest nagrywana. Paleta sprawdzona walidatorem (ciemne tło, wszystkie testy PASS).
+            LICZBA FABRYK (2026-10-13, prośba użytkownika): rejestrator zapisuje też fabryki cywilne, wojskowe i stocznie
+            (jak pokazuje gra, read_factories, 2 ms dla wszystkich państw); zakładka: grupa "Factories" (Civilian / Military /
+            Dockyards / All), tylko wykres dzienny (to stan, nie przepływ), liczby całkowite. Dni nagrane wcześniej nie mają
+            fabryk (puste, nie zero).
+            POPRAWKA (2026-10-13): menu i ekran wyboru państwa mają stan gry z datą 1936.01.01 i graczem = zaznaczone
+            państwo - powstawały puste kampanie (SOV/SWI 1936), a każdy restart aplikacji zakładał nowy plik. Teraz zapis
+            tylko po UPŁYWIE dnia gry (data do przodu o 1..30 dni między odczytami; wczytanie save'a czy menu to skok) i bez
+            próbek z samymi zerami. Śmieciowe pliki usunięte.
+            GRUPY (2026-10-13, prośba użytkownika): w trybie Factions panel edycji - przy każdym państwie wybór grupy
+            (frakcja z gry, własna grupa albo Non-aligned; "*" = inaczej niż w grze), dodawanie i usuwanie własnych grup
+            (państwa wracają do frakcji z gry), Reset, pokazywanie/ukrywanie grup na wykresie (max 8, kolor zostaje przy
+            grupie). Zapis per kampania: ic-history/<id>.groups.json = {"custom": [...], "assign": {tag: grupa}} - tylko
+            zmiany względem gry, więc frakcje z gry dalej aktualizują się na żywo. Porównywana kampania używa grup pierwszej
+            (groups_from). API: GET/POST /api/summary/games/<id>/groups.
+            KOLORY / WYSZUKIWANIE / KURSOR (2026-10-13, prośba użytkownika, graph.jpg, grupa.png.jpg): wybór koloru grupy i
+            państwa (klik w kwadracik, prawy klik = domyślny z palety; zapis w ustawieniach aplikacji), wyszukiwanie po tagu
+            i nazwie w obu trybach, wspólny kursor: najechanie na jeden wykres pokazuje dzień i wartości widocznych serii w
+            obu. POPRAWKI: podpowiedź pokazywała "[object HTMLDivElement]" (replaceChildren z tablicą); kliknięte pole
+            wyboru blokowało odświeżenie panelu grup.
+            [ ] historia tylko z dni, gdy aplikacja działała (nie da się odtworzyć wstecz)
+            [ ] gracz odczytany jako GER w grze SOV (2026-10-13) - sprawdzić, czy użyto `tag`
 [ ] Krok G  Game Tools (narzędzia lokalne)
             (zakładka Intelligence Lab USUNIĘTA 2026-10-13 na prośbę użytkownika - była tylko na danych DEMO)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)

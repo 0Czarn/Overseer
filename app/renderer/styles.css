@@ -807,3 +807,57 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
   repeating-linear-gradient(45deg, transparent 0 8px, rgba(181, 66, 58, 0.35) 8px 10px); pointer-events: none; }
 .tech-xor { position: absolute; left: 3px; bottom: 3px; padding: 0 3px; font-size: 9px; font-weight: 700; color: #fff;
   background: #6b4a8a; border-radius: 2px; }
+
+/* Game summary: IC history charts */
+.gs-status { margin: 0 0 10px; font-size: 13px; }
+.gs-controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-bottom: 12px; font-size: 13px; }
+.gs-controls select { max-width: 340px; }
+.gs-seg-label { color: var(--text-muted); font-size: 12px; margin-right: -8px; }
+.gs-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.gs-seg-btn { background: var(--bg-elev); color: var(--text-muted); border: 0; padding: 5px 10px; cursor: pointer; font: inherit; }
+.gs-seg-btn + .gs-seg-btn { border-left: 1px solid var(--border); }
+.gs-seg-on { background: var(--accent-soft); color: var(--text); }
+.gs-body { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 14px; align-items: start; }
+.gs-body:has(.gs-picker[hidden]) { grid-template-columns: minmax(0, 1fr); }
+.gs-picker { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; padding: 8px; font-size: 13px;
+  max-height: 640px; overflow: auto; }
+.gs-picker-head { display: flex; justify-content: space-between; align-items: center; font-weight: 700; margin-bottom: 6px; }
+.gs-group > summary { cursor: pointer; color: var(--text-muted); font-size: 12px; margin: 4px 0; }
+.gs-country { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: center; padding: 1px 0; cursor: pointer; }
+.gs-country-tag { font-family: var(--mono); font-size: 12px; }
+.gs-country-value { color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+.gs-search { width: 100%; margin-bottom: 6px; }
+.gs-color { width: 18px; height: 14px; padding: 0; border: 1px solid var(--border); border-radius: 3px; background: none;
+  cursor: pointer; vertical-align: middle; margin-left: 4px; }
+.gs-color::-webkit-color-swatch-wrapper { padding: 0; }
+.gs-color::-webkit-color-swatch { border: 0; border-radius: 2px; }
+.gs-new { display: flex; gap: 6px; margin-bottom: 6px; }
+.gs-new-group { flex: 1; min-width: 0; }
+.gs-group > summary { display: flex; align-items: center; gap: 6px; }
+.gs-group-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.gs-del { padding: 0 6px; line-height: 1.4; }
+.gs-member { display: grid; grid-template-columns: 52px 44px minmax(0, 1fr); gap: 6px; align-items: center; padding: 1px 0 1px 18px; }
+.gs-move { min-width: 0; width: 100%; font-size: 11.5px; }
+.gs-charts { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.gs-table table { margin-top: 6px; }
+.lc { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.lc-title { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+.lc-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.lc-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.lc-swatch { display: inline-block; width: 16px; border-top: 2px solid; }
+.lc-swatch-dash { border-top-style: dashed; }
+.lc-plot { position: relative; }
+.lc-svg { width: 100%; height: auto; display: block; }
+.lc-grid { stroke: var(--border); stroke-width: 1; opacity: 0.6; }
+.lc-base, .lc-tick { stroke: var(--text-muted); stroke-width: 1; opacity: 0.6; }
+.lc-axis { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.lc-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.lc-cross { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; }
+.lc-dot { stroke: var(--bg-elev); stroke-width: 2; }
+.lc-hit { fill: transparent; cursor: crosshair; }
+.lc-tip { position: absolute; top: 8px; pointer-events: none; background: var(--bg-elev-2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 8px; font-size: 12px; min-width: 150px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); }
+.lc-tip-date { color: var(--text-muted); margin-bottom: 3px; }
+.lc-tip-row { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: center; }
+.lc-tip-value { font-variant-numeric: tabular-nums; color: var(--text); }
+@media (max-width: 900px) { .gs-body { grid-template-columns: minmax(0, 1fr); } }

@@ -14,6 +14,7 @@ import sys
 import threading
 
 from . import __version__, applog, paths
+from .ic_history import IcHistory, IcRecorder
 from .integration import NullIntegration
 from .integration.hoi4 import Hoi4Integration
 from .live.service import LiveService
@@ -46,6 +47,8 @@ def main(argv: list[str] | None = None) -> int:
                               logger, str(data_dir), saves=saves)
     if not args.no_game:
         service.live = LiveService(service.detect, service.player_save_values, data_dir / "live", logger)
+        service.ic_recorder = IcRecorder(service.live, service.ic_history, logger)
+        service.ic_recorder.start()
     server = make_server(service, token, args.port)
     port = server.server_address[1]
 

@@ -5,7 +5,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const TABS = ['dashboard', 'countries', 'country-editor', 'research', 'construction', 'doctrines', 'state-editor', 'focus', 'equipment', 'tools',
+const TABS = ['dashboard', 'summary', 'countries', 'country-editor', 'research', 'construction', 'doctrines', 'state-editor', 'focus', 'equipment', 'tools',
   'logs'];
 // HOI4DBG_SMOKE_TABS=focus,construction checks only these tabs
 const ONLY = (process.env.HOI4DBG_SMOKE_TABS || '').split(',').filter(Boolean);
@@ -126,6 +126,48 @@ function runSmoke(win, outDir, quit) {
               await wc.executeJavaScript(`document.querySelector('[data-focus="${target}"]').click()`);
               await waitFor(wc, `${count} === ${before}`, 10000);
               if (info.focusQueueAdd !== 1) result.failures.push(`${size.name}/focus: clicking a focus does not add it to the plan`);
+            }
+          }
+          if (tab === 'summary') {
+            await waitFor(wc, `!!document.querySelector('.lc-svg, .gs-charts .notice')`, 20000);
+            info.summary = await wc.executeJavaScript(`({ charts: document.querySelectorAll('.lc-svg').length,
+              lines: document.querySelectorAll('.lc-line').length, countries: document.querySelectorAll('.gs-country').length,
+              notice: document.querySelector('.gs-charts .notice')?.textContent ?? null })`);
+            if (!info.summary.charts && !info.summary.notice) result.failures.push(`${size.name}/summary: shows nothing`);
+            if (info.summary.charts === 2) {   // hover one chart: the values of the day show in both
+              info.summary.hover = await wc.executeJavaScript(`(() => {
+                const hit = document.querySelector('.lc-hit'); const r = hit.getBoundingClientRect();
+                hit.dispatchEvent(new MouseEvent('mousemove', { clientX: r.left + r.width / 2, clientY: r.top + 10, bubbles: true }));
+                return [...document.querySelectorAll('.lc-tip')].map((t) => (t.hidden ? null : [...t.querySelectorAll('.lc-tip-row')].length));
+              })()`);
+              if (!info.summary.hover.every((n) => n > 0)) result.failures.push(`${size.name}/summary: hover shows no values in both charts`);
+              info.summary.search = await wc.executeJavaScript(`(() => { const i = document.querySelector('.gs-search');
+                i.value = 'sov'; i.dispatchEvent(new Event('input'));
+                const n = [...document.querySelectorAll('.gs-country-tag')].map((e) => e.textContent);
+                i.value = ''; i.dispatchEvent(new Event('input')); return n; })()`);
+              if (!info.summary.search.includes('SOV') || info.summary.search.length > 3) result.failures.push(`${size.name}/summary: search does not filter`);
+              await wc.executeJavaScript(`(() => { const c = document.querySelector('.gs-color'); c.value = '#ffffff';
+                c.dispatchEvent(new Event('change')); })()`);
+              await waitFor(wc, `[...document.querySelectorAll('.lc-line')].some((l) => l.getAttribute('stroke') === '#ffffff')`, 10000);
+            }
+            if (info.summary.charts) {   // factory counts: one chart (a level, no cumulative)
+              await wc.executeJavaScript(`document.querySelectorAll('.gs-seg')[1].querySelectorAll('.gs-seg-btn')[1].click()`);
+              await waitFor(wc, `document.querySelector('.lc-title')?.textContent === 'Military factories'`, 10000);
+              info.summary.factoryCharts = await wc.executeJavaScript(`document.querySelectorAll('.lc-svg').length`);
+              if (info.summary.factoryCharts !== 1) result.failures.push(`${size.name}/summary: factory view should show one chart`);
+            }
+            if (info.summary.charts && size.name === 'wide') {   // factions: a new group, a country moved into it
+              await wc.executeJavaScript(`[...document.querySelectorAll('.gs-seg-btn')].find((b) => b.textContent === 'Factions').click()`);
+              await waitFor(wc, `!!document.querySelector('.gs-new-group')`, 10000);
+              await wc.executeJavaScript(`(() => { const i = document.querySelector('.gs-new-group'); i.value = 'Smoke bloc';
+                i.dispatchEvent(new Event('input')); document.querySelector('.gs-new button').click(); })()`);
+              await waitFor(wc, `[...document.querySelectorAll('.gs-group-name')].some((e) => e.textContent.startsWith('Smoke bloc'))`, 10000);
+              await wc.executeJavaScript(`(() => { const s = document.querySelector('.gs-move'); s.value = 'Smoke bloc';
+                s.dispatchEvent(new Event('change')); })()`);
+              await waitFor(wc, `[...document.querySelectorAll('.gs-group-name')].some((e) => e.textContent === 'Smoke bloc (1)')`, 10000);
+              info.summary.groups = await wc.executeJavaScript(`({ groups: document.querySelectorAll('.gs-group').length,
+                legend: [...document.querySelectorAll('.lc-legend-item')].map((e) => e.textContent) })`);
+              if (!info.summary.groups.legend.includes('Smoke bloc')) result.failures.push('wide/summary: a new group is not on the chart');
             }
           }
           if (tab === 'doctrines') {

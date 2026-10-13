@@ -20,6 +20,7 @@ from typing import Callable
 from ..integration.memory import ENCODINGS, MemoryAccessError, ProcessMemory, needles_for, scan
 from ..integration.memory_write import ProcessMemoryWriter
 from .. import construction as construction_mod
+from .. import ic_history
 from . import console, layout, pointers
 from .calibration import SCAN_LIMIT, CalibrationError, FieldCalibration, holds, scan_many, tolerance_for
 
@@ -834,6 +835,66 @@ class LiveService:
             raise LiveError(exc.code, str(exc)) from exc
         except (MemoryAccessError, OSError, KeyError) as exc:
             raise LiveError("memory_error", f"Game memory access failed: {exc}") from exc
+
+    def _game_memory(self, fn):
+        """Runs fn(memory, module base, tag order) in the running game (verified version only)."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Live reading is only verified for 1.19.3.0.c01a")
+        key = (process["pid"], process.get("started"))
+        install = process.get("install") or ""
+        if install not in self._tags:
+            self._tags[install] = pointers.tag_order(Path(install))
+        try:
+            with self._open_memory(process["pid"]) as mem:
+                if key not in self._module_base:
+                    self._module_base[key] = mem.modules()[pointers.MODULE][0]
+                return fn(mem, self._module_base[key], self._tags[install], process)
+        except pointers.PointerError as exc:
+            raise LiveError(exc.code, str(exc)) from exc
+        except (MemoryAccessError, OSError, KeyError) as exc:
+            raise LiveError("memory_error", f"Game memory access failed: {exc}") from exc
+
+    def game_day(self) -> int | None:
+        """Day number of the running game (365-day years), None when it is not readable (menu, loading)."""
+        try:
+            return self._game_memory(lambda mem, base, _tags, _p: ic_history.day_number(pointers.read_date(mem, base)))
+        except LiveError:
+            return None
+
+    def ic_snapshot(self, with_factions: bool = False) -> dict:
+        """{"t", "player", "countries": {tag: [mil, nav, civ, civilian factories, military factories, dockyards]},
+        "factions": {tag: faction name} or None} - IC a day (pointers.read_ic) and factories as the game shows them
+        (pointers.read_factories) of every existing country."""
+        def read(mem, base, tags, process):
+            t = ic_history.day_number(pointers.read_date(mem, base))
+            countries = pointers.country_objects(mem, base, tags)
+            owned = pointers.owned_states(mem, base, tags)
+            out = {}
+            for tag, c in countries.items():
+                if owned.get(tag, 0) <= 0:
+                    continue
+                try:
+                    ic = pointers.read_ic(mem, c)
+                    fac = pointers.read_factories(mem, c)
+                except pointers.PointerError:   # a country being created or annexed right now
+                    continue
+                out[tag] = [ic["mil"], ic["nav"], ic["civ"],
+                            fac["civilian"]["total"], fac["military"]["total"], fac["dockyards"]["total"]]
+            factions = None
+            if with_factions:
+                by_object = {c: t for t, c in countries.items()}
+                factions = {}
+                for tag in out:
+                    try:
+                        f = pointers.read_faction(mem, countries[tag], by_object)
+                    except pointers.PointerError:
+                        f = None
+                    if f and f.get("name"):
+                        factions[tag] = f["name"]
+            player = pointers.player_country(mem, base, tags) or self.player_tag(process)
+            return {"t": t, "player": player, "countries": out, "factions": factions}
+        return self._game_memory(read)
 
     def stockpile(self, tag: str | None = None) -> dict:
         """Live equipment stockpile of `tag` (default: player): {"tag", "entries": [{id, name, amount}]}."""

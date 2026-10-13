@@ -1,4 +1,4 @@
-HOI4 DEBUGGER - RAPORT Z PRACY, 2026-10-09
+coHOI4 DEBUGGER - RAPORT Z PRACY, 2026-10-09
 ==========================================
 Do przeczytania przed jutrzejszą sesją. Krótko: co działa, jak tego używać, co jest otwarte,
 od czego zacząć. Szczegóły techniczne i dowody: docs/PROGRESS.md. Lista zrobione / do zrobienia:

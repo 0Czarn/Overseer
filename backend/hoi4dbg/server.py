@@ -100,6 +100,12 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("GET", f"/api/countries/{tag}/trade-advice", lambda q, b, tag: svc.trade_advice(
             tag, _str(q, "mode") or "surplus", _int(q, "limit", 25, 10, 100) / 100)),
         r("GET", f"/api/countries/{tag}/military", lambda q, b, tag: svc.military(tag)),
+        r("GET", "/api/summary/games", lambda q, b: svc.summary_games()),
+        r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})", lambda q, b, gid: svc.summary_game(
+            gid, (q.get("metric") or ["mil"])[0], [t for t in (q.get("tags") or [""])[0].upper().split(",") if t],
+            (q.get("factions") or [""])[0] == "1", (q.get("groups_from") or [""])[0] or None)),
+        r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/groups", lambda q, b, gid: svc.summary_groups(gid)),
+        r("POST", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/groups", lambda q, b, gid: svc.summary_groups(gid, b)),
         r("GET", f"/api/countries/{tag}/doctrines", lambda q, b, tag: svc.doctrines(tag)),
         r("GET", f"/api/countries/{tag}/factories", lambda q, b, tag: svc.factories(tag)),
         r("GET", f"/api/countries/{tag}/construction", lambda q, b, tag: svc.construction(tag)),

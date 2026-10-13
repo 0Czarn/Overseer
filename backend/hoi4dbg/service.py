@@ -19,6 +19,8 @@ from . import __version__, construction as construction_mod, doctrines as doctri
 from . import government as government_mod
 from . import mio as mio_mod
 from . import divisions as divisions_mod
+from . import ic_history as ic_history_mod
+from .ic_history import IcHistory
 from . import focus as focus_mod
 from . import techtree
 from .applog import RingBufferHandler
@@ -264,6 +266,8 @@ class DebuggerService:
         self.log = logger
         self.data_dir = data_dir
         self._last_detected: bool | None = None
+        self.ic_history = IcHistory(Path(data_dir or ".") / "ic-history")   # recorded campaigns (Game summary)
+        self.ic_recorder = None   # ic_history.IcRecorder when live access is on (started in __main__)
 
     # -- status ---------------------------------------------------------------------------
     def detect(self) -> dict:
@@ -1299,6 +1303,42 @@ class DebuggerService:
             res["estimate"] = sorted(needs & several)
             res["designs"] = {a: equipment[a]["design"] for a in sorted(needs) if equipment.get(a, {}).get("design")}
             t["designer"] = res
+
+    def summary_games(self) -> dict:
+        """Recorded campaigns (IC history, ic_history.py) and what the recorder is doing."""
+        recorder = self.ic_recorder.status() if self.ic_recorder else {"recording": None, "last": None,
+                                                                        "error": "Live game access is disabled"}
+        return {"data": {"games": self.ic_history.games(), "recorder": recorder}}
+
+    def summary_game(self, gid: str, metric: str = "mil", tags: list[str] | None = None, by_faction: bool = False,
+                     groups_from: str | None = None) -> dict:
+        """IC history of one campaign for the Game summary tab: the countries (latest MIL / NAV / CIV IC a day,
+        faction, name) and the day series of `metric` for `tags` or per faction (ic_history.view), with the user's
+        grouping of this campaign - or of `groups_from` (the campaign it is compared with)."""
+        try:
+            game = self.ic_history.game(gid)
+            out = ic_history_mod.view(game, metric, tags, by_faction, self.ic_history.groups(groups_from or gid))
+        except FileNotFoundError:
+            raise NotFound(f"No recorded campaign {gid}") from None
+        except ValueError as exc:
+            raise ReportError(str(exc)) from None
+        install = self._install_path()
+        names = gamefiles.country_names(install) if install else {}
+        for c in out["countries"]:
+            c["name"] = names.get(c["tag"], c["tag"])
+        return {"data": {"id": gid, "player": game["player"], "metric": metric, "by_faction": by_faction, **out}}
+
+    def summary_groups(self, gid: str, data=None) -> dict:
+        """The user's grouping of a campaign: {"custom": [names], "assign": {tag: group}}; saved when `data` is given."""
+        try:
+            groups = self.ic_history.groups(gid) if data is None else self.ic_history.set_groups(gid, data)
+        except FileNotFoundError:
+            raise NotFound(f"No recorded campaign {gid}") from None
+        except ValueError as exc:
+            raise ReportError(str(exc)) from None
+        if data is not None:
+            self.log.info("Game summary groups of %s: %d custom, %d moved", gid, len(groups["custom"]), len(groups["assign"]))
+        return {"data": groups}
 
     def research_tabs(self) -> dict:
         """Tabs of the research screen (technology folders) for the installed game, enabled mods and owned DLCs,

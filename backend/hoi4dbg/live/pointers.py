@@ -843,6 +843,36 @@ FACTORIES = {"total": 0x43C, "from_trade": 0x3C8, "consumer_goods": 0x440, "mark
              "national_projects": 0x458, "traded_goods": 0x488}
 
 
+# IC used per day (2026-10-13, SOV 1941-11-01 -> 11-02, one day apart): [production status + 0x58] = array of the
+# military and naval production lines (+ 0x8 int32 = 56 CMilitaryProductionLine / 57 CNavalProductionLine / 71
+# CShipRefitProductionLine (counted as naval), + 0x18 =
+# factories, + 0x28 = cost of one unit, + 0x30 = IC produced that day, + 0x38 = progress in IC: Series II Leninets
+# 312.32 -> 320.22 at 7.90 a day, convoys 8.17 -> 20.02 at 11.86); the construction lines (+ 0x70) hold the
+# construction points of the day at the same + 0x30. Like HOI4-IC-Graphs: MIL / NAV / CIV IC a day per country.
+PRODUCTION_LINES = 0x58
+PRODUCTION_LINE = {"kind": 0x8, "output": 0x30}
+LINE_KINDS = {56: "mil", 57: "nav", 71: "nav"}
+
+
+def read_ic(memory, country: int) -> dict[str, float]:
+    """{"mil", "nav", "civ"}: IC a day on military production, naval production and construction."""
+    status = _ptr(memory, country + PRODUCTION_STATUS)
+    if status is None:
+        raise PointerError("no_production", "The country's production status is not readable")
+    out = {"mil": 0.0, "nav": 0.0, "civ": 0.0}
+    for kind_of, array in ((None, PRODUCTION_LINES), ("civ", CONSTRUCTION_LINES)):
+        for line in read_array(memory, status + array, 5000):
+            raw = memory.read(line, 0x38) if line else None
+            if raw is None:
+                continue
+            kind = kind_of or LINE_KINDS.get(struct.unpack_from("<i", raw, PRODUCTION_LINE["kind"])[0])
+            value = struct.unpack_from("<q", raw, PRODUCTION_LINE["output"])[0] / 100000
+            if kind is None or not 0 <= value < 1e6:
+                raise PointerError("implausible", "Production line output out of range - layout does not match")
+            out[kind] += value
+    return {k: round(v, 3) for k, v in out.items()}
+
+
 def read_civilian_factories(memory, country: int) -> dict[str, int]:
     """{"total", "from_trade", "owned", "consumer_goods", "market_contracts", "national_projects", "traded_goods",
     "free"} - civilian factories of a country and what they are used for; free = left for construction."""
