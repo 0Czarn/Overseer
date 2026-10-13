@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 
-from . import __version__, construction as construction_mod, deficit, demo, equipment_changes, gamefiles, gfx, modifiers
+from . import __version__, construction as construction_mod, geography, trade as trade_mod, deficit, demo, equipment_changes, gamefiles, gfx, modifiers
 from . import government as government_mod
 from . import mio as mio_mod
 from . import focus as focus_mod
@@ -110,7 +110,8 @@ def save_freshness(save_mtime: float, game: dict, now: float | None = None) -> d
 
 @functools.lru_cache(maxsize=2)
 def resource_order(roots: tuple[str, ...]) -> dict[str, dict]:
-    """{resource: {"frame": icon_frame}} from common/resources (later roots override)."""
+    """{resource: {"frame": icon_frame, "cic": civilian factories per unit traded}} from common/resources (later
+    roots override)."""
     out: dict[str, dict] = {}
     for root in map(Path, roots):
         for path in sorted((root / "common" / "resources").glob("*.txt")):
@@ -122,7 +123,8 @@ def resource_order(roots: tuple[str, ...]) -> dict[str, dict]:
                 for name, body in (i for i in block if isinstance(i, tuple)) if isinstance(block, list) else []:
                     frame = text_mod.get(body, "icon_frame") if isinstance(body, list) else None
                     if frame is not None:
-                        out[name] = {"frame": int(float(frame))}
+                        cic = text_mod.get(body, "cic")
+                        out[name] = {"frame": int(float(frame)), "cic": float(cic) if cic is not None else 0.125}
     return out
 
 
@@ -953,6 +955,63 @@ class DebuggerService:
                 state = provinces.get(loc) if (defs.get(m["building"]) or {}).get("provincial") else loc
                 m["state_name"] = names.get(f"STATE_{state}") if state is not None else None
         return res
+
+    def trade_advice(self, tag: str, mode: str = "surplus", limit: float = trade_mod.DEFAULT_LIMIT) -> dict:
+        """Trade advisor for `tag` (trade.py): deals that cover its shortages and deals no longer needed, sellers
+        ranked by the player's rules, within the factory limit (game memory)."""
+        tag = tag.upper()
+        install = self._install_path()
+        if install is None:
+            return envelope(UNAVAILABLE, None, "Needs the game installation")
+        if self.live is None:
+            return envelope(UNAVAILABLE, None, "Needs the running game")
+        roots = self._game_roots(install)
+        order = resource_order(roots)
+        try:
+            market = self.live.trade_market(tag, list(order), list(government_mod.ideologies(roots)["colors"]))
+        except Exception as exc:  # game not running, main menu, other version
+            return envelope(UNAVAILABLE, None, f"Needs the running game: {exc}")
+        geo_note = self._trade_geography(install, tag, market["sellers"])
+        advice = trade_mod.plan(market["player"], market["sellers"], {k: v["cic"] for k, v in order.items()},
+                                mode, limit)
+        if geo_note:
+            advice["unchecked"].insert(0, geo_note)
+        tags = {d["seller"] for row in advice["resources"] for d in row["buy"] + row["cancel"] + row["candidates"]}
+        names = gamefiles.country_names(install)
+        loc = focus_mod.loc_names(install, {f"PRODUCTION_MATERIALS_{r.upper()}" for r in trade_mod.RESOURCES})
+        for row in advice["resources"]:
+            row["name"] = loc.get(f"PRODUCTION_MATERIALS_{row['resource'].upper()}", row["resource"].capitalize())
+            row["frame"] = order.get(row["resource"], {}).get("frame")
+        sprites = gfx.sprites(roots)
+        strip = sprites.get("GFX_resources_strip")
+        return envelope(LIVE, {"tag": tag, **advice, "country_names": {t: names.get(t, t) for t in tags},
+                               "icons": gfx.icon_data_uri(strip) if strip else None,
+                               "icon_frames": max([v["frame"] for v in order.values()] or [0]),
+                               "trade_source": "live"}, "Trade advice from game memory.")
+
+    def _trade_geography(self, install: Path, tag: str, sellers: dict) -> str | None:
+        """Sets "border" and "continent" of each seller (provinces of the newest save's state owners, map files);
+        returns why they could not be set, else None."""
+        picked = self._pick_save(None)
+        if picked is None:
+            return "shared border and same continent (no save to read the state owners from)"
+        try:
+            states = self.saves.states(picked[0])["states"]
+            definitions = gamefiles.state_definitions(install)
+            owned: dict[str, list[int]] = {}
+            for sid, st in states.items():
+                if st.get("owner") and int(sid) in definitions:
+                    owned.setdefault(st["owner"], []).extend(definitions[int(sid)]["provinces"])
+            neighbours = geography.province_neighbours(str(install), str(Path(self.data_dir) / "cache") if self.data_dir else "")
+            continents = geography.province_continents(str(install))
+        except (SaveFormatError, OSError, ValueError, KeyError) as exc:
+            return f"shared border and same continent ({exc})"
+        touching = geography.countries_touching(owned, neighbours, tag)
+        home = geography.main_continent(owned.get(tag, []), continents)
+        for t, info in sellers.items():
+            info["border"] = t in touching
+            info["continent"] = home is not None and geography.main_continent(owned.get(t, []), continents) == home
+        return None
 
     def research_tabs(self) -> dict:
         """Tabs of the research screen (technology folders) for the installed game, enabled mods and owned DLCs,

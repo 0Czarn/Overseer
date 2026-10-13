@@ -102,6 +102,26 @@ ZROBIONE
             WZÓR "At war" USTALONY (2026-10-13): -20% + war_stability_factor (DODAWANY, nie mnożony); suma z gry =
             numer 145 (SOV 0,02195 -> -17,80%; z POL 0,0025 -> -19,75%), bez zmian po miesiącu gry (kapitulacja
             18% bez wpływu). SOV 1941-10-21: wszystkie linie ST = podpowiedź gry (st3.png), bez UNKNOWN.
+[~] DORADCA HANDLU w kafelku Resources (Country Editor) (2026-10-13, prośba użytkownika, Trading_opt.txt;
+            wybrany wariant: tylko doradca - gra nie ma komendy ani efektu anulującego umowę importową):
+            [x] etap 1: niedobory ropy/aluminium/gumy/wolframu/stali/chromu, cel bilansu +2 / 0 / -2, limit fabryk
+                na import 10-100% (domyślnie 25%, minus fabryki już na handlu, nie więcej niż wolne), sprzedawcy:
+                nie w wojnie z graczem, nadwyżka na rynku >= 1 fabryka (8 szt., cic z common/resources); ranking:
+                sojusznik z frakcji +40, ta sama ideologia +20, obecny sprzedawca +5, frakcja w wojnie z graczem -100,
+                remis - większa nadwyżka; umowy ponad cel -> "anuluj" (najgorszy sprzedawca pierwszy). Ustawienia
+                zapamiętane lokalnie. Odczyt rynku z pamięci jednym przebiegiem 0,18 s (USA 1936: guma od MAL,
+                chrom od PHI).
+            [x] etap 2 (2026-10-13): pełna kolejność zasad użytkownika, każda waży więcej niż wszystkie niższe:
+                marionetka 64 > sojusznik 32 > ideologia 16 > dobra opinia o tobie 8 > pakt o nieagresji 4 >
+                wspólna granica 2 > ten sam kontynent 1; suweren i frakcja w wojnie z tobą -200; embargo wyklucza.
+                Pamięć: relacja (CDiplomacyStatus+0x8, indeks = numer państwa) +0x300 = opinia (op_1..3.png: USA-GER
+                -20/-10, USA-ENG +20/+22, USA-MEX -26/-10 = gra); +0x270..+0x2F0 wskaźniki na obiekty relacji
+                rozpoznawane po vtable (subject, guarantee, non_aggression_pact, embargo, war, military_access,
+                lend_lease), +0x10/+0x14 strony (suweren/gwarant pierwszy: USA-PHI, ENG-MAL, FRA-CZE).
+                Mapa: sąsiedztwo prowincji z map/provinces.bmp (numpy 0,8 s, bez numpy czysty Python; cache JSON),
+                kontynent z definition.csv (główny kontynent państwa); właściciele stanów z najnowszego save'a.
+                Pakt o nieagresji i embargo: klasy i vtable potwierdzone, ale w grze 1936 nie było przykładu.
+            [ ] etap 3: przygotowania wojny (cele wojenne), ochotnicy, konwoje na trasy morskie.
 [x] ZAKŁADKA CONSTRUCTION (2026-10-13, nowa, na życzenie użytkownika; wzór: construction.png): wybór państwa +
             kafelek "Construction queue" [Live | On refresh] - kolejka budowy NA ŻYWO w kolejności gry: stan, ikona
             budynku z gry (GFX_buildings_strip, icon_frame) z liczbą poziomów, przydzielone fabryki x/15, postęp

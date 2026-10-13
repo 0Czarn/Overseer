@@ -90,8 +90,89 @@ function totalsPie(rows, key, title, parts) {
       h('span', null, `${label} ${total ? Math.round((v / total) * 100) : 0}%`)))));
 }
 
+const TRADE_KEY = 'hoi4dbg.tradeAdvisor';
+const MODES = { surplus: 'Small surplus (+2)', exact: 'Exactly (0)', tolerate: 'Tolerate shortage (-2)' };
+
+function tradeSettings() {
+  try {
+    const v = JSON.parse(localStorage.getItem(TRADE_KEY)) ?? {};
+    return { mode: MODES[v.mode] ? v.mode : 'surplus', limit: Math.min(100, Math.max(10, Number(v.limit) || 25)) };
+  } catch {
+    return { mode: 'surplus', limit: 25 };
+  }
+}
+
+function saveTradeSettings(v) {
+  try { localStorage.setItem(TRADE_KEY, JSON.stringify(v)); } catch { /* preference only */ }
+}
+
+/** "Buy 8 from Malaya (1 factory)" / "Cancel 16 from Romania" / "OK" for one resource of the advice. */
+export function adviceText(row, names = {}) {
+  const who = (t) => names[t] ?? t;
+  const f = (n) => `${n} ${n === 1 ? 'factory' : 'factories'}`;
+  if (row.action === 'buy') {
+    const buys = row.buy.map((b) => `${fmt(b.amount)} from ${who(b.seller)} (${f(b.factories)})`).join(', ');
+    return `Buy ${buys}${row.missing ? ` - still ${fmt(row.missing)} short` : ''}`;
+  }
+  if (row.action === 'cancel') return `Cancel ${row.cancel.map((c) => `${fmt(c.amount)} from ${who(c.seller)}`).join(', ')} - not needed`;
+  if (row.action === 'short') return `${fmt(row.missing)} short - no seller or factories left`;
+  return 'OK';
+}
+
+/** Trade advisor section of the resources tile: deals that keep the balance at the target, within the factory limit. */
+function tradeAdvisor(ctx, tag) {
+  const settings = tradeSettings();
+  const out = h('div', { class: 'trade-out' }, h('span', { class: 'muted' }, 'Reading the market…'));
+  const mode = h('select', { class: 'input input-small', 'aria-label': 'Balance target' },
+    Object.entries(MODES).map(([k, label]) => h('option', { value: k, selected: k === settings.mode }, label)));
+  const limit = h('input', { class: 'input input-small trade-limit', type: 'number', min: 10, max: 100, step: 5,
+    value: settings.limit, 'aria-label': 'Factory limit for imports, percent of civilian factories' });
+  let busy = false;
+  async function refresh() {
+    if (busy) return;
+    busy = true;
+    const v = { mode: mode.value, limit: Math.min(100, Math.max(10, Number(limit.value) || 25)) };
+    saveTradeSettings(v);
+    try {
+      const res = await ctx.api.get(`/api/countries/${encodeURIComponent(tag)}/trade-advice?mode=${v.mode}&limit=${v.limit}`);
+      const d = res.data;
+      if (!d?.resources) {
+        out.replaceChildren(notice('warn', `Trade advice unavailable: ${res.note}`));
+        return;
+      }
+      const names = d.country_names ?? {};
+      const fz = d.factories;
+      out.replaceChildren(
+        h('p', { class: 'muted trade-budget' }, `Import limit ${fz.limit} of ${fz.total} civilian factories · on trade now ${fz.trade_now} · `
+          + `free ${fz.free} · this plan uses ${fz.planned}`),
+        h('div', { class: 'trade-rows' }, d.resources.map((r) => h('div', { class: `trade-row trade-${r.action}` },
+          icon(d, r), h('span', { class: 'res-name' }, r.name),
+          h('span', { class: `res-num ${r.balance < 0 ? 'hoi-neg' : r.balance > 0 ? 'hoi-pos' : ''}`, title: `Balance now; target ${r.target > 0 ? '+' : ''}${r.target}` },
+            `${r.balance > 0 ? '+' : ''}${fmt(r.balance)}`),
+          h('span', { class: 'trade-advice', title: r.candidates.length
+            ? `Best sellers: ${r.candidates.map((c) => `${names[c.seller] ?? c.seller} ${fmt(c.free)} free${c.reasons.length ? ` (${c.reasons.join(', ')})` : ''}`).join('; ')}`
+            : 'No seller with at least one factory of goods on the market' }, adviceText(r, names))))),
+        h('p', { class: 'muted trade-unchecked' }, `Not checked yet: ${d.unchecked.join(', ')}.`));
+    } catch (err) {
+      out.replaceChildren(notice('warn', `Trade advice unavailable: ${err.message}`));
+    } finally {
+      busy = false;
+    }
+  }
+  mode.addEventListener('change', refresh);
+  limit.addEventListener('change', refresh);
+  const el = h('div', { class: 'trade-advisor' },
+    h('div', { class: 'trade-head' }, h('strong', null, 'Trade advisor'),
+      h('span', { class: 'muted' }, 'oil, aluminium, rubber, tungsten, steel, chromium - you make the deals in the game'),
+      h('label', { class: 'trade-setting' }, 'Balance ', mode),
+      h('label', { class: 'trade-setting' }, 'Factory limit ', limit, '%')),
+    out);
+  return { el, refresh };
+}
+
 /** Resources tile (refreshable). Returns { el, refresh, stop }. */
 export function resourcesPanel(ctx, tag) {
+  const advisor = tradeAdvisor(ctx, tag);
   return livePanel(ctx, {
     title: 'Resources (per day)', url: `/api/countries/${encodeURIComponent(tag)}/resources`, unavailable: 'Resources',
     liveParts: (res) => (res.data?.resources_source === 'live' ? ['resources, trade deals'] : []),
@@ -119,7 +200,9 @@ export function resourcesPanel(ctx, tag) {
           totalsPie(d.resources, (r, k) => (k === 'home' ? r.produced - r.to_market : r.to_market), 'Production',
             [['home', 'Kept at home', COLORS.home], ['market', 'To market', COLORS.market]]),
           totalsPie(d.resources, (r, k) => (k === 'home' ? r.available - r.imported : r.imported), 'Available supply',
-            [['home', 'Own production', COLORS.home], ['imported', 'Imported', COLORS.imported]]))));
+            [['home', 'Own production', COLORS.home], ['imported', 'Imported', COLORS.imported]]))),
+      advisor.el);
+      advisor.refresh();   // the market moved with the resources
     },
   });
 }

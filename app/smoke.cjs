@@ -73,6 +73,12 @@ function runSmoke(win, outDir, quit) {
               lines: g.querySelectorAll('.hoi-lines .hoi-line').length }))`);
             if (info.gauges.length !== 2) result.failures.push(`${size.name}/country-editor: stability/war support gauges missing`);
             await waitFor(wc, `document.querySelectorAll('.live-panel-body').length >= 4 && ![...document.querySelectorAll('.live-panel-body > .muted')].some((e) => e.textContent.startsWith('Reading'))`, 30000);
+            // trade advisor in the resources tile: six resource rows, or the reason (game not running)
+            await waitFor(wc, `!!document.querySelector('.trade-row, .trade-out .notice')`, 20000);
+            info.trade = await wc.executeJavaScript(`({ rows: document.querySelectorAll('.trade-row').length,
+              advice: [...document.querySelectorAll('.trade-advice')].map((e) => e.textContent),
+              notice: document.querySelector('.trade-out .notice')?.textContent ?? null })`);
+            if (info.trade.rows !== 6 && !info.trade.notice) result.failures.push(`${size.name}/country-editor: trade advisor shows ${info.trade.rows} rows`);
             info.modeSwitches = await wc.executeJavaScript(`document.querySelectorAll('.hoi-mode').length`);
             if (info.modeSwitches < 5) result.failures.push(`${size.name}/country-editor: ${info.modeSwitches} Live/On refresh switches`);
             info.spirits = await wc.executeJavaScript(`document.querySelectorAll('.hoi-panel:not(.gov-panel) .spirit-row .spirit').length`);

@@ -862,3 +862,43 @@ def write_construction_order(writer, data: int, lines: list[int], order: list[in
         if pos is None or struct.unpack("<i", pos)[0] != i:
             writer.write(lines[k] + LINE_POSITION, struct.pack("<i", i))
     return changed
+
+
+# Relations between two countries (2026-10-13, USA 1936): [country + 0xf88] CDiplomacyStatus + 0x8 = array of
+# CRelationStatus*, index = slot of the other country (index in the tag order + 1). Relation + 0x300 = opinion of
+# the other country (int32; USA of GER -20, GER of USA -10, ENG of USA +22, MEX of USA -10 as the game tooltips).
+# + 0x270 .. + 0x2f0 = pointers to relation objects, told apart by their vtable (module offset, 1.19.3): subject,
+# guarantee, non-aggression pact, embargo, war, military access, lend-lease; each holds the slots of its two sides
+# at + 0x10 / + 0x14, the first being the overlord / guarantor / attacker (USA-PHI, ENG-MAL, FRA-CZE, ITA-ETH).
+RELATION_OPINION = 0x300
+RELATION_LINKS = range(0x270, 0x2F8, 8)
+RELATION_KINDS = {0x2960A08: "subject", 0x29607C8: "guarantee", 0x2960888: "non_aggression_pact",
+                  0x2960B60: "embargo", 0x2960288: "war", 0x2960408: "military_access", 0x2960948: "lend_lease"}
+
+
+def read_relation(memory, country: int, other_slot: int, module_base: int) -> dict:
+    """{"opinion": the country's opinion of the other one, "links": {kind: (first slot, second slot)}}."""
+    dip = _ptr(memory, country + DIPLOMACY)
+    if dip is None:
+        raise PointerError("unreadable", "The country's diplomacy object is not readable")
+    raw = memory.read(dip + RELATIONS, 16)
+    data, _cap, size = struct.unpack("<Qii", raw) if raw else (0, 0, 0)
+    if not 0 <= other_slot < size:
+        raise PointerError("implausible", "No relation slot for that country - layout does not match")
+    rel = _ptr(memory, data + 8 * other_slot)
+    body = memory.read(rel, RELATION_OPINION + 4) if rel else None
+    if body is None or struct.unpack_from("<i", body, RELATION_SLOT)[0] != other_slot:
+        raise PointerError("implausible", "Relation is for another country - layout does not match")
+    opinion = struct.unpack_from("<i", body, RELATION_OPINION)[0]
+    if not -1000 <= opinion <= 1000:
+        raise PointerError("implausible", "Opinion out of range - layout does not match")
+    links = {}
+    for off in RELATION_LINKS:
+        obj = struct.unpack_from("<Q", body, off)[0]
+        head = memory.read(obj, 0x18) if 0x10000 <= obj < 0x7FFF_FFFF_FFFF else None
+        if not head:
+            continue
+        kind = RELATION_KINDS.get(struct.unpack_from("<Q", head, 0)[0] - module_base)
+        if kind:
+            links[kind] = struct.unpack_from("<ii", head, 0x10)
+    return {"opinion": opinion, "links": links}

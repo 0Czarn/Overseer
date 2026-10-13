@@ -553,6 +553,17 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
 .construction-name { font-size: 12px; }
 .construction-eta { font-size: 12px; }
 .construction-repair { border-color: #8a5a2b; }
+.trade-advisor { margin-top: 12px; border-top: 1px solid var(--hoi-trim); padding-top: 8px; }
+.trade-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-bottom: 6px; }
+.trade-setting { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.trade-limit { width: 64px; }
+.trade-budget, .trade-unchecked { font-size: 12px; margin: 4px 0; }
+.trade-rows { display: flex; flex-direction: column; gap: 4px; }
+.trade-row { display: grid; grid-template-columns: 28px minmax(80px, 120px) 64px 1fr; align-items: center; gap: 8px; }
+.trade-advice { min-width: 0; overflow-wrap: anywhere; }
+.trade-buy .trade-advice { color: var(--hoi-pos); }
+.trade-cancel .trade-advice, .trade-short .trade-advice { color: #f0b46a; }
+.trade-ok .trade-advice { color: var(--hoi-muted, #8a8a7a); }
 .cons-sort { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0 0 10px; }
 .cons-sort-label { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; }
 .cons-sort-info { font-size: 12px; }

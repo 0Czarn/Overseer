@@ -1111,6 +1111,26 @@ class IdeaPointerTests(unittest.TestCase):
         with self.assertRaises(pointers.PointerError):   # a line lost or doubled: refused before any write
             pointers.write_construction_order(mem, data, slots, [0, 0, 1])
 
+    def test_read_relation(self):
+        mem = FakeMemory(0x4000)
+        module = 0x7FF0_0000_0000
+        country, dip, array, rel, link = BASE + 0x100, BASE + 0x400, BASE + 0x500, BASE + 0x800, BASE + 0x1000
+        mem.put(country + pointers.DIPLOMACY, "Q", dip)
+        mem.put(dip + pointers.RELATIONS, "Q", array)
+        mem.put(dip + pointers.RELATIONS + 8, "i", 100)
+        mem.put(dip + pointers.RELATIONS + 12, "i", 70)
+        mem.put(array + 8 * 68, "Q", rel)   # PHI's relation to USA (slot 68)
+        mem.put(rel + pointers.RELATION_SLOT, "i", 68)
+        mem.put(rel + pointers.RELATION_OPINION, "i", 100)
+        subject = {v: k for k, v in pointers.RELATION_KINDS.items()}["subject"]
+        mem.put(rel + 0x288, "Q", link)
+        mem.put(link, "Q", module + subject)
+        mem.put(link + 0x10, "i", 68)   # overlord USA
+        mem.put(link + 0x14, "i", 58)   # subject PHI
+        self.assertEqual(pointers.read_relation(mem, country, 68, module), {"opinion": 100, "links": {"subject": (68, 58)}})
+        with self.assertRaises(pointers.PointerError):   # slot beyond the array
+            pointers.read_relation(mem, country, 80, module)
+
     def test_read_research(self):
         mem = FakeMemory(0x4000)
         country, status, array = BASE + 0x100, BASE + 0x400, BASE + 0x600

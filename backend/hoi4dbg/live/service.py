@@ -632,6 +632,67 @@ class LiveService:
             raise LiveError("memory_error", f"Game memory access failed: {exc}") from exc
         return {**out, "tag": tag, "read_at": self._clock()}
 
+    def trade_market(self, tag: str, resources: list[str], ideologies: list[str]) -> dict:
+        """What the trade advisor needs, read in one pass (game memory): `tag`'s resources, import deals, civilian
+        factories, wars and faction, and for every other country with resources on the market and not sold yet
+        ({resource: amount}): ruling ideology, faction members, opinion of `tag` and the links between them
+        ({kind: [first tag, second tag]}: subject = [overlord, subject], non_aggression_pact, embargo, ...)."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Live trade reading is only verified for 1.19.3.0.c01a")
+        key = (process["pid"], process.get("started"))
+        install = process.get("install") or ""
+        if install not in self._tags:
+            self._tags[install] = pointers.tag_order(Path(install))
+        order = self._tags[install]
+        try:
+            with self._open_memory(process["pid"]) as mem:
+                if key not in self._module_base:
+                    self._module_base[key] = mem.modules()[pointers.MODULE][0]
+                countries = pointers.country_objects(mem, self._module_base[key], order)
+                if tag not in countries:
+                    raise LiveError("country_missing", f"{tag} has no country object in the running game")
+                by_object = {c: t for t, c in countries.items()}
+                cr_of = {t: pointers._ptr(mem, c + pointers.COUNTRY_RESOURCES) for t, c in countries.items()}
+                own = pointers.read_resources(mem, cr_of[tag], resources)
+                tokens = own.pop("_tokens")
+                player = {"tag": tag, "resources": own,
+                          "imports": pointers.read_imports(mem, cr_of[tag], tokens, {cr: t for t, cr in cr_of.items() if cr}),
+                          "factories": pointers.read_civilian_factories(mem, countries[tag]),
+                          "wars": pointers.read_wars(mem, countries[tag], order, tag),
+                          "faction": pointers.read_faction(mem, countries[tag], by_object)}
+                sellers = {}
+                for t, cr in cr_of.items():
+                    if t == tag or not cr:
+                        continue
+                    try:
+                        pools = pointers.read_resources(mem, cr, resources)
+                    except pointers.PointerError:   # tags without a country (released later, ...)
+                        continue
+                    free = {r: round(pools["to_market"][r] - pools["exported"][r], 3) for r in resources}
+                    if not any(v > 0 for v in free.values()):
+                        continue
+                    c = countries[t]
+                    try:
+                        ruling = pointers.read_parties(mem, c, ideologies)["ruling"]
+                        faction = pointers.read_faction(mem, c, by_object)
+                    except pointers.PointerError:
+                        ruling, faction = None, None
+                    try:   # the seller's view of the player: its opinion and their pacts, subject link, embargo
+                        relation = pointers.read_relation(mem, c, order.index(tag) + 1, self._module_base[key])
+                    except pointers.PointerError:
+                        relation = {"opinion": None, "links": {}}
+                    links = {k: [order[s - 1] if 0 < s <= len(order) else None for s in v]
+                             for k, v in relation["links"].items()}
+                    sellers[t] = {"market": free, "ideology": ruling, "faction": faction["members"] if faction else [],
+                                  "opinion": relation["opinion"], "links": links}
+                player["ideology"] = pointers.read_parties(mem, countries[tag], ideologies)["ruling"]
+        except pointers.PointerError as exc:
+            raise LiveError(exc.code, str(exc)) from exc
+        except (MemoryAccessError, OSError, KeyError) as exc:
+            raise LiveError("memory_error", f"Game memory access failed: {exc}") from exc
+        return {"tag": tag, "player": player, "sellers": sellers, "read_at": self._clock()}
+
     def session(self) -> dict:
         """Running game: mode (game.log), local player country and states owned by every country (memory)."""
         process = self._process()

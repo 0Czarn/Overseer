@@ -1,0 +1,12 @@
+Automatyczny handel surowcami dla gracza. Raz w miesiącu mod pokrywa niedobory ropy, aluminium, gumy, wolframu, stali i chromu własnymi umowami importowymi i anuluje te, które nie są już potrzebne. Umowy zawarte przez ciebie zostają bez zmian.
+
+Kupuje tylko tam, gdzie handel jest możliwy. Nie handluje z krajem, z którym prowadzisz wojnę; przy embargu w dowolną stronę; gdy nadwyżka sprzedawcy jest mniejsza niż jedna fabryka; bez wolnych fabryk cywilnych; drogą morską bez konwojów.
+
+Spośród możliwych sprzedawców wybiera najbardziej odpowiedniego. Najwyżej stoją twoje marionetki, sojusznicy, kraje tej samej ideologii, dobra opinia o tobie, pakt o nieagresji, wspólna granica i ten sam kontynent. Najniżej — twój suweren, frakcja, która prowadzi z tobą wojnę lub ją przygotowuje, kraje przygotowujące wojnę przeciw tobie lub twoim marionetkom, kraje, przeciw którym sam przygotowujesz wojnę, oraz przeciwnicy przez ochotników. Przy remisie wygrywa większa nadwyżka. Obecny sprzedawca dostaje niewielki bonus, żeby umowy nie przeskakiwały co miesiąc między niemal równymi krajami.
+
+Działa tylko dla gracza; AI handluje jak zwykle. Włącza się i wyłącza decyzją w kategorii „Handel automatyczny”. Wyłączenie anuluje wszystkie umowy moda.
+
+Zasady gry (grupa HOI4 Auto Trade):
+limit fabryk na import — od 10 do 100% fabryk cywilnych, domyślnie 25%; (koonfigurowalne).
+bilans — niewielka nadwyżka +2 (domyślnie), dokładnie lub tolerowanie niedoboru do 2; (koonfigurowalne).
+handel automatyczny na starcie gry — wyłączony (domyślnie) lub włączony od pierwszego dnia. (koonfigurowalne).
