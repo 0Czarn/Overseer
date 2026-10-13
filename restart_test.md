@@ -1,0 +1,1 @@
+Sprawdź aktualny stan projektu HOI4 Mod Debugger. Przejrzyj status Git, ostatnie commity, istniejące pliki i dokumentację. Sprawdź, czy raport `docs/live_game_feasibility.md` już istnieje i czy poprzednie zadanie zostało ukończone. Nie powtarzaj wykonanej pracy i nie zmieniaj niczego, dopóki nie przedstawisz mi krótkiego podsumowania aktualnego stanu.

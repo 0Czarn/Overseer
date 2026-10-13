@@ -118,8 +118,3 @@ Etap 7: testy synchronizacji prywatnego multiplayera, w tym inicjowanie zmian pr
 
 Etap 8: poprawki, raport kompatybilności i instrukcja użytkownika.
 
-## Pierwsze zadanie
-
-Przeczytaj całą specyfikację. Sprawdź, czy folder projektu jest pusty. Przedstaw krótki plan technologiczny i rozpocznij implementację pierwszego etapu.
-
-Dostarcz działający prototyp, instrukcję uruchomienia i testy. Nie twórz na razie mechanizmu zapisu do pamięci gry. Nie zatrzymuj się na samym planie.

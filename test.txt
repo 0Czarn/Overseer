@@ -1,0 +1,47 @@
+Kontynuuj od aktualnego stanu repozytorium. Wybieram opcję 1: dokończ diagnostykę i kalibrację odczytu pamięci, ale najpierw zabezpiecz i napraw istniejącą implementację. Nie pisz teraz nowego raportu wykonalności i nie pytaj mnie, którą opcję wybrać.
+
+## Krok 1 — zabezpiecz istniejącą pracę
+
+* Sprawdź `git status`, `git diff` i ostatnie commity.
+* Zachowaj wszystkie niezacommitowane zmiany w `integration/`, `live/`, `server.py`, `service.py`, `__main__.py` oraz testach.
+* Nie przywracaj automatycznie usuniętych plików promptów i nie kasuj danych użytkownika.
+* Sprawdź, czy usunięcie pustego `zalozenia.md` ma jakiekolwiek znaczenie dla projektu.
+* Nie rób commita, dopóki nie ustalisz, że kod jest spójny i testy przechodzą.
+
+## Krok 2 — napraw istniejące błędy
+
+* Zbadaj odwołanie do nieistniejącego `livecal.py` w `integration/memory.py`.
+* Napraw ścieżki importu i uruchamianie `tests.test_live` w taki sposób, żeby testy działały zarówno osobno, jak i jako część pełnego zestawu.
+* Uruchom testy backendu, JS i UI. Podaj aktualne wyniki, nie przepisuj starych wyników z dokumentacji.
+* Dodaj testy regresyjne dla naprawionych błędów.
+
+## Krok 3 — dokończ bezpieczny odczyt pamięci
+
+* Sprawdź, czy proces gry nadal działa i czy PID zapisany w kalibracji jest aktualny.
+* Nie używaj kalibracji pochodzącej z poprzedniego PID. Wykrywaj zmianę procesu i unieważniaj nieaktualne wyniki.
+* Kalibrację rozpocznij od nowa dla aktualnego procesu gry.
+* Użyj kontrolowanych zmian Political Power w jednoosobowej rozgrywce, aby zawęzić kandydatów. Przed każdą zmianą zapisz wartość bazową, a potem sprawdź wynik niezależnym odczytem z zapisu.
+* Nie zakładaj, że każda znaleziona liczba jest Political Power. Zawężaj wyniki na podstawie powtarzalnych zmian i wiarygodnych kryteriów.
+* Na tym etapie wykonuj wyłącznie odczyt pamięci. Nie zapisuj do pamięci gry, nie zmieniaj przypadkowych adresów i nie eksperymentuj na niezweryfikowanych offsetach.
+* Jeżeli potrzebna jest moja czynność, np. zmiana Political Power w grze, podaj krótką instrukcję dokładnie w momencie, kiedy będzie potrzebna.
+
+## Krok 4 — zintegruj odczyt z UI
+
+Gdy backend działa poprawnie i odczyt jest wystarczająco wiarygodny:
+
+* Podłącz frontend do istniejących endpointów `/api/live/*`.
+* Pokaż rzeczywistą wartość Political Power, status odczytu, PID procesu, wersję gry i czas ostatniej aktualizacji.
+* Rozróżnij stan LIVE od danych SAVE i DEMO.
+* Jeśli wartość nie została wiarygodnie rozpoznana, pokaż błąd lub status „niezweryfikowane”, a nie zgadywaną liczbę.
+* Dodaj obsługę braku gry, ponownego uruchomienia gry, błędu uprawnień i nieaktualnego odczytu.
+
+## Krok 5 — kolejny cel
+
+Po uzyskaniu stabilnego i powtarzalnego odczytu Political Power:
+
+* Zapisz ustalenia w `docs/PROGRESS.md`.
+* Zacommituj tylko zweryfikowane zmiany.
+* Dopiero potem przejdź do implementacji kontrolowanej modyfikacji Political Power z poziomu aplikacji. Nie zapisuj do pamięci, dopóki nie będzie potwierdzony poprawny adres, typ danych i bezpieczna metoda odtworzenia stanu.
+* Następnie kontynuuj pozostałe edytory zgodnie z `PROMPT.md`.
+
+Nie zatrzymuj się na samym planie. Wykonaj naprawy i testy, a następnie kontynuuj kalibrację tak daleko, jak to możliwe w tej sesji. Jeśli kalibracja wymaga mojej czynności, jasno napisz, co mam zrobić i jaki wynik mam Ci przekazać.
