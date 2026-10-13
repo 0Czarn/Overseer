@@ -2,6 +2,7 @@
 import { createApi } from './lib/api.js';
 import { clear, errorBox, h, toast } from './lib/dom.js';
 import { startFocusWatch } from './lib/focus-watch.js';
+import { sortMessage, startConstructionSort } from './lib/construction-sort.js';
 import dashboard from './views/dashboard.js';
 import countries from './views/countries.js';
 import countryEditor from './views/country-editor.js';
@@ -190,6 +191,18 @@ async function init() {
     api.log('info', `Focus alert: ${message}`);
     try { new Notification('HOI4 Debugger - national focus', { body: message }); } catch { /* notifications unavailable */ }
   }), 5000);
+  // Optional construction queue auto-sort (switch on the Construction tab): a refusal (multiplayer, player not
+  // known) is shown once per reason, not every few seconds
+  let lastSortError = null;
+  if (!smoke) startConstructionSort(api, (res, err) => {
+    const message = sortMessage(res);
+    if (message) {
+      toast(message, 'ok');
+      api.log('warning', `Local memory write: ${message}`);
+    }
+    if (err && err.message !== lastSortError) toast(`Construction auto-sort: ${err.message}`, 'warn');
+    lastSortError = err ? err.message : null;
+  });
   await renderView();
   document.body.dataset.ready = '1';
 }

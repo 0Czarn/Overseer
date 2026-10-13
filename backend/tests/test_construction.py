@@ -31,6 +31,16 @@ class ConstructionRowsTest(unittest.TestCase):
         # railway ends named like the game: province name, else its state ("Tunis - Tunisia")
         self.assertEqual([r["place"] for r in rows], [None, "Bizerte - Kharkov", None])
 
+    def test_civilian_factories_closest_to_completion_first(self):
+        # civ_przed.png -> civ_po.png: the civilian factory with the most progress goes on top; repairs, military
+        # factories and railways keep their order below
+        def line(building, produced, levels=1, kind="building"):
+            return {"kind": kind, "building": building, "levels": levels, "produced": produced, "cost": 10800.0}
+        lines = [line("arms_factory", 7000), line("industrial_complex", 1000), line("industrial_complex", 0, levels=0),
+                 line("industrial_complex", 9000), line("rail_way", 0, kind="railway"), line("industrial_complex", 1000)]
+        self.assertEqual(construction.civilian_first_order(lines), [3, 1, 5, 0, 2, 4])
+        self.assertEqual(construction.civilian_first_order([line("industrial_complex", 9000)]), [0])
+
     def test_date_over_the_year_end(self):
         # day 360 = 27 Dec (no leap years)
         self.assertEqual(construction.game_date_after({"year": 1941, "day": 360}, 10)["text"], "6 Jan, 1942")

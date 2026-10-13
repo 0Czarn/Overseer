@@ -758,6 +758,7 @@ LINE_VTABLES = {0x297B958: "building", 0x2A2BE90: "railway"}
 LINE = {"id": 0xC, "factories": 0x18, "cost": 0x28, "speed": 0x30, "produced": 0x38, "levels": 0x48, "building": 0x70,
         "repair": 0x78, "path": 0x80, "from_level": 0x70, "to_level": 0x74}
 BUILDING = {"status": 0x1D8, "template": 0x1E0}
+LINE_POSITION = 0x44   # int32 queue position (0-based, the save's priority - 1), kept equal to the array index
 STATUS_LOCATION = 0x6C
 BUILDING_NAME = 0x270
 
@@ -807,3 +808,57 @@ def read_construction(memory, country: int, module_base: int) -> list[dict]:
                     "levels": i32("levels"), "repair": repair, "factories": i32("factories"), "cost": cost,
                     "speed": speed, "produced": produced, "railway_levels": railway_levels})
     return out
+
+
+# Civilian factories (2026-10-13, SOV 1941 equal to the game's construction screen, cons_goods.png: 161/161, from
+# trade 38, owned 123, consumer goods 60, market contracts 1, national projects 5, traded goods 3): CProductionStatus
+# int32 fields + 0x43c = all civilian factories, + 0x3c8 = from trade, + 0x440 = consumer goods, + 0x4a0 = market
+# contracts, + 0x458 = national projects, + 0x488 = traded goods (the task fields are 0x18 apart; GER 61 / 12 / 8 /
+# 18, HOL 1 / 1 / 0 / 0 consistent with what is left after each task at + 0x454 and + 0x46c).
+FACTORIES = {"total": 0x43C, "from_trade": 0x3C8, "consumer_goods": 0x440, "market_contracts": 0x4A0,
+             "national_projects": 0x458, "traded_goods": 0x488}
+
+
+def read_civilian_factories(memory, country: int) -> dict[str, int]:
+    """{"total", "from_trade", "owned", "consumer_goods", "market_contracts", "national_projects", "traded_goods",
+    "free"} - civilian factories of a country and what they are used for; free = left for construction."""
+    status = _ptr(memory, country + PRODUCTION_STATUS)
+    raw = memory.read(status + 0x3C8, 0xE0) if status else None
+    if raw is None:
+        raise PointerError("unreadable", "The country's production status is not readable")
+    out = {k: struct.unpack_from("<i", raw, off - 0x3C8)[0] for k, off in FACTORIES.items()}
+    used = sum(out[k] for k in ("consumer_goods", "market_contracts", "national_projects", "traded_goods"))
+    out.update(owned=out["total"] - out["from_trade"], free=max(0, out["total"] - used))
+    if not 0 <= out["total"] <= 100_000 or any(v < 0 for v in out.values()):
+        raise PointerError("implausible", "Civilian factories out of range - layout does not match")
+    return out
+
+
+
+def construction_slots(memory, country: int) -> tuple[int, list[int]]:
+    """(address of the line pointer array, [line pointers]) of the country's construction queue."""
+    status = _ptr(memory, country + PRODUCTION_STATUS)
+    if status is None:
+        raise PointerError("no_production", "The country's production status is not readable")
+    lines = read_array(memory, status + CONSTRUCTION_LINES, 5000)
+    data = _ptr(memory, status + CONSTRUCTION_LINES)
+    if lines and data is None or None in lines:
+        raise PointerError("unreadable", "The construction queue is not readable")
+    return data or 0, lines
+
+
+def write_construction_order(writer, data: int, lines: list[int], order: list[int]) -> int:
+    """Puts the queue in `order` (indices into `lines`, the pointers read at `data`): pointer array slots and each
+    line's position field; returns how many slots changed. The same lines must stay in the queue."""
+    if sorted(order) != list(range(len(lines))):
+        raise PointerError("implausible", "The new order is not a permutation of the queue")
+    changed = 0
+    for i, k in enumerate(order):
+        if k != i:
+            writer.write(data + 8 * i, struct.pack("<Q", lines[k]))
+            changed += 1
+    for i, k in enumerate(order):
+        pos = writer.read(lines[k] + LINE_POSITION, 4)
+        if pos is None or struct.unpack("<i", pos)[0] != i:
+            writer.write(lines[k] + LINE_POSITION, struct.pack("<i", i))
+    return changed

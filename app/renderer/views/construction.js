@@ -3,6 +3,7 @@
 import { h, notice, viewHeader } from '../lib/dom.js';
 import { livePanel } from '../lib/refresh.js';
 import { countryPicker, tagChip } from './shared.js';
+import { setSortEnabled, sortEnabled } from '../lib/construction-sort.js';
 
 /** "87%" - progress of the level being built, cut to whole percent like the game tooltip. */
 export function progressPct(progress) {
@@ -84,6 +85,30 @@ function lineRow(l) {
     `${l.factories}/${l.max_factories}`));
 }
 
+const TASKS = [['consumer_goods', 'Consumer Goods'], ['market_contracts', 'Market Contracts'],
+  ['national_projects', 'National Projects'], ['traded_goods', 'Traded Goods']];
+
+/** "161/161 · From trade: 38 · Owned: 123" like the game's construction screen header. */
+export function factoriesHead(f) {
+  return `${f.total}/${f.total} · From trade: ${f.from_trade} · Owned: ${f.owned}`;
+}
+
+/** Civilian factories and what they are used for, laid out like the game's construction screen. */
+function factoriesBlock(f) {
+  if (!f) return null;
+  const row = (icon, label, value, title) => h('div', { class: 'cons-task', title },
+    icon ? h('img', { class: 'cons-task-icon', src: icon, alt: '' }) : h('span', { class: 'cons-task-icon' }),
+    h('span', { class: 'cons-task-name' }, label), h('span', { class: 'cons-task-value' }, value));
+  return h('div', { class: 'cons-factories' },
+    h('div', { class: 'cons-factories-head', title: `Civilian factories: ${factoriesHead(f)}` },
+      h('span', { class: 'cons-total', title: 'Civilian factories: all / all' }, `${f.total}/${f.total}`),
+      h('span', null, 'From trade: ', h('b', null, f.from_trade)),
+      h('span', null, 'Owned: ', h('b', null, f.owned))),
+    h('div', { class: 'cons-tasks' },
+      ...TASKS.map(([key, label]) => row(f.icons?.[key], label, f[key], `${label}: civilian factories used`)),
+      row(null, 'Construction', `${f.free}`, `Left for construction (all minus the tasks above); ${f.assigned} assigned to queue lines`)));
+}
+
 /** Construction queue tile (refreshable). Returns { el, refresh, stop }. */
 export function constructionPanel(ctx, tag) {
   return livePanel(ctx, {
@@ -96,10 +121,35 @@ export function constructionPanel(ctx, tag) {
         return;
       }
       body.replaceChildren(
+        factoriesBlock(res.data.factories),
         h('p', { class: 'muted research-summary' }, queueSummary(lines)),
         h('div', { class: 'construction-lines' }, lines.map(lineRow)));
     },
   });
+}
+
+/** "Civilian factories first" switch: the app keeps the player's queue sorted, civilian factories closest to
+ *  completion on top (LOCAL game memory write, single player only). Shows what a sort would move now. */
+function sortSwitch(ctx) {
+  const info = h('span', { class: 'muted cons-sort-info' });
+  const box = h('input', { type: 'checkbox', checked: sortEnabled() });
+  const preview = async () => {
+    try {
+      const r = await ctx.api.get('/api/live/construction/sort');
+      info.textContent = r.moved.length
+        ? `${r.tag}: ${r.moved.length} line${r.moved.length === 1 ? '' : 's'} would move`
+        : `${r.tag}: queue already in this order`;
+    } catch (err) {
+      info.textContent = `Not available: ${err.message}`;
+    }
+  };
+  box.addEventListener('change', () => { setSortEnabled(box.checked); preview(); });
+  preview();
+  return h('div', { class: 'cons-sort' },
+    h('label', { class: 'cons-sort-label', title: 'Your country only. The app moves civilian factories being built to the '
+      + 'top of the construction queue, the one with the most progress first, every few seconds while this is on. '
+      + 'Writes game memory on this computer only; refused in multiplayer.' },
+    box, h('span', null, 'Auto-sort: civilian factories closest to completion first')), info);
 }
 
 export default {
@@ -113,6 +163,7 @@ export default {
     root.append(
       viewHeader('Construction', 'What the selected country builds and has queued, with the progress of each line (game memory).', picker),
       h('div', { class: 'country-head research-head' }, tagChip(tag, 'tag-chip-lg')),
+      sortSwitch(ctx),
       tile.el);
     return () => tile.stop();
   },

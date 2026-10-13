@@ -19,6 +19,7 @@ from typing import Callable
 
 from ..integration.memory import ENCODINGS, MemoryAccessError, ProcessMemory, needles_for, scan
 from ..integration.memory_write import ProcessMemoryWriter
+from .. import construction as construction_mod
 from . import console, layout, pointers
 from .calibration import SCAN_LIMIT, CalibrationError, FieldCalibration, holds, scan_many, tolerance_for
 
@@ -540,15 +541,49 @@ class LiveService:
                 "read_at": self._clock()}
 
     def construction(self, tag: str) -> dict:
-        """Live construction queue of `tag` in queue order (game memory)."""
+        """Live construction queue of `tag` in queue order and its civilian factories by task (game memory)."""
         process = self._process()
         if not pointers.supported(process.get("version")):
             raise LiveError("unsupported_version", "Live construction reading is only verified for 1.19.3.0.c01a")
         key = (process["pid"], process.get("started"))
-        lines, date = self._with_country(process, tag, lambda mem, c: (
-            pointers.read_construction(mem, c, self._module_base[key]),
+        lines, factories, date = self._with_country(process, tag, lambda mem, c: (
+            pointers.read_construction(mem, c, self._module_base[key]), pointers.read_civilian_factories(mem, c),
             pointers.read_date(mem, self._module_base[key])))
-        return {"lines": lines, "date": date, "tag": tag, "read_at": self._clock()}
+        return {"lines": lines, "factories": factories, "date": date, "tag": tag, "read_at": self._clock()}
+
+    def sort_construction(self, apply: bool) -> dict:
+        """Civilian factories with the most progress first in the PLAYER's construction queue (see
+        construction.civilian_first_order). apply=False only reports the new order; apply=True writes it into game
+        memory (LOCAL write, single player only) and checks it by reading the queue again."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Queue sorting is only available for the verified game version")
+        if apply:
+            self._require_single_player()
+        tag = self.player_tag(process)
+        key = (process["pid"], process.get("started"))
+
+        def run(mem, country):
+            lines = pointers.read_construction(mem, country, self._module_base[key])
+            data, slots = pointers.construction_slots(mem, country)
+            if len(slots) != len(lines):
+                raise LiveError("queue_changed", "The construction queue changed while it was read - try again")
+            order = construction_mod.civilian_first_order(lines)
+            changed = 0
+            if apply and order != list(range(len(lines))):
+                changed = pointers.write_construction_order(mem, data, slots, order)
+                if pointers.construction_slots(mem, country)[1] != [slots[k] for k in order]:
+                    raise LiveError("not_held", "The construction queue did not hold the new order")
+            return lines, order, changed
+        lines, order, changed = self._with_country(process, tag, run, writer=apply)
+        if changed:
+            self.log.warning("LOCAL memory write %s construction queue: civilian factories by progress, %d slots moved",
+                             tag, changed)
+        moved = [{"from": k + 1, "to": i + 1, "building": lines[k]["building"], "location": lines[k]["location"],
+                  "progress": lines[k]["produced"] / lines[k]["cost"] if lines[k]["cost"] else None}
+                 for i, k in enumerate(order) if k != i]
+        return {"tag": tag, "sorted": not moved or bool(changed), "applied": bool(changed), "moved": moved,
+                "scope": "local" if changed else None, "read_at": self._clock()}
 
     def advisors(self, tag: str) -> dict:
         """Live hired advisors and staff of `tag`: [{"slot", "id": character id}] (game memory)."""

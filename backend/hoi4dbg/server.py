@@ -67,6 +67,11 @@ def build_routes(svc: DebuggerService) -> list[Route]:
                                       str(body.get("tag") or "").upper() or None,
                                       _number(before) if before is not None else None)
 
+    def construction_sort(body: dict) -> dict:
+        if body.get("confirm_local") is not True:
+            raise LiveError("not_confirmed", "Direct memory writes must be enabled explicitly (local only)")
+        return svc.construction_sort(apply=True)
+
     def calibration(body: dict) -> dict:
         field, action = str(body.get("field", "")), body.get("action")
         if action == "start":
@@ -111,6 +116,8 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("GET", "/api/live/values", lambda q, b: {"data": live().values(_str(q, "tag").upper() or None)}),
         r("POST", "/api/live/calibration", lambda q, b: calibration(b)),
         r("POST", "/api/live/write", lambda q, b: live_write(b)),
+        r("GET", "/api/live/construction/sort", lambda q, b: svc.construction_sort(apply=False)),
+        r("POST", "/api/live/construction/sort", lambda q, b: construction_sort(b)),
         r("GET", "/api/live/stockpile", lambda q, b: svc.live_stockpile(_str(q, "tag").upper() or None)),
         r("POST", "/api/live/stockpile", lambda q, b: stockpile_write(b)),
         r("POST", "/api/live/operations", lambda q, b: live().create_operation(

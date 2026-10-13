@@ -926,8 +926,33 @@ class DebuggerService:
         for row in out:
             frame = (defs.get(row["building"]) or {}).get("icon_frame")
             row["icon"] = gfx.frame_data_uri(strip[0], frame, strip[1]) if strip and frame else None
-        return envelope(LIVE, {"tag": tag, "lines": out, "construction_source": "live", "game_date": found.get("date")},
+        factories = found.get("factories")
+        if factories:
+            sprites = gfx.sprites(roots)
+            icons = {task: gfx.icon_data_uri(sprites[name]) if sprites.get(name) else None
+                     for task, name in construction_mod.TASK_SPRITES.items()}
+            factories = {**factories, "assigned": sum(row["factories"] for row in out), "icons": icons}
+        return envelope(LIVE, {"tag": tag, "lines": out, "factories": factories, "construction_source": "live",
+                               "game_date": found.get("date")},
                         "Construction queue from game memory.")
+
+    def construction_sort(self, apply: bool) -> dict:
+        """Player's construction queue with civilian factories closest to completion first (live/service.py
+        sort_construction); moved lines named by their state like the construction tab."""
+        if self.live is None:
+            from .live.service import LiveError   # live is optional (--no-game): imported only here
+            raise LiveError("disabled", "Live game access is disabled (--no-game)")
+        res = self.live.sort_construction(apply)
+        install = self._install_path()
+        if install is not None:
+            names = gamefiles.state_names(install)
+            provinces = {p: sid for sid, d in gamefiles.state_definitions(install).items() for p in d["provinces"]}
+            defs = construction_mod.buildings(self._game_roots(install))
+            for m in res["moved"]:
+                loc = m["location"]
+                state = provinces.get(loc) if (defs.get(m["building"]) or {}).get("provincial") else loc
+                m["state_name"] = names.get(f"STATE_{state}") if state is not None else None
+        return res
 
     def research_tabs(self) -> dict:
         """Tabs of the research screen (technology folders) for the installed game, enabled mods and owned DLCs,

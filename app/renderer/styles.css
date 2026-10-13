@@ -553,6 +553,18 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
 .construction-name { font-size: 12px; }
 .construction-eta { font-size: 12px; }
 .construction-repair { border-color: #8a5a2b; }
+.cons-sort { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0 0 10px; }
+.cons-sort-label { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; }
+.cons-sort-info { font-size: 12px; }
+.cons-factories { border: 1px solid var(--hoi-trim); border-radius: 3px; background: #1c1a12; padding: 8px 10px; margin-bottom: 10px; }
+.cons-factories-head { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; margin-bottom: 6px; color: var(--hoi-text); }
+.cons-total { font-size: 18px; font-weight: 700; color: var(--hoi-pos); }
+.cons-tasks { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px 14px; }
+.cons-task { display: grid; grid-template-columns: 36px 1fr auto; align-items: center; gap: 8px; color: var(--hoi-text); }
+.cons-task-icon { width: 36px; height: 30px; object-fit: contain; }
+.cons-task-name { font-weight: 600; }
+.cons-task-value { min-width: 34px; text-align: center; font-weight: 700; background: #0e100c; border: 1px solid #4a4430;
+  border-radius: 2px; padding: 1px 6px; }
 .construction-action { display: inline-block; padding: 0 6px; border-radius: 3px; font-size: 11px; font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.03em; }
 .construction-action-build { background: #2e3b22; color: #b9d98a; }

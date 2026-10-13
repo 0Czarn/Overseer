@@ -125,6 +125,17 @@ ZROBIONE
             Kolej wg podpowiedzi gry (cons_fra.png, FRA "Constantine - Algiers"): +0x48 = "Railways needed" (4),
             +0x70/+0x74 = poziom kolei z/do (2 -> 3), czas 67 dni = gra; końce trasy nazwane jak w grze:
             VICTORY_POINTS_<prowincja>, bez nazwy - stan ("Bizerte - Tunis", "Tunis - Tunisia").
+            FABRYKI CYWILNE (2026-10-13, prośba użytkownika, cons_goods.png SOV 1941: 161/161, z handlu 38, własne
+            123, consumer goods 60, market contracts 1, national projects 5, traded goods 3 - wszystko = gra):
+            CProductionStatus int32: +0x43C wszystkie, +0x3C8 z handlu, +0x440 consumer goods, +0x4A0 market
+            contracts, +0x458 national projects, +0x488 traded goods; własne = wszystkie - z handlu; na budowę =
+            wszystkie - zadania (SOV 92 = suma fabryk przy liniach kolejki). 439 państw bez błędu. Ikony zadań z gry.
+            AUTO-SORT KOLEJKI (2026-10-13, prośba użytkownika, civ_przed.png -> civ_po.png): przełącznik w zakładce
+            Construction (domyślnie wyłączony, zapamiętany lokalnie). Co 3 s aplikacja ustawia fabryki cywilne w
+            budowie na górze kolejki GRACZA, od największego postępu; reszta (naprawy, inne budynki, kolej) bez zmian
+            pod nimi. Zapis do pamięci: zamiana wskaźników w tablicy linii (CProductionStatus+0x70) + pozycja linii
+            +0x44 (= indeks), potem ponowny odczyt i sprawdzenie. Tylko singleplayer, tylko państwo gracza.
+            [x] TEST W GRZE (2026-10-13, użytkownik, nowa gra USA): działa.
             [ ] odczyt z zapisu, gdy gra nie działa.
 [x] ZAKŁADKA RESEARCH (2026-10-11, nowa, na życzenie użytkownika): wybór państwa + kafelek "Research slots"
             [Live | On refresh]: liczba slotów, co bada każdy slot (nazwa, ikona z gry, id), premia szybkości slotu.

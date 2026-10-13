@@ -1076,6 +1076,41 @@ class IdeaPointerTests(unittest.TestCase):
         with self.assertRaises(pointers.PointerError):
             pointers.read_construction(mem, country, module)
 
+    def test_read_civilian_factories(self):
+        mem = FakeMemory(0x4000)
+        country, status = BASE + 0x100, BASE + 0x400
+        mem.put(country + pointers.PRODUCTION_STATUS, "Q", status)
+        # SOV 1941 (game construction screen): 161/161, from trade 38, consumer goods 60, market 1, projects 5, traded 3
+        for key, value in {"total": 161, "from_trade": 38, "consumer_goods": 60, "market_contracts": 1,
+                           "national_projects": 5, "traded_goods": 3}.items():
+            mem.put(status + pointers.FACTORIES[key], "i", value)
+        self.assertEqual(pointers.read_civilian_factories(mem, country), {
+            "total": 161, "from_trade": 38, "owned": 123, "consumer_goods": 60, "market_contracts": 1,
+            "national_projects": 5, "traded_goods": 3, "free": 92})
+        mem.put(status + pointers.FACTORIES["from_trade"], "i", 200)   # more from trade than all: wrong layout
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_civilian_factories(mem, country)
+
+    def test_write_construction_order(self):
+        mem = FakeMemory(0x4000)
+        mem.write = lambda address, data: mem.put(address, f"{len(data)}s", data)
+        country, status, array = BASE + 0x100, BASE + 0x400, BASE + 0x500
+        lines = [BASE + 0x800 + 0x100 * i for i in range(3)]
+        mem.put(country + pointers.PRODUCTION_STATUS, "Q", status)
+        mem.put(status + pointers.CONSTRUCTION_LINES, "Q", array)
+        mem.put(status + pointers.CONSTRUCTION_LINES + 8, "i", 4)
+        mem.put(status + pointers.CONSTRUCTION_LINES + 12, "i", 3)
+        for i, line in enumerate(lines):
+            mem.put(array + 8 * i, "Q", line)
+            mem.put(line + pointers.LINE_POSITION, "i", i)
+        data, slots = pointers.construction_slots(mem, country)
+        self.assertEqual((data, slots), (array, lines))
+        self.assertEqual(pointers.write_construction_order(mem, data, slots, [2, 0, 1]), 3)
+        self.assertEqual(pointers.construction_slots(mem, country)[1], [lines[2], lines[0], lines[1]])
+        self.assertEqual([struct.unpack("<i", mem.read(line + pointers.LINE_POSITION, 4))[0] for line in lines], [1, 2, 0])
+        with self.assertRaises(pointers.PointerError):   # a line lost or doubled: refused before any write
+            pointers.write_construction_order(mem, data, slots, [0, 0, 1])
+
     def test_read_research(self):
         mem = FakeMemory(0x4000)
         country, status, array = BASE + 0x100, BASE + 0x400, BASE + 0x600

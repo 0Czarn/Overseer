@@ -11,6 +11,9 @@ from pathlib import Path
 from .saves import text
 
 STRIP_SPRITE = "GFX_buildings_strip"
+# icons of the civilian factory tasks on the game's construction screen (interface/countryconstructionsview.gfx)
+TASK_SPRITES = {"consumer_goods": "GFX_consumer_goods_icon", "market_contracts": "GFX_ongoing_market_contract_icon",
+                "national_projects": "GFX_special_project_icon", "traded_goods": "GFX_traded_factories_icon"}
 STRIP_RE = re.compile(r'name\s*=\s*"?' + STRIP_SPRITE + r'"?\s*texturefile\s*=\s*"([^"]+)"\s*noOfFrames\s*=\s*(\d+)', re.I)
 
 
@@ -131,3 +134,15 @@ def rows(lines: list[dict], names: dict[str, str], state_names: dict[str, str], 
                     "max_factories": max_factories, "days_left": days,
                     "next_complete": game_date_after(today, days) if today and days is not None else None})
     return out
+
+
+def civilian_first_order(lines: list[dict]) -> list[int]:
+    """New queue order (indices into `lines`): civilian factories being built on top, the one closest to completion
+    first (it gets the factories and finishes soonest, then builds more), the rest below in its own order. Repairs
+    and other buildings keep their relative order; equal progress keeps the current order."""
+    def civilian(line: dict) -> bool:
+        return line["kind"] == "building" and line["building"] == "industrial_complex" and line["levels"] > 0
+    civ = sorted((i for i, line in enumerate(lines) if civilian(line)),
+                 key=lambda i: -(lines[i]["produced"] / lines[i]["cost"] if lines[i]["cost"] else 0))
+    picked = set(civ)
+    return civ + [i for i in range(len(lines)) if i not in picked]

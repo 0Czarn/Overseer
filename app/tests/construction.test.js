@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { actionText, completeText, placeText, pointsText, progressPct, queueSummary } from '../renderer/views/construction.js';
+import { sortMessage } from '../renderer/lib/construction-sort.js';
+import { actionText, completeText, factoriesHead, placeText, pointsText, progressPct, queueSummary } from '../renderer/views/construction.js';
 
 test('construction progress cut like the game tooltip (SOV Krasnoyarsk: 6309/7200 (87%))', () => {
   assert.equal(progressPct(6309.79 / 7200), '87%');
@@ -40,4 +41,16 @@ test('railway line like the game tooltip (FRA Constantine - Algiers)', () => {
   assert.equal(actionText({ action: 'build', levels: 4, repair: 0, railway_levels: [2, 3] }),
     'upgrading level 2 railways to level 3 · 4 railways needed');
   assert.equal(actionText({ action: 'build', levels: 1, repair: 0, railway_levels: [0, 1] }), 'new railways to level 1 · 1 railway needed');
+});
+
+test('civilian factories header like the game (SOV 1941: 161/161, from trade 38, owned 123)', () => {
+  assert.equal(factoriesHead({ total: 161, from_trade: 38, owned: 123 }), '161/161 · From trade: 38 · Owned: 123');
+});
+
+test('auto-sort message only when the queue was changed', () => {
+  assert.equal(sortMessage({ applied: false, moved: [] }), null);
+  assert.equal(sortMessage({ applied: true, moved: [
+    { building: 'industrial_complex', location: 568, state_name: 'Krasnoyarsk', progress: 0.876, to: 1 },
+    { building: 'arms_factory', location: 400, progress: 0.5, to: 2 }] }),
+  'Construction queue sorted (2 moved): Krasnoyarsk 87% → 1');
 });
