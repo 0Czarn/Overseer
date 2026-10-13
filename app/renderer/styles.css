@@ -549,6 +549,11 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
 .mil-part { margin-top: 6px; }
 .mil-part-title { font-size: 12px; font-weight: 700; color: #7fbf4f; }
 .mil-part-list { display: flex; flex-direction: column; font-size: 12px; }
+.mil-designer { margin-top: 8px; border-top: 1px dotted #3c3826; padding-top: 6px; }
+.mil-designer > summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--hoi-text); }
+.mil-designer-grid { display: grid; grid-template-columns: 1fr; gap: 6px; margin-top: 6px; font-size: 12px; }
+.mil-designer-group .hoi-line { font-size: 12px; }
+.mil-designer-note { margin: 4px 0 0; font-size: 11px; }
 .mil-roles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
 .mil-role { border: 1px solid var(--hoi-trim); border-radius: 3px; background: #1c1a12; padding: 8px 10px; color: var(--hoi-text);
   display: flex; flex-direction: column; gap: 4px; }

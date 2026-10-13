@@ -1269,8 +1269,9 @@ class IdeaPointerTests(unittest.TestCase):
         mem.put(inf + pointers.SUBUNIT_ID + 24, "Q", 15)
         mem.put(empty + pointers.SUBUNIT_ID + 24, "Q", 15)   # an empty slot: empty id
         mem.put(country + pointers.ARMY["manpower_field"], "i", 4345676)
+        mem.put(country + pointers.ARMY["manpower_training"], "i", 295000)
         army = pointers.read_army(mem, country)
-        self.assertEqual((army["divisions"], army["manpower_field"]), (2, 4345676))
+        self.assertEqual((army["divisions"], army["manpower_field"], army["manpower_training"]), (2, 4345676, 295000))
         self.assertEqual((army["templates"][0]["name"], army["templates"][0]["count"], army["templates"][0]["battalions"]),
                          ("Strelkovaya", 2, ["infantry", "infantry"]))
         # I-16 design stats (Air.png)
@@ -1280,6 +1281,48 @@ class IdeaPointerTests(unittest.TestCase):
         stats = pointers.plane_stats(mem, variant)
         self.assertEqual((stats["range"], stats["air_agility"], stats["reliability"]), (550.0, 43.0, 0.8))
         self.assertIsNone(pointers.plane_stats(mem, BASE + 0x2800))   # no agility / speed: not a plane
+
+    def test_read_free_manpower(self):
+        # SOV 1941: free manpower = available manpower of the states SOV controls (an occupied state does not count)
+        mem = FakeMemory(0x4000)
+        module, table, array = BASE + 0x3000 - pointers.COUNTRY_TABLE[0], BASE + 0x3000 + 0x10, BASE + 0x80
+        mem.put(module + pointers.COUNTRY_TABLE[0], "Q", table)
+        states = [BASE + 0x10_0000 + 0x1000 * i for i in range(3)]
+        mem.put(table + pointers.STATES, "Q", array)
+        mem.put(table + pointers.STATES + 8, "i", 4)
+        mem.put(table + pointers.STATES + 12, "i", 4)
+        tags = ["GER", "SOV"]
+        for i, (state, owner, controller, available) in enumerate(zip(states, (2, 2, 1), (2, 1, 2), (181341, 1008, 280225))):
+            mem.put(array + 8 * (i + 1), "Q", state)   # slot 0 empty: indexed by state id
+            mem.put(state + pointers.STATE["owner"], "i", owner)
+            mem.put(state + pointers.STATE["controller"], "i", controller)
+            mem.put(state + pointers.STATE["available"], "i", available)
+        self.assertEqual(pointers.read_free_manpower(mem, module, tags, "SOV"), 461566)
+        self.assertEqual(pointers.read_free_manpower(mem, module, tags, "GER"), 1008)
+        mem.put(states[0] + pointers.STATE["available"], "i", -1)
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_free_manpower(mem, module, tags, "SOV")
+
+    def test_read_designs(self):
+        # SOV 1941: the newest design of each equipment type (PPSz-41) with its land stats
+        mem = FakeMemory(0x4000)
+        country, production, array, variant, etype = BASE + 0x100, BASE + 0x200, BASE + 0x300, BASE + 0x1000, BASE + 0x800
+        mem.put(country + pointers.STOCKPILE["production"], "Q", production)
+        mem.put(production + pointers.DESIGNS["current"], "Q", array)
+        mem.put(production + pointers.DESIGNS["current"] + 8, "i", 1)
+        mem.put(production + pointers.DESIGNS["current"] + 12, "i", 1)
+        mem.put(array, "Q", variant)
+        mem.put(variant + pointers.DESIGNS["type"], "Q", etype)
+        self._string(mem, etype + pointers.DESIGNS["type_id"], "infantry_equipment_2")
+        self._string(mem, variant + pointers.VARIANT["name"], "PPSz-41")
+        for key, value in (("soft_attack", 10.215), ("hard_attack", 1.875), ("reliability", 0.972)):
+            mem.put(variant + pointers.LAND_STATS[key], "q", round(value * 100000))
+        [d] = pointers.read_designs(mem, country)
+        self.assertEqual((d["type"], d["name"], d["stats"]["soft_attack"], d["stats"]["hard_attack"], d["stats"]["reliability"]),
+                         ("infantry_equipment_2", "PPSz-41", 10.215, 1.875, 0.972))
+        mem.put(variant + pointers.LAND_STATS["reliability"], "q", -100000)
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_designs(mem, country)
 
     def test_read_research(self):
         mem = FakeMemory(0x4000)

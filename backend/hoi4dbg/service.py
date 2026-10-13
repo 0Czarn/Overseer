@@ -18,6 +18,7 @@ import time
 from . import __version__, construction as construction_mod, doctrines as doctrines_mod, geography, trade as trade_mod, deficit, demo, equipment_changes, gamefiles, gfx, modifiers
 from . import government as government_mod
 from . import mio as mio_mod
+from . import divisions as divisions_mod
 from . import focus as focus_mod
 from . import techtree
 from .applog import RingBufferHandler
@@ -1233,6 +1234,7 @@ class DebuggerService:
         except Exception as exc:  # game not running, main menu, other version
             return envelope(UNAVAILABLE, None, f"Needs the running game: {exc}")
         army, navy, air, reserve = found["army"], found["navy"], found["air"], found["air_reserve"]
+        self._division_stats(install, army["templates"], found)
         ids = {u for t in army["templates"] for k in ("battalions", "support", "regimental") for u in t[k]}
         ids |= {sh["type"] for sh in navy["ships"]} | {g["role"] for g in air}
         stat_keys = {k for g in air + reserve for k in (g["stats"] or {})}
@@ -1267,6 +1269,36 @@ class DebuggerService:
             "army": army, "navy": navy_out,
             "air": {"planes": sum(g["planes"] for g in air), "wings": air, "reserve": reserve, "stat_labels": stat_label},
         }, "Army, air force and navy from game memory.")
+
+    def _division_stats(self, install: Path, templates: list[dict], found: dict) -> None:
+        """Adds "designer" (stats like the game's division designer, divisions.py) to each template; an estimate when
+        a needed equipment type has several current designs (tanks)."""
+        roots = self._game_roots(install)
+        try:
+            tabs = divisions_mod.tables(roots)
+            archetypes = deficit.tables(install, [Path(r) for r in roots[1:]])[1]
+            mods, mults = divisions_mod.bonuses(tabs, found.get("researched") or [], found.get("doctrine_state") or [],
+                                                doctrines_mod.definitions(roots))
+        except Exception as exc:  # broken game files must not hide the army
+            self.log.warning("Division designer stats unavailable: %s", exc)
+            return
+        equipment: dict[str, dict] = {}
+        several: set[str] = set()
+        for d in found.get("designs") or []:
+            arch = deficit.archetype_of(d["type"], archetypes)
+            if arch in equipment:
+                several.add(arch)
+            else:
+                equipment[arch] = {**d["stats"], "design": d["name"]}
+        for t in templates:
+            res = divisions_mod.template_stats(t, tabs, equipment, mods, mults)
+            if res is None:
+                continue
+            needs = {a for u in t["battalions"] + t["support"] + t["regimental"]
+                     for a in tabs["units"].get(u, {}).get("need", {})}
+            res["estimate"] = sorted(needs & several)
+            res["designs"] = {a: equipment[a]["design"] for a in sorted(needs) if equipment.get(a, {}).get("design")}
+            t["designer"] = res
 
     def research_tabs(self) -> dict:
         """Tabs of the research screen (technology folders) for the installed game, enabled mods and owned DLCs,

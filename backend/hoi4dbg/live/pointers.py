@@ -1088,14 +1088,25 @@ def read_doctrine_state(memory, module_base: int, tags: list[str], tag: str) -> 
 # + 0x68 battalion grid (CSubUnitDefinition*, empty slots have an empty id), + 0x88 support companies, + 0xa8
 # regimental support; CSubUnitDefinition + 0x18 = its id ("infantry"). Strelkovaya Diviziya 350 / NKVD 15 /
 # Gornostrelkovaya 13 / Mekhanizirovaniy Korpus 12 as the game; country + 0x348 = manpower in the field (4.35M,
-# "4M"). Navy: country + 0x278 = array of CFleet* (5), fleet + 0xb8 = CTaskForce* (9), task force + 0x348 =
+# "4M"), + 0x338 = in training (int32; SOV 1941-11-01: 4 447 000 / 295 000, the game rounds both lines to two
+# significant digits: "4.40M" / "300.00K", army "4.70M"). Navy: country + 0x278 = array of CFleet* (5), fleet +
+# 0xb8 = CTaskForce* (9), task force + 0x348 =
 # CShip* (119: 93 submarines, 18 destroyers, 5 light cruisers, 3 battleships); ship + 0x98 = type id, + 0x60 =
 # variants (CEquipmentVariant*, its name = the class). Air: [game state + 0x690] = CStrategicAirManager, + 0x30 =
 # array of CStrategicAir* by country slot; + 0x58 = its pools (CAirWingPool*): + 0x20 the role (CSubUnitDefinition,
 # "fighter"), + 0x28 the wings (CAirWing*): + 0x1f8 = entries of 16 bytes (CEquipmentVariant*, planes fixed64) -
 # I-16 100 fighters and DB-3 100 tactical bombers (an I-15 wing at the same air base is SIK's). A plane design's
 # stats are fixed64 in the variant (PLANE_STATS, all equal to the game's design tooltip of the I-16).
-ARMY = {"divisions": 0x290, "templates": 0x1B8, "division_template": 0x3B8, "manpower_field": 0x348}
+ARMY = {"divisions": 0x290, "templates": 0x1B8, "division_template": 0x3B8, "manpower_field": 0x348,
+        "manpower_training": 0x338}
+# Free manpower (2026-10-13, SOV 1941-11-01): kept per state, as manpower_pool = { available locked total } in the
+# save. [game state + 0x2c8] = array of CState* indexed by state id (1082 slots, slot 0 empty); state + 0xc8 = owner,
+# + 0xcc = controller (country slot = tag index + 1, owner 439/439 tags equal to the owned state count), + 0x848 /
+# + 0x84c / + 0x850 = available / locked / total (int32). Two `manpower 100000` in a paused game changed + 0x848 in
+# 141 states by exactly 100 000 in all; the available manpower of the states SOV controls = 461 566 = the game's
+# "Free Manpower: 461.56K" (by owner: 462 574 - occupied states do not count).
+STATES = 0x2C8
+STATE = {"owner": 0xC8, "controller": 0xCC, "available": 0x848, "locked": 0x84C, "total": 0x850}
 DIVISION_TEMPLATE = {"name": 0x20, "battalions": 0x68, "support": 0x88, "regimental": 0xA8}
 SUBUNIT_ID = 0x18
 NAVY = {"fleets": 0x278, "task_forces": 0xB8, "ships": 0x348, "ship_type": 0x98, "ship_variants": 0x60}
@@ -1133,11 +1144,31 @@ def read_army(memory, country: int) -> dict:
             raise PointerError("implausible", "A division template has no readable name - layout does not match")
         templates.append({"name": name, "count": counts.get(t, 0),
                           **{k: _id_list(memory, t + DIVISION_TEMPLATE[k]) for k in ("battalions", "support", "regimental")}})
-    raw = memory.read(country + ARMY["manpower_field"], 4)
-    field = struct.unpack("<i", raw)[0] if raw else None   # int32 (the next 4 bytes are another field)
-    if field is not None and not 0 <= field < 10**10:
-        raise PointerError("implausible", "Manpower in the field out of range - layout does not match")
-    return {"divisions": len(divisions), "manpower_field": field, "templates": templates}
+    men = {}
+    for key in ("manpower_field", "manpower_training"):
+        raw = memory.read(country + ARMY[key], 4)
+        men[key] = struct.unpack("<i", raw)[0] if raw else None   # int32 (the next 4 bytes are another field)
+        if men[key] is not None and not 0 <= men[key] < 10**9:
+            raise PointerError("implausible", f"{key} out of range - layout does not match")
+    return {"divisions": len(divisions), **men, "templates": templates}
+
+
+def read_free_manpower(memory, module_base: int, tags: list[str], tag: str) -> int:
+    """Free manpower of `tag`: the available manpower of the states it controls (game memory)."""
+    table = _ptr(memory, module_base + COUNTRY_TABLE[0])
+    if table is None:
+        raise PointerError("no_country_table", "The game state is not readable")
+    slot = tags.index(tag) + 1
+    total = 0
+    for state in read_array(memory, table + STATES, 5000):
+        raw = memory.read(state + STATE["controller"], 4) if state else None
+        if not raw or struct.unpack("<i", raw)[0] != slot:
+            continue
+        available = struct.unpack("<i", memory.read(state + STATE["available"], 4) or b"\0\0\0\0")[0]
+        if not 0 <= available < 10**9:
+            raise PointerError("implausible", "State manpower out of range - layout does not match")
+        total += available
+    return total
 
 
 def _variant_entries(memory, address: int, limit: int = 20) -> list[tuple[int, float]]:
@@ -1177,6 +1208,39 @@ def plane_stats(memory, variant: int) -> dict[str, float] | None:
         return None
     stats = {k: round(struct.unpack_from("<q", raw, off)[0] / 100000, 4) for k, off in PLANE_STATS.items()}
     return stats if stats["air_agility"] > 0 and stats["maximum_speed"] > 0 else None
+
+
+# Equipment designs the division designer uses (2026-10-13, SOV 1941): [country + 0xf68] (production) + 0xb8 = array
+# of CEquipmentVariant* - the newest design of each equipment type (47 for SOV: PPSz-41, 122-mm M-30, Plot. M1940 25 mm
+# as the designer's equipment list; one per archetype for land equipment without a designer; tanks, planes and ships
+# have several). + 0xa0 = all the country's designs (92). Variant + 0x3f0 = CEquipmentType (+ 0x18 = its id, std::string),
+# + 0x28 = design name; land stats fixed64 / 100000 with the equipment bonuses included (PPSz-41: hard attack 1.875 =
+# 1.5 + 25% army spirit, soft attack 10.215, reliability 0.972; tanks: hardness 0.8 / 0.85 / 0.95 for light / medium /
+# heavy, BT-7 armor 31.25).
+DESIGNS = {"current": 0xB8, "all": 0xA0, "type": 0x3F0, "type_id": 0x18}
+LAND_STATS = {"defense": 0x108, "breakthrough": 0x110, "hardness": 0x118, "soft_attack": 0x120, "hard_attack": 0x128,
+              "air_attack": 0x280, "maximum_speed": 0x2F0, "armor_value": 0x2F8, "ap_attack": 0x300, "reliability": 0x308,
+              "build_cost_ic": 0x368}
+
+
+def read_designs(memory, country: int) -> list[dict]:
+    """[{"type": equipment id, "name": design name or "", "stats": {LAND_STATS}}] of the newest design of each
+    equipment type (what the division designer uses)."""
+    production = _ptr(memory, country + STOCKPILE["production"])
+    if production is None:
+        raise PointerError("unreadable", "Production object of the country is not readable")
+    out = []
+    for variant in read_array(memory, production + DESIGNS["current"], 2000):
+        etype = _ptr(memory, variant + DESIGNS["type"]) if variant else None
+        type_id = _msvc_string(memory, etype + DESIGNS["type_id"], 120) if etype else None
+        raw = memory.read(variant, 0x370) if type_id else None
+        if not raw:
+            continue
+        stats = {k: round(struct.unpack_from("<q", raw, off)[0] / 100000, 5) for k, off in LAND_STATS.items()}
+        if not 0 <= stats["reliability"] <= 2:
+            raise PointerError("implausible", "Design reliability out of range - layout does not match")
+        out.append({"type": type_id, "name": _msvc_string(memory, variant + VARIANT["name"], 120) or "", "stats": stats})
+    return out
 
 
 def read_air(memory, module_base: int, tags: list[str], tag: str) -> list[dict]:

@@ -647,17 +647,23 @@ class LiveService:
         return {"folders": folders, "tag": tag, "read_at": self._clock()}
 
     def military(self, tag: str) -> dict:
-        """Live army (divisions, templates, manpower in the field), navy (fleets, task forces, ships) and air force
-        (wings by role and design, planes in the stockpile) of `tag` (game memory)."""
+        """Live army (divisions, templates, free manpower, manpower in the field and in training), navy (fleets, task
+        forces, ships) and air force (wings by role and design, planes in the stockpile) of `tag` (game memory), with
+        what the division designer needs: the newest equipment designs, researched technologies, doctrine state."""
         process = self._process()
         if not pointers.supported(process.get("version")):
             raise LiveError("unsupported_version", "Live military reading is only verified for 1.19.3.0.c01a")
         key = (process["pid"], process.get("started"))
         tags = self._tags.setdefault(process.get("install") or "", pointers.tag_order(Path(process.get("install") or "")))
-        army, navy, air, reserve = self._with_country(process, tag, lambda mem, c: (
-            pointers.read_army(mem, c), pointers.read_navy(mem, c),
-            pointers.read_air(mem, self._module_base[key], tags, tag), pointers.read_stockpile_planes(mem, c)))
-        return {"army": army, "navy": navy, "air": air, "air_reserve": reserve, "tag": tag, "read_at": self._clock()}
+        army, navy, air, reserve, free, designs, researched, doctrine_state = self._with_country(
+            process, tag, lambda mem, c: (
+                pointers.read_army(mem, c), pointers.read_navy(mem, c),
+                pointers.read_air(mem, self._module_base[key], tags, tag), pointers.read_stockpile_planes(mem, c),
+                pointers.read_free_manpower(mem, self._module_base[key], tags, tag), pointers.read_designs(mem, c),
+                pointers.read_researched(mem, c), pointers.read_doctrine_state(mem, self._module_base[key], tags, tag)))
+        army["manpower_free"] = free
+        return {"army": army, "navy": navy, "air": air, "air_reserve": reserve, "designs": designs,
+                "researched": researched, "doctrine_state": doctrine_state, "tag": tag, "read_at": self._clock()}
 
     def advisors(self, tag: str) -> dict:
         """Live hired advisors and staff of `tag`: [{"slot", "id": character id}] (game memory)."""

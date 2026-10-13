@@ -114,9 +114,33 @@ ZROBIONE
             polu (int32), +0x278 floty -> +0xB8 zespoły -> +0x348 statki (+0x98 typ, +0x60 klasa); [stan gry+0x690]
             CStrategicAirManager +0x30[numer państwa] -> CStrategicAir (+0x90 właściciel) +0x58 pule -> +0x20 rola,
             +0x28 skrzydła -> +0x1F8 (projekt, liczba). Właściciel skrzydła ≠ projektant (I-15 SIK na lotnisku SOV).
-            [ ] bazowe statystyki szablonu dywizji (jak projektant dywizji) - do zrobienia
-            [ ] dostępna siła ludzka (manpower) - pole nieustalone, potrzebna wartość z gry
-            [ ] ludzie w lotnictwie / marynarce (6K / 38K), wyposażenie armii (90%)
+            [x] STATYSTYKI SZABLONU JAK PROJEKTANT DYWIZJI (2026-10-13, dywizja.png, batalion-piech.png, *_eq.png;
+                SOV Strelkovaya Diviziya: 19/20 = gra). Gra NIE trzyma tych statystyk w pamięci (szukane w szablonie,
+                dywizjach i w całej pamięci 7,5 GB) - liczone w hoi4dbg/divisions.py z: common/units (statystyki,
+                need, kategorie, battalion_mult), najnowszy projekt każdego typu sprzętu Z PAMIĘCI ([produkcja]+0xB8,
+                wariant +0x3F0 typ, statystyki z premiami MIO/duchów armii: +0x108 obrona, +0x110 przełamanie, +0x118
+                twardość, +0x120/+0x128 atak miękki/twardy, +0x280 atak plot., +0x2F0 prędkość, +0x2F8 pancerz,
+                +0x300 przebicie, +0x308 niezawodność), zbadane technologie, doktryny (główna, subdoktryny, odblokowane
+                nagrody). Reguły: premie DODAJĄ się do własnego współczynnika jednostki (bateria AA 26 x (1-0,6+0,2)
+                = 15,6); battalion_mult w kompaniach wsparcia i w blokach technologii/doktryn (commandos: logistyka
+                +5 HP piechocie, add=yes przed mnożnikami: (25+5) x 1,1 = 33); org/odzyskiwanie = średnia, pancerz
+                0,3 max + 0,7 średnia, przebicie 0,4 max + 0,6 średnia; gra OBCINA wartości (122,96 -> 122,9).
+                Podpowiedź batalionu w projektancie = zmiana statystyk po usunięciu batalionu RAZEM z baterią pułku.
+                Kafelek Army: rozwijane "Division designer stats" w karcie szablonu (jak w grze: Base / Combat / Cost).
+                [ ] niezawodność: gra 95,5%, średnia po batalionach 92,9% - wzór nieznany (pokazywana z "≈")
+                [ ] czołgi/samoloty: kilka bieżących projektów jednego typu - brany pierwszy, oznaczone "estimate"
+                [ ] kamienie milowe doktryn nieliczone (nie wiadomo, kiedy się odblokowują)
+            [x] WOLNA SIŁA LUDZKA + W SZKOLENIU (2026-10-13, SOV 1941-11-01, manpower.png / Manpower2.png): gra trzyma
+                manpower W STANACH (save: manpower_pool = { available locked total }). [stan gry]+0x2C8 = tablica
+                CState* wg numeru stanu (1082), stan +0xC8 właściciel, +0xCC kontroler (numer państwa = indeks + 1),
+                +0x848/+0x84C/+0x850 available/locked/total. Dwa razy `manpower 100000` na pauzie: +0x848 w 141
+                stanach, suma dokładnie +100 000. Free = suma available stanów KONTROLOWANYCH: 461 566 = gra
+                "461.56K" (wg właściciela 462 574 - okupowane się nie liczą). Kraj +0x338 = w szkoleniu (295 000),
+                +0x348 = w polu (4 447 000); gra zaokrągla te wiersze do 2 cyfr znaczących ("300.00K", "4.40M").
+                Kafelek Army: Free manpower (jak w grze, obcięte do 2 miejsc), In the field, In training. Odczyt 0,2 s.
+            [ ] ludzie w lotnictwie / marynarce / garnizonie (6K / 38,1K / 59,43K) - nie są osobnym polem
+                (szukane w obiekcie państwa i 2 skokach dalej); gra liczy je z samolotów/statków/garnizonów
+            [ ] wyposażenie armii (90%), Total Manpower 4.64M (= 2,95% ludności rdzennej + 0,206% nierdzennej)
 [x] ZAKŁADKA DOCTRINES (2026-10-13, nowa, prośba użytkownika, Doktryny.png SOV 1941 - wartości = gra): foldery jak
             w grze (Land / Naval / Air / Special Forces), główna doktryna (ikona, nazwa, opis, efekty, taktyki), tory z
             subdoktryną, biegłością, biegłością w banku ("+68"), przyrostem dziennym i drabinką nagród I-V (próg,
