@@ -386,7 +386,8 @@ class DebuggerService:
                 live = self.live.focus(tag)
                 if live.get("tree"):
                     state = {"tree": live["tree"], "completed": live["completed"], "current": live["current"],
-                             "progress": live["progress_days"], "paused": False, "analysis": None, "source": "live"}
+                             "progress": live["progress_days"], "paused": False, "analysis": None, "source": "live",
+                             "date": live.get("date")}
             except Exception:  # game not running, main menu, other version: the save is the fallback
                 state = None
         if state is None:
@@ -447,7 +448,8 @@ class DebuggerService:
             "tag": tag, "tree": state["tree"], "current": state["current"], "progress_days": state["progress"],
             "paused": state["paused"], "completed": len(state["completed"]), "focuses": focuses,
             "queue": focus_mod.validate_queue(focuses, state, queue), "queue_supported": False,
-            "focus_source": state["source"], "layout": focus_mod.layout(focuses), **self._focus_graphics(focuses)}
+            "focus_source": state["source"], "game_date": state.get("date"), "layout": focus_mod.layout(focuses),
+            **self._focus_graphics(focuses)}
         if state["source"] == "live":
             return envelope(LIVE, data, f"Focus tree {state['tree']} from the game files; state of {tag} from game memory.")
         analysis = state["analysis"]
@@ -474,10 +476,42 @@ class DebuggerService:
         nxt = next((q for q in queue if q["ok"]), None)
         return envelope(LIVE if state["source"] == "live" else SAVE, {
             "tag": tag, "tree": state["tree"], "current": state["current"], "progress_days": state["progress"],
-            "focus_source": state["source"], "queue": queue,
+            "focus_source": state["source"], "queue": queue, "game_date": state.get("date"),
             "statuses": {f["id"]: {"status": f["status"], "progress": f["progress"], "missing": f["missing"]} for f in focuses},
             "next": {"id": nxt["id"], "name": by_id[nxt["id"]]["name"], "days": by_id[nxt["id"]]["days"]} if nxt else None,
         }, "Focus state from game memory." if state["source"] == "live" else "Focus state from the newest save.")
+
+    def focus_autostart(self, apply: bool) -> dict:
+        """Next focus of the PLAYER's plan, started in game memory when no focus is selected (apply=True; LOCAL write,
+        single player). Focuses with start conditions the app cannot check or with effects on picking are left to
+        the player ("manual"). state: busy (a focus runs), empty (no valid focus in the plan), manual, ready
+        (preview), started."""
+        if self.live is None:
+            raise NotFound("Live game access is disabled")
+        live = self.live.focus(None)
+        tag = live["tag"]
+        base = {"tag": tag, "current": live["current"], "focus": None, "name": None, "reason": None}
+        if live["current"]:
+            return {**base, "state": "busy"}
+        ctx = self._focus_context(tag, live_first=True)
+        if ctx is None:
+            return {**base, "state": "empty", "reason": "focus tree not readable"}
+        state, focuses = ctx
+        by_id = {f["id"]: f for f in focuses}
+        queue = focus_mod.validate_queue(focuses, state, self._focus_queues().get(f"{tag}:{state['tree']}", []))
+        nxt = next((q for q in queue if q["ok"]), None)
+        if nxt is None:
+            return {**base, "state": "empty"}
+        f = by_id[nxt["id"]]
+        out = {**base, "focus": f["id"], "name": f["name"], "days": f["days"]}
+        if f.get("start_conditions") or f.get("select_effect"):
+            why = " and ".join(w for w, on in (("conditions the app cannot check", f.get("start_conditions")),
+                                               ("effects when it is picked", f.get("select_effect"))) if on)
+            return {**out, "state": "manual", "reason": f"has {why} - start it in the game"}
+        if not apply:
+            return {**out, "state": "ready"}
+        self.live.start_focus(f["id"])
+        return {**out, "state": "started"}
 
     def _focus_context_cached(self, tag: str, wait: bool = True):
         """_focus_context() cached per newest save (parsing a binary save takes seconds). With wait=False a
@@ -617,7 +651,7 @@ class DebuggerService:
         tag = tag.upper()
         if not isinstance(queue, list) or len(queue) > 200 or not all(isinstance(q, str) and len(q) < 200 for q in queue):
             raise ReportError("queue must be a list of up to 200 focus ids")
-        ctx = self._focus_context(tag)
+        ctx = self._focus_context(tag, live_first=True)   # checked against the running game, like the tree shows it
         if ctx is None:
             raise NotFound("No game installation or save to read the focus tree from")
         state, focuses = ctx
@@ -1076,6 +1110,30 @@ class DebuggerService:
             info["continent"] = home is not None and geography.main_continent(owned.get(t, []), continents) == home
         return None
 
+    def factories(self, tag: str) -> dict:
+        """Factories of `tag` like the game's factory tooltip (game memory): military, dockyards, civilian - total
+        and owned / occupation / subject relations / trade / damaged - and energy; building icons from the game."""
+        tag = tag.upper()
+        install = self._install_path()
+        if install is None:
+            return envelope(UNAVAILABLE, None, "Needs the game installation")
+        if self.live is None:
+            return envelope(UNAVAILABLE, None, "Needs the running game")
+        try:
+            found = self.live.factories(tag)
+        except Exception as exc:  # game not running, main menu, other version
+            return envelope(UNAVAILABLE, None, f"Needs the running game: {exc}")
+        roots = self._game_roots(install)
+        defs = construction_mod.buildings(roots)
+        strip = construction_mod.icon_strip(roots)
+        icons = {}
+        for kind, building in (("military", "arms_factory"), ("dockyards", "dockyard"), ("civilian", "industrial_complex")):
+            frame = (defs.get(building) or {}).get("icon_frame")
+            icons[kind] = gfx.frame_data_uri(strip[0], frame, strip[1]) if strip and frame else None
+        data = {k: found[k] for k in ("military", "dockyards", "civilian", "energy")}
+        return envelope(LIVE, {"tag": tag, **data, "icons": icons, "factories_source": "live"},
+                        "Factories from game memory.")
+
     def research_tabs(self) -> dict:
         """Tabs of the research screen (technology folders) for the installed game, enabled mods and owned DLCs,
         with the number of technologies in each tab."""
@@ -1248,7 +1306,8 @@ class DebuggerService:
         plain = [s["speed"] for s in slots if s["technology"] and s.get("speed")
                  and not ahead_years(techs.get(s["technology"]), today)]
         country_speed = max(plain) if plain else None
-        bonuses = bonuses or []
+        # used up (0 uses left) bonuses stay in game memory and the save - the game no longer offers them
+        bonuses = [b for b in bonuses or [] if (b.get("uses") or 0) > 0]
         names = focus_mod.loc_names(install, ids | {b["name"] for b in bonuses if b["name"]}
                                     | {k for b in bonuses for c in b["categories"] for k in (c, f"{c}_research")})
         sprites = gfx.sprites(roots)

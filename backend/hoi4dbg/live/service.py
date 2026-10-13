@@ -359,14 +359,16 @@ class LiveService:
 
     # -- live values -----------------------------------------------------------------------
     def player_tag(self, process: dict) -> str:
-        """Player country: the only country not hidden by fog of war (verified version); with fog of war off the
-        last unambiguous result of this game process; else the newest save."""
+        """Player country: the game state's player slot (verified version, follows `tag`); else the only country not
+        hidden by fog of war; else the last unambiguous result of this game process; else the newest save."""
         key = (process["pid"], process.get("started"))
         now = self._clock()
         if self._player and self._player[1] == key and now - self._player[0] < 5:
             return self._player[2]
         tag = None
         if pointers.supported(process.get("version")):
+            tag = self._player_from_state(process)
+        if tag is None and pointers.supported(process.get("version")):
             visible = self.players(process)
             if len(visible) == 1:
                 tag = visible[0]
@@ -380,6 +382,23 @@ class LiveService:
             raise LiveError("player_unknown", "The newest save has no player country")
         self._player = (now, key, tag)
         return tag
+
+    def _player_from_state(self, process: dict) -> str | None:
+        """Player's country from the game state (pointers.player_country), None when not readable."""
+        key = (process["pid"], process.get("started"))
+        install = process.get("install") or ""
+        if install not in self._tags:
+            self._tags[install] = pointers.tag_order(Path(install))
+        try:
+            with self._open_memory(process["pid"]) as mem:
+                if key not in self._module_base:
+                    module = mem.modules().get(pointers.MODULE)
+                    if not module:
+                        return None
+                    self._module_base[key] = module[0]
+                return pointers.player_country(mem, self._module_base[key], self._tags[install])
+        except (MemoryAccessError, OSError, pointers.PointerError):
+            return None
 
     def players(self, process: dict | None = None) -> list[str]:
         """Human-controlled countries read from game memory ([] if unavailable)."""
@@ -440,6 +459,10 @@ class LiveService:
                     self._module_base[key] = module[0]
                 country = pointers.country_object(mem, self._module_base[key], self._tags[install], tag)
                 out = pointers.read_focus(mem, country)
+                try:
+                    out["date"] = pointers.read_date(mem, self._module_base[key])
+                except pointers.PointerError:
+                    out["date"] = None
         except pointers.PointerError as exc:
             raise LiveError(exc.code, str(exc)) from exc
         except (MemoryAccessError, OSError) as exc:
@@ -584,6 +607,34 @@ class LiveService:
                  for i, k in enumerate(order) if k != i]
         return {"tag": tag, "sorted": not moved or bool(changed), "applied": bool(changed), "moved": moved,
                 "scope": "local" if changed else None, "read_at": self._clock()}
+
+    def start_focus(self, focus_id: str) -> dict:
+        """LOCAL write: makes `focus_id` the PLAYER's current focus (0 days, see pointers.write_focus_start); single
+        player only, only while no focus is selected; checked by reading the focus again."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Starting a focus is only available for the verified game version")
+        self._require_single_player()
+        tag = self.player_tag(process)
+
+        def run(mem, country):
+            definition = pointers.focus_definition(mem, country, focus_id)
+            if definition is None:
+                raise LiveError("not_in_tree", f"{focus_id} is not in {tag}'s focus tree")
+            pointers.write_focus_start(mem, country, definition)
+            return pointers.read_focus(mem, country)
+        after = self._with_country(process, tag, run, writer=True)
+        if after["current"] != focus_id:
+            raise LiveError("not_held", f"The game did not keep {focus_id} as the current focus")
+        self.log.warning("LOCAL memory write %s: focus %s started (0 days)", tag, focus_id)
+        return {"tag": tag, "started": focus_id, "scope": "local", "written_at": self._clock()}
+
+    def factories(self, tag: str) -> dict:
+        """Live factories of `tag` by type with where they come from, and energy (game memory)."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Live factory reading is only verified for 1.19.3.0.c01a")
+        return {**self._with_country(process, tag, pointers.read_factories), "tag": tag, "read_at": self._clock()}
 
     def advisors(self, tag: str) -> dict:
         """Live hired advisors and staff of `tag`: [{"slot", "id": character id}] (game memory)."""

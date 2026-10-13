@@ -5,6 +5,7 @@ import { countryLivePanel } from './country-live.js';
 import { governmentPanel, spiritsPanel } from './spirits.js';
 import { overviewPanel } from './overview.js';
 import { resourcesPanel } from './resources.js';
+import { factoriesPanel } from './factories.js';
 import { countryPicker, tagChip } from './shared.js';
 
 const STATUS_NOTE = { read: null, absent: 'not in save', unmapped: 'not mapped yet' };
@@ -130,7 +131,7 @@ export default {
     // Live values for any country (game country table); verified console changes only for the player country.
     const live = countryLivePanel(ctx, tag, { isPlayer });
     const tiles = [overviewPanel(ctx, tag), spiritsPanel(ctx, tag)];
-    const lower = [resourcesPanel(ctx, tag), governmentPanel(ctx, tag)];
+    const lower = [factoriesPanel(ctx, tag), resourcesPanel(ctx, tag), governmentPanel(ctx, tag)];
     root.append(...tiles.map((t) => t.el), live.el, ...lower.map((t) => t.el));
     if (fromSave) {
       root.append(

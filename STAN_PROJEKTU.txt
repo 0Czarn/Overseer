@@ -102,6 +102,14 @@ ZROBIONE
             WZÓR "At war" USTALONY (2026-10-13): -20% + war_stability_factor (DODAWANY, nie mnożony); suma z gry =
             numer 145 (SOV 0,02195 -> -17,80%; z POL 0,0025 -> -19,75%), bez zmian po miesiącu gry (kapitulacja
             18% bez wpływu). SOV 1941-10-21: wszystkie linie ST = podpowiedź gry (st3.png), bez UNKNOWN.
+[x] KAFELEK FABRYK w Country Editor (2026-10-13, prośba użytkownika, fabryk.png GER 1941 - wszystko = gra):
+            wojskowe 268 (własne 208, okupacja +61, wasale +2, uszkodzone -3), stocznie 23 (11 + 12), cywilne 182
+            (71 + 71 + 10 + handel 30), energia: zapotrzebowanie 4091,6 (97,1%), wytwarzanie 3974,0, węgiel 383 (+brak).
+            CProductionStatus: bloki wojskowe +0x2B0, stocznie +0x310, cywilne +0x370: +0x8 łącznie przed
+            uszkodzeniem, +0x18 własne, +0x20 uszkodzone (fixed64), +0x44 od wasali, +0x48 oddane suwerenowi, +0x58
+            handel (int32), +0x38 pokrycie energii; energia +0x508 wytw., +0x530 zapotrz., +0x4F8 węgiel, +0x528
+            węgiel potrzebny. Gra pokazuje liczby całkowite: razem = floor(łącznie) - floor(uszkodzone) - oddane,
+            okupacja = reszta. Cywilne razem = sprawdzone pole +0x43C dla 439/439 państw (wasale: MAL -12, RAJ -2).
 [~] DORADCA HANDLU w kafelku Resources (Country Editor) (2026-10-13, prośba użytkownika, Trading_opt.txt;
             wybrany wariant: tylko doradca - gra nie ma komendy ani efektu anulującego umowę importową):
             [x] etap 1: niedobory ropy/aluminium/gumy/wolframu/stali/chromu, cel bilansu +2 / 0 / -2, limit fabryk
@@ -164,6 +172,10 @@ ZROBIONE
             +0x44 (= indeks), potem ponowny odczyt i sprawdzenie. Tylko singleplayer, tylko państwo gracza.
             [x] TEST W GRZE (2026-10-13, użytkownik, nowa gra USA): działa.
             [ ] odczyt z zapisu, gdy gra nie działa.
+[x] RESEARCH - wyczerpane bonusy (2026-10-13, prośba użytkownika): bonusy z 0 użyć znikają z listy (gra trzyma je
+            w pamięci i w save'ie z uses 0). POPRAWKA przy okazji: bonus bez nazwy (USA id 9, +75%, pusty napis)
+            psuł cały odczyt research z pamięci ("out of range") - zakładka po cichu brała save; teraz pusta nazwa
+            jest dopuszczona (w aplikacji "Research bonus"). USA: 8 w pamięci -> 5 pokazanych; GER 18 -> 5; SOV 10 -> 3.
 [x] ZAKŁADKA RESEARCH (2026-10-11, nowa, na życzenie użytkownika): wybór państwa + kafelek "Research slots"
             [Live | On refresh]: liczba slotów, co bada każdy slot (nazwa, ikona z gry, id), premia szybkości slotu.
             Pamięć: [country+0xF60] = CTechnologyStatus, tablica +0xA0 = CResearchSlot (+0x18 CTechnology lub 0,
@@ -286,6 +298,28 @@ DO ZROBIENIA (w tej kolejności)
                 zrobił): liczba ukończonych była czytana z pojemności tablicy (+0x48, np. 42) zamiast z rozmiaru
                 (+0x4C) - liczyły się stare sloty. Teraz 15/15 państw = ukończone z save'a (USA 0). Błąd dotyczył też
                 wcześniejszych funkcji na żywo (kolory drzewka, powiadomienie o ukończonym celu).
+                POPRAWKA (2026-10-13, zgłoszenie użytkownika: nie da się dodać celów do kolejki): przeciąganie drzewka
+                przejmowało mysz już przy wciśnięciu (setPointerCapture na pointerdown), więc kliknięcie trafiało do
+                tła, nie do celu - teraz przejęcie dopiero po ruszeniu myszą o 3 px. Zapis kolejki sprawdza ją
+                względem stanu na żywo. Smoke: klik w dostępny cel dodaje go do planu, drugi klik usuwa.
+            [~] AUTO-START CELÓW Z KOLEJKI (2026-10-13, prośba użytkownika): przełącznik w zakładce (domyślnie wył.),
+                tylko państwo gracza, tylko singleplayer. Gdy żaden cel nie jest wybrany, aplikacja zaczyna
+                następny ważny cel z planu: CNationalFocusProgress +0x10 = definicja celu (z CNationalFocusTree
+                +0x30, tablica CNationalFocus*), +0x38 = 0 dni. Pomiar (użytkownik wybrał cel przy pauzie): gra
+                wpisuje tylko +0x10, zostawia zachowane dni (MAX_SAVED_FOCUS_PROGRESS = 10) i pobiera za nie PP
+                ("Picking a focus will use 10 PP", usa_focus.png) - wybór użytkownika: aplikacja zeruje dni, PP bez
+                zmian. Cele z warunkami (available z treścią) lub select_effect (np. GER_anschluss) - tylko
+                powiadomienie "zacznij w grze". GRACZ: [stan gry]+0x520 = numer państwa gracza (test `tag`
+                USA->MEX->USA: 68->51->68, jedyne takie pole) - pierwsze źródło wykrywania gracza (mgła wojny była
+                wyłączona: stara metoda dawała pustą listę, a save miał MEX).
+                [x] TEST W GRZE (2026-10-13, użytkownik): działa.
+            [x] KAFELEK KOLEJKI czytelniej (2026-10-13): podsumowanie (ile celów, ile dni, kiedy koniec planu wg daty
+                gry), wiersze z ikoną celu, czasem i datami start -> koniec (każdy po poprzednim, bieżący pierwszy),
+                znaczniki NEXT i START IN GAME (cele z warunkami / select_effect), błędne pozycje na czerwono z powodem.
+            [x] PRZYBLIŻANIE drzewek Research i National Focus (2026-10-13): kółko myszy (przy kursorze), - / + / Fit /
+                100%, poziom 25-200% zapamiętany per widok (lib/zoom.js); przeciąganie bez zmian.
+                Smoke: przy filtrze zakładek pierwsza zakładka była nieprzeładowana - poprawione. Zrzuty przy zasłoniętym
+                oknie (gra na pełnym ekranie) pokazują stary obraz - sprawdzać DOM, nie zrzut.
 [ ] Krok G  Intelligence Lab (poziomy wywiadu) i Game Tools (narzędzia lokalne)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)
             -> wymaga drugiego komputera/konta

@@ -40,6 +40,12 @@ function runSmoke(win, outDir, quit) {
         win.setContentSize(size.width, size.height);
         await sleep(300);
         for (const tab of TABS.filter((t) => !ONLY.length || ONLY.includes(t))) {
+          // a tab already shown is not rendered again by a hash change: show another one first (tab filter)
+          if (await wc.executeJavaScript(`location.hash === '#/${tab}'`)) {
+            const other = tab === 'dashboard' ? 'logs' : 'dashboard';
+            await wc.executeJavaScript(`location.hash = '#/${other}'`);
+            await waitFor(wc, `document.body.dataset.rendered === '${other}'`, 20000);
+          }
           await wc.executeJavaScript(`location.hash = '#/${tab}'`);
           // the first read of a new 40 MB binary save takes a few seconds per view (pure Python parser)
           const ok = await waitFor(wc,
@@ -75,6 +81,10 @@ function runSmoke(win, outDir, quit) {
               lines: g.querySelectorAll('.hoi-lines .hoi-line').length }))`);
             if (info.gauges.length !== 2) result.failures.push(`${size.name}/country-editor: stability/war support gauges missing`);
             await waitFor(wc, `document.querySelectorAll('.live-panel-body').length >= 4 && ![...document.querySelectorAll('.live-panel-body > .muted')].some((e) => e.textContent.startsWith('Reading'))`, 30000);
+            // factories tile: military, dockyards, civilian and energy boxes, or the reason
+            await waitFor(wc, `!!document.querySelector('.fac-kind, .fac-grid ~ .notice, .live-panel-body .notice')`, 20000);
+            info.factories = await wc.executeJavaScript(`[...document.querySelectorAll('.fac-total')].map((e) => e.textContent)`);
+            if (info.factories.length && info.factories.length !== 3) result.failures.push(`${size.name}/country-editor: factories tile shows ${info.factories.length} types`);
             // trade advisor in the resources tile: six resource rows, or the reason (game not running)
             await waitFor(wc, `!!document.querySelector('.trade-row, .trade-out .notice')`, 20000);
             info.trade = await wc.executeJavaScript(`({ rows: document.querySelectorAll('.trade-row').length,
@@ -105,6 +115,18 @@ function runSmoke(win, outDir, quit) {
             info.focusState = await wc.executeJavaScript(`({ switches: document.querySelectorAll('.card .hoi-mode').length,
               status: document.querySelector('.card .hoi-status')?.textContent ?? null })`);
             if (info.focusState.switches !== 1) result.failures.push(`${size.name}/focus: tree has no Live / On refresh switch`);
+            // a click on an available focus adds it to the plan, a second click removes it again (the user's plan stays)
+            const target = await wc.executeJavaScript(`document.querySelector('.fnode-available:not(.fnode-queued)')?.dataset.focus ?? null`);
+            if (target) {
+              const count = `document.querySelectorAll('.focus-queue li').length`;
+              const before = await wc.executeJavaScript(count);
+              await wc.executeJavaScript(`document.querySelector('[data-focus="${target}"]').click()`);
+              await waitFor(wc, `${count} === ${before + 1}`, 10000);
+              info.focusQueueAdd = (await wc.executeJavaScript(count)) - before;
+              await wc.executeJavaScript(`document.querySelector('[data-focus="${target}"]').click()`);
+              await waitFor(wc, `${count} === ${before}`, 10000);
+              if (info.focusQueueAdd !== 1) result.failures.push(`${size.name}/focus: clicking a focus does not add it to the plan`);
+            }
           }
           if (tab === 'construction') {
             // queue rows, the empty-queue line, or the reason (game not running)

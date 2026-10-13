@@ -3,6 +3,7 @@ import { createApi } from './lib/api.js';
 import { clear, errorBox, h, toast } from './lib/dom.js';
 import { startFocusWatch } from './lib/focus-watch.js';
 import { sortMessage, startConstructionSort } from './lib/construction-sort.js';
+import { autostartMessage, startFocusAutostart } from './lib/focus-autostart.js';
 import dashboard from './views/dashboard.js';
 import countries from './views/countries.js';
 import countryEditor from './views/country-editor.js';
@@ -202,6 +203,19 @@ async function init() {
     }
     if (err && err.message !== lastSortError) toast(`Construction auto-sort: ${err.message}`, 'warn');
     lastSortError = err ? err.message : null;
+  });
+  // Optional focus auto-start (switch on the National Focus Manager tab); refusals shown once per reason
+  const manualSeen = new Set();
+  let lastFocusError = null;
+  if (!smoke) startFocusAutostart(api, (res, err) => {
+    const msg = autostartMessage(res, manualSeen);
+    if (msg) {
+      toast(msg.text, msg.kind);
+      api.log(msg.kind === 'ok' ? 'warning' : 'info', `Focus auto-start: ${msg.text}`);
+      try { new Notification('HOI4 Debugger - national focus', { body: msg.text }); } catch { /* unavailable */ }
+    }
+    if (err && err.message !== lastFocusError) toast(`Focus auto-start: ${err.message}`, 'warn');
+    lastFocusError = err ? err.message : null;
   });
   await renderView();
   document.body.dataset.ready = '1';

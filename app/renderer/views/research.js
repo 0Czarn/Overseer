@@ -3,6 +3,7 @@
 import { h, notice, viewHeader } from '../lib/dom.js';
 import { livePanel } from '../lib/refresh.js';
 import { countryPicker, tagChip } from './shared.js';
+import { zoomable } from '../lib/zoom.js';
 
 /** "+13%" for a research speed factor of 1.13 ('' when unknown or 1). */
 export function speedText(speed) {
@@ -73,7 +74,7 @@ function bonusList(bonuses, year) {
     h('h3', { class: 'research-subhead' }, `Limited bonuses: ${bonuses.length}`),
     bonuses.length
       ? h('ul', { class: 'research-bonus-list' }, bonuses.map((b) => h('li', { class: 'research-bonus' },
-        h('span', { class: 'research-bonus-name' }, b.label || b.name),
+        h('span', { class: 'research-bonus-name' }, b.label || b.name || 'Research bonus'),
         h('span', { class: 'research-bonus-info', title: `${b.name} · ${b.categories.join(', ')}` }, bonusText(b)),
         b.usable ? h('span', { class: 'research-bonus-usable', title: 'From the technology tree: researched predecessors, '
           + 'no exclusive technology researched; country-only technologies are left out' },
@@ -142,12 +143,14 @@ export function dragToScroll(el) {
   el.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     start = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop, moved: false };
-    el.setPointerCapture(e.pointerId);
   });
   el.addEventListener('pointermove', (e) => {
     if (!start) return;
     const dx = e.clientX - start.x; const dy = e.clientY - start.y;
     if (!start.moved && Math.abs(dx) + Math.abs(dy) < 3) return;
+    // capture only once it is a drag: capturing on pointerdown sent every click to the container, so a click on
+    // an item (a focus: add to the plan) never reached it
+    if (!start.moved) el.setPointerCapture?.(e.pointerId);
     start.moved = true;
     el.classList.add('tech-dragging');
     el.scrollLeft = start.left - dx;
@@ -234,15 +237,17 @@ export function researchTreePanel(ctx, tag) {
           .map((st) => h('span', { class: `tech-legend-item tech-legend-${st}` }, STATE_LABEL[st])),
         h('span', { class: 'tech-legend-item tech-legend-ahead' }, 'Year: ahead of time'),
         h('span', { class: 'muted' }, 'Drag with the left mouse button to move around'));
-        const view = h('div', { class: 'tech-tree-scroll' },
-          h('div', { class: 'tech-tree', style: { width: `${d.width}px`, height: `${d.height}px` } },
-            svg, ...labels, ...d.items.map((t) => treeItem(d, t))));
+        const content = h('div', { class: 'tech-tree', style: { width: `${d.width}px`, height: `${d.height}px` } },
+          svg, ...labels, ...d.items.map((t) => treeItem(d, t)));
+        const view = h('div', { class: 'tech-tree-scroll' });
+        const zoom = zoomable('research', view, content, d.width, d.height);
+        view.append(zoom.sizer);
         dragToScroll(view);
         body.replaceChildren(
           tabStrip(d.tabs, d.folder, (id) => { writeTab(id); open(id); }),
           h('div', { class: 'research-tab-info' }, h('strong', null, tab?.name ?? d.folder),
             h('span', { class: 'muted' }, ` · ${d.items.length} technologies`)),
-          legend, view);
+          legend, zoom.toolbar, view);
         view.scrollLeft = scroll.left;
         view.scrollTop = scroll.top;
       },

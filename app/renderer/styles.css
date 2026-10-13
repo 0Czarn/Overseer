@@ -538,6 +538,46 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
 .hoi-mode-btn:focus-visible, .hoi-refresh:focus-visible { outline: 1px solid var(--hoi-trim-hi); outline-offset: 1px; }
 .hoi-refresh[hidden] { display: none; }
 
+/* Factories tile (Country Editor) */
+.fac-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.fac-kind { border: 1px solid var(--hoi-trim); border-radius: 3px; background: #1c1a12; padding: 8px 10px; color: var(--hoi-text); }
+.fac-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.fac-icon { width: 32px; height: 32px; }
+.fac-label { font-weight: 700; flex: 1; }
+.fac-total { font-size: 18px; font-weight: 700; color: #f0c060; font-variant-numeric: tabular-nums; }
+.fac-lines .hoi-line { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+
+/* Focus plan (queue tile) */
+.plan-empty { display: flex; flex-direction: column; gap: 4px; padding: 12px; border: 1px dashed var(--hoi-trim); border-radius: 3px; }
+.plan-summary { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 4px 0 8px; font-size: 13px; }
+.plan-bad-count { color: #f08070; font-weight: 600; }
+.plan-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow: auto; }
+.plan-row { display: grid; grid-template-columns: 26px 44px 1fr auto; align-items: center; gap: 10px; padding: 6px 8px;
+  border: 1px solid var(--hoi-trim); border-radius: 3px; background: #1c1a12; color: var(--hoi-text); }
+.plan-row-next { border-color: var(--hoi-trim-hi); box-shadow: inset 3px 0 0 var(--hoi-trim-hi); }
+.plan-row-bad { border-color: #8a2b22; background: #261410; }
+.plan-n { width: 24px; height: 24px; border-radius: 12px; background: #2f6fb0; color: #fff; font-weight: 700; font-size: 12px;
+  display: flex; align-items: center; justify-content: center; }
+.plan-row-bad .plan-n { background: #b52a1f; }
+.plan-icon { width: 44px; height: 44px; object-fit: contain; display: block; }
+.plan-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.plan-name { font-weight: 600; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; overflow-wrap: anywhere; }
+.plan-when { font-size: 12px; color: var(--hoi-muted, #a8a08a); }
+.plan-row-bad .plan-when { color: #f08070; }
+.plan-badge { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; padding: 1px 6px; border-radius: 3px; }
+.plan-badge-next { background: #3c5a22; color: #c8eb98; }
+.plan-badge-manual { background: #4a3017; color: #f0b46a; }
+.plan-btns { display: flex; gap: 2px; }
+.plan-hint { margin-top: 8px; }
+
+/* Zoom of tree views */
+.zoom-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
+.zoom-btn { min-width: 32px; }
+.zoom-level { min-width: 44px; text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; }
+.zoom-hint { font-size: 12px; margin-left: 6px; }
+.zoom-sizer { position: relative; }
+.zoom-sizer > .ftree, .zoom-sizer > .tech-tree { position: absolute; left: 0; top: 0; }
+
 /* National focus tree (game style) */
 .ftree-scroll { overflow: auto; max-height: 72vh; border: 1px solid var(--hoi-trim); border-radius: 3px;
   background: radial-gradient(ellipse at top, #2a2a22 0%, #15140f 70%); cursor: grab; user-select: none; }

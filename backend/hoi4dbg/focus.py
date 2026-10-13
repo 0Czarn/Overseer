@@ -46,7 +46,11 @@ def _focus(block: list) -> dict:
     return {"id": text.get(block, "id"), "days": round(cost * DAYS_PER_COST), "x": num("x"), "y": num("y"),
             "icon": icon if isinstance(icon, str) and icon.startswith("GFX_") else None,
             "relative_to": text.get(block, "relative_position_id"), "prerequisites": [p for p in prereqs if p],
-            "exclusive": exclusive, "has_conditions": any(k in ("available", "bypass") for k, _ in block)}
+            "exclusive": exclusive, "has_conditions": any(k in ("available", "bypass") for k, _ in block),
+            # conditions to start it that the app cannot check (an empty available = {} has none), effects run
+            # when it is picked in the game: such focuses are started by the player, not by the app
+            "start_conditions": any(k == "available" and v for k, v in block),
+            "select_effect": any(k == "select_effect" for k, _ in block)}
 
 
 @lru_cache(maxsize=4)

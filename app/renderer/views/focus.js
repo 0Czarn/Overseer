@@ -3,6 +3,8 @@ import { FOCUS_COLUMNS, formatAge, freshnessInfo, groupFocuses } from '../lib/fo
 import { countryPicker } from './shared.js';
 import { dragToScroll, pathOf } from './research.js';
 import { dataKey, refreshControl } from '../lib/refresh.js';
+import { autostartEnabled, setAutostartEnabled } from '../lib/focus-autostart.js';
+import { readZoom, zoomable } from '../lib/zoom.js';
 
 const CELL_W = 118;
 const CELL_H = 74;
@@ -89,21 +91,104 @@ function treeView(d, queue, onToggle) {
       h('span', { style: { width: `${Math.min(100, (f.progress ?? 0) * 100)}%` } })) : null,
     q ? h('span', { class: 'fnode-qn' }, String(q.n)) : null);
   });
-  const view = h('div', { class: 'ftree-scroll' },
-    h('div', { class: 'ftree', style: { width: `${L.width}px`, height: `${L.height}px` } }, svg, ...links, ...nodes));
+  const content = h('div', { class: 'ftree', style: { width: `${L.width}px`, height: `${L.height}px` } }, svg, ...links, ...nodes);
+  const view = h('div', { class: 'ftree-scroll' });
+  const zoom = zoomable('focus', view, content, L.width, L.height);
+  view.append(zoom.sizer);
   dragToScroll(view);
-  return view;
+  return h('div', null, zoom.toolbar, view);
 }
 
-function queueList(byId, queue, save, move, remove) {
-  if (!queue.length) return notice('muted', 'Queue is empty - click focuses in the tree to plan the order.');
-  return h('ol', { class: 'focus-queue' }, queue.map((q, i) => h('li', { class: q.ok ? '' : 'bad-text' },
-    h('span', { class: 'focus-queue-name' }, byId.get(q.id)?.name ?? q.id),
-    h('span', { class: 'muted' }, q.ok ? ` · ${byId.get(q.id)?.days ?? '?'} days${q.conditions ? ' · game conditions not checked' : ''}` : ` · ${q.reason}`),
-    h('span', { class: 'btn-row' },
-      h('button', { class: 'btn btn-small btn-ghost', disabled: i === 0, onClick: () => move(i, -1), 'aria-label': 'Up' }, '↑'),
-      h('button', { class: 'btn btn-small btn-ghost', disabled: i === queue.length - 1, onClick: () => move(i, 1), 'aria-label': 'Down' }, '↓'),
-      h('button', { class: 'btn btn-small btn-ghost', onClick: () => remove(i), 'aria-label': 'Remove' }, '✕')))));
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];   // the game has no leap years
+
+/** "23 Jun 1936" - `days` after the game date {year, day: 0-based day of the year}. */
+export function gameDateText(date, days) {
+  if (!date) return '';
+  const year = date.year + Math.floor((date.day + days) / 365);
+  let day = (date.day + days) % 365;
+  let m = 0;
+  while (day >= MONTH_DAYS[m]) { day -= MONTH_DAYS[m]; m += 1; }
+  return `${day + 1} ${MONTHS[m]} ${year}`;
+}
+
+/** Plan timeline: each valid queued focus starts when the one before it ends (the current one first). Returns
+ *  { items: [{ ...q, n, focus, start, end, next, manual }], total } (start/end in days from now; null for invalid
+ *  entries). Focuses needing a manual start are marked (the app's auto-start leaves them to the player). */
+export function planTimeline(queue, byId, current, progressDays) {
+  const cur = current ? byId.get(current) : null;
+  let at = cur ? Math.max(0, cur.days - (progressDays ?? 0)) : 0;
+  let nextFound = false;
+  const items = queue.map((q, i) => {
+    const f = byId.get(q.id);
+    if (!q.ok || !f) return { ...q, n: i + 1, focus: f, start: null, end: null, next: false, manual: false };
+    const item = { ...q, n: i + 1, focus: f, start: at, end: at + f.days, next: !nextFound,
+      manual: Boolean(f.start_conditions || f.select_effect) };
+    nextFound = true;
+    at += f.days;
+    return item;
+  });
+  return { items, total: at };
+}
+
+function queueList(d, byId, queue, move, remove) {
+  if (!queue.length) {
+    return h('div', { class: 'plan-empty' }, h('strong', null, 'No focuses planned yet'),
+      h('span', { class: 'muted' }, 'Click focuses in the tree below to add them here in the order you want to take them.'));
+  }
+  const { items, total } = planTimeline(queue, byId, d.current, d.progress_days);
+  const bad = items.filter((x) => !x.ok).length;
+  const summary = h('div', { class: 'plan-summary' },
+    h('span', null, h('b', null, items.length), ` focus${items.length === 1 ? '' : 'es'} planned`),
+    h('span', null, h('b', null, total), ' days'),
+    d.game_date ? h('span', null, 'plan ends ', h('b', null, gameDateText(d.game_date, total))) : null,
+    bad ? h('span', { class: 'plan-bad-count' }, `${bad} cannot follow - see red`) : null);
+  const rows = items.map((x, i) => {
+    const f = x.focus;
+    const icon = f?.icon_key ? d.icons?.[f.icon_key] : null;
+    const range = d.game_date ? `${gameDateText(d.game_date, x.start)} → ${gameDateText(d.game_date, x.end)}` : `starts in ${x.start} days`;
+    const when = x.ok ? `${f.days} days · ${range}` : x.reason;
+    return h('li', { class: `plan-row${x.ok ? '' : ' plan-row-bad'}${x.next ? ' plan-row-next' : ''}` },
+      h('span', { class: 'plan-n' }, x.n),
+      icon ? h('img', { class: 'plan-icon', src: icon, alt: '' }) : h('span', { class: 'plan-icon' }),
+      h('div', { class: 'plan-main' },
+        h('div', { class: 'plan-name' }, f?.name ?? x.id,
+          x.next ? h('span', { class: 'plan-badge plan-badge-next' }, 'NEXT') : null,
+          x.manual ? h('span', { class: 'plan-badge plan-badge-manual', title: 'Has conditions the app cannot check or effects '
+            + 'when picked: start it yourself in the game (auto-start leaves it to you)' }, 'START IN GAME') : null),
+        h('div', { class: 'plan-when' }, when)),
+      h('span', { class: 'plan-btns' },
+        h('button', { class: 'btn btn-small btn-ghost', disabled: i === 0, onClick: () => move(i, -1), 'aria-label': 'Move up', title: 'Move up' }, '↑'),
+        h('button', { class: 'btn btn-small btn-ghost', disabled: i === items.length - 1, onClick: () => move(i, 1), 'aria-label': 'Move down', title: 'Move down' }, '↓'),
+        h('button', { class: 'btn btn-small btn-ghost', onClick: () => remove(i), 'aria-label': 'Remove', title: 'Remove from the plan' }, '✕')));
+  });
+  return h('div', null, summary, h('ol', { class: 'plan-list focus-queue' }, rows));
+}
+
+const AUTO_STATE = { busy: 'a focus is in progress - the next one starts when it ends',
+  empty: 'no valid focus in your plan', ready: 'would start now', manual: 'next one must be started in the game',
+  started: 'started' };
+
+/** "Auto-start the next focus" switch with what it would do now (your country only, single player). */
+function autostartSwitch(ctx) {
+  const info = h('span', { class: 'muted cons-sort-info' });
+  const box = h('input', { type: 'checkbox', checked: autostartEnabled() });
+  const preview = async () => {
+    try {
+      const r = await ctx.api.get('/api/live/focus/autostart');
+      info.textContent = `${r.tag}: ${r.name ? `${r.name} - ` : ''}${r.state === 'manual' ? r.reason : AUTO_STATE[r.state] ?? r.state}`;
+    } catch (err) {
+      info.textContent = `Not available: ${err.message}`;
+    }
+  };
+  box.addEventListener('change', () => { setAutostartEnabled(box.checked); preview(); });
+  preview();
+  return h('div', { class: 'cons-sort' },
+    h('label', { class: 'cons-sort-label', title: 'Your country only, single player. When no focus is selected, the app '
+      + 'starts the next valid focus of this plan by writing game memory on this computer (0 days: saved days are '
+      + 'dropped, no political power is taken). Focuses with conditions the app cannot check or with effects on '
+      + 'picking are left to you - you get a notice.' },
+    box, h('span', null, 'Auto-start the next focus of the plan')), info);
 }
 
 export default {
@@ -172,6 +257,7 @@ export default {
         for (const f of d.focuses) Object.assign(f, st.statuses[f.id] ?? {});
         d.current = st.current;
         d.progress_days = st.progress_days;
+        d.game_date = st.game_date ?? d.game_date;
         queue = st.queue;
         render();
         countsHost.textContent = treeTitle();
@@ -191,9 +277,10 @@ export default {
       const f = d.focuses.find((x) => x.status === 'in_progress') ?? d.focuses.find((x) => x.status === 'available');
       const it = f && d.layout.items.find((i) => i.id === f.id);
       if (!it) return;
+      const z = readZoom('focus');
       requestAnimationFrame(() => {
-        el.scrollLeft = Math.max(0, it.left - el.clientWidth / 2 + d.layout.node.w / 2);
-        el.scrollTop = Math.max(0, it.top - 40);
+        el.scrollLeft = Math.max(0, (it.left + d.layout.node.w / 2) * z - el.clientWidth / 2);
+        el.scrollTop = Math.max(0, it.top * z - 40);
       });
     }
     function render() {
@@ -203,7 +290,7 @@ export default {
       const s2 = treeHost.querySelector('.ftree-scroll');
       if (keep) [s2.scrollLeft, s2.scrollTop] = keep;
       else centreOnCurrent(s2);
-      queueHost.replaceChildren(queueList(byId, queue, save, move, remove));
+      queueHost.replaceChildren(queueList(d, byId, queue, move, remove));
     }
     render();
     countsHost.textContent = treeTitle();
@@ -218,13 +305,13 @@ export default {
         : h('p', { class: 'hint' }, h('span', { class: 'badge badge-live' }, 'LIVE'), ` Tree ${d.tree} and its state read from game memory - no save needed.`),
       h('div', { class: 'split' },
         card('Current focus', currentHost),
-        card(`Planned order (${queue.length})`, [queueHost,
-          notice('info', 'The plan is checked against prerequisites and exclusions. When the current focus ends, the app '
-            + 'notifies you which one to start next (the game has no command that starts a focus; focuses are never '
-            + 'completed instantly).')])),
+        card('Planned order', [autostartSwitch(ctx), queueHost,
+          h('p', { class: 'hint plan-hint' }, 'Checked against prerequisites and exclusions. Dates follow the game date and '
+            + 'assume each focus starts when the one before it ends. When a focus ends the app tells you the next one - '
+            + 'or starts it itself with auto-start on.')])),
       card(countsHost, [
         h('p', { class: 'hint' }, 'Laid out like the game. Gold name plate: completed · pulsing: in progress · silver-blue plate: can be '
-          + 'taken next · red plate: not yet possible (darker: excluded by an earlier choice). Red link: mutually exclusive '
+          + 'taken next · dark plate, grey icon: not yet possible (faded: excluded by an earlier choice). Red link: mutually exclusive '
           + 'focuses. Dashed lines: one of several prerequisites. Drag to move around; click a focus to add it to the plan or '
           + 'remove it; hover for its description. The game may still require conditions the app cannot check.'),
         treeHost], { extra: h('span', { class: 'hoi-head-right' }, sourceText, control.el) }),

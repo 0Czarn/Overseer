@@ -1148,6 +1148,67 @@ class IdeaPointerTests(unittest.TestCase):
         with self.assertRaises(pointers.PointerError):
             pointers.read_justifications(mem, country)
 
+    def test_focus_start_and_player_slot(self):
+        mem = FakeMemory(0x4000)
+        mem.write = lambda address, data: mem.put(address, f"{len(data)}s", data)
+        module, table = BASE + 0x3000 - pointers.COUNTRY_TABLE[0], BASE + 0x3800   # module + offset inside the fake
+        mem.put(module + pointers.COUNTRY_TABLE[0], "Q", table)
+        mem.put(table + pointers.PLAYER_SLOT, "i", 3)   # `tag` USA -> MEX -> USA followed this slot
+        self.assertEqual(pointers.player_country(mem, module, ["GER", "ENG", "USA"]), "USA")
+        mem.put(table + pointers.PLAYER_SLOT, "i", 9)
+        self.assertIsNone(pointers.player_country(mem, module, ["GER", "ENG", "USA"]))
+        country, state, tree, array, wpa = BASE + 0x100, BASE + 0x800, BASE + 0x900, BASE + 0xA00, BASE + 0xB00
+        mem.put(country + pointers.FOCUS["state"], "Q", state)
+        mem.put(country + pointers.FOCUS["tree"], "Q", tree)
+        mem.put(tree + pointers.FOCUS["tree_id"], "16s", b"usa_focus")
+        mem.put(tree + pointers.FOCUS["tree_id"] + 16, "Q", 9)
+        mem.put(tree + pointers.FOCUS["tree_id"] + 24, "Q", 15)
+        mem.put(tree + pointers.TREE_FOCUSES, "Q", array)
+        mem.put(tree + pointers.TREE_FOCUSES + 8, "i", 1)
+        mem.put(tree + pointers.TREE_FOCUSES + 12, "i", 1)
+        mem.put(array, "Q", wpa)
+        mem.put(wpa + pointers.FOCUS["id"], "16s", b"USA_wpa")
+        mem.put(wpa + pointers.FOCUS["id"] + 16, "Q", 7)
+        mem.put(wpa + pointers.FOCUS["id"] + 24, "Q", 15)
+        mem.put(state + pointers.FOCUS["progress"], "q", 1_000_000)   # 10 saved days
+        self.assertEqual(pointers.focus_definition(mem, country, "USA_wpa"), wpa)
+        self.assertIsNone(pointers.focus_definition(mem, country, "USA_other"))
+        pointers.write_focus_start(mem, country, wpa)
+        self.assertEqual(pointers.read_focus(mem, country)["current"], "USA_wpa")
+        self.assertEqual(pointers.read_focus(mem, country)["progress_days"], 0.0)   # saved days dropped, no PP
+        with self.assertRaises(pointers.PointerError):   # a focus is already selected
+            pointers.write_focus_start(mem, country, wpa)
+
+    def test_read_factories_like_the_game_tooltip(self):
+        # GER 1941 (fabryk.png): military 268 = owned 208 + occupation 61 + subjects 2 - damaged 3, dockyards 23 =
+        # 11 + 12, civilian 182 = 71 + 71 + 10 + trade 30; a subject (MAL) gives 7 military to its overlord
+        mem = FakeMemory(0x4000)
+        country, status = BASE + 0x100, BASE + 0x800
+        mem.put(country + pointers.PRODUCTION_STATUS, "Q", status)
+        f = pointers.FACTORY_FIELDS
+        for kind, (total, owned, damaged, received, given, trade) in {
+                "military": (271.04526, 208.90038, 3.25245, 2, 0, 0), "dockyards": (23.40028, 11.28154, 0, 0, 0, 0),
+                "civilian": (182.95971, 71.84011, 0.94969, 10, 0, 30)}.items():
+            b = status + pointers.FACTORY_BLOCKS[kind]
+            for key, value in (("total", total), ("owned", owned), ("damaged", damaged)):
+                mem.put(b + f[key], "q", round(value * 100000))
+            mem.put(b + f["subjects"], "i", received)
+            mem.put(b + f["to_overlord"], "i", given)
+            mem.put(b + f["trade"], "i", trade)
+        mem.put(status + pointers.FACTORY_BLOCKS["military"] + f["energy_coverage"], "q", 97126)
+        for key, value in (("generated", 3974.05), ("demand", 4091.628), ("coal_used", 383), ("coal_needed", 394.36)):
+            mem.put(status + pointers.ENERGY[key], "q", round(value * 100000))
+        r = pointers.read_factories(mem, country)
+        self.assertEqual({k: r["military"][k] for k in ("total", "owned", "occupation", "subjects", "damaged")},
+                         {"total": 268, "owned": 208, "occupation": 61, "subjects": 2, "damaged": 3})
+        self.assertEqual((r["dockyards"]["total"], r["dockyards"]["owned"], r["dockyards"]["occupation"]), (23, 11, 12))
+        self.assertEqual({k: r["civilian"][k] for k in ("total", "owned", "occupation", "subjects", "trade", "damaged")},
+                         {"total": 182, "owned": 71, "occupation": 71, "subjects": 10, "trade": 30, "damaged": 0})
+        self.assertEqual(r["energy"]["coverage"], 0.97126)
+        mem.put(status + pointers.FACTORY_BLOCKS["military"] + f["to_overlord"], "i", 7)   # now a subject: -7
+        self.assertEqual((pointers.read_factories(mem, country)["military"]["total"],
+                          pointers.read_factories(mem, country)["military"]["subjects"]), (261, -5))
+
     def test_read_research(self):
         mem = FakeMemory(0x4000)
         country, status, array = BASE + 0x100, BASE + 0x400, BASE + 0x600
@@ -1203,6 +1264,10 @@ class IdeaPointerTests(unittest.TestCase):
         self._string(mem, cat, "motorized_equipment")
         self.assertEqual(pointers.read_limited_bonuses(mem, country), [
             {"id": 1, "name": "SUBDOCTRINE_MOBILE_INFANTRY", "bonus": 0.5, "uses": 1, "categories": ["motorized_equipment"]}])
+        # a used up bonus (0 uses) without a name (USA 1936, id 9): still read - the service hides used up ones
+        mem.put(bonus + pointers.BONUS["uses"], "i", 0)
+        self._string(mem, bonus + pointers.BONUS["name"], "")
+        self.assertEqual(pointers.read_limited_bonuses(mem, country)[0]["name"], "")
         mem.put(bonus + pointers.BONUS["uses"], "i", -3)   # negative uses: wrong layout
         with self.assertRaises(pointers.PointerError):
             pointers.read_limited_bonuses(mem, country)

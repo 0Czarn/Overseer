@@ -11,6 +11,7 @@ Other game versions are refused: offsets of a compiled program are not stable ac
 
 from __future__ import annotations
 
+import math
 import re
 import struct
 
@@ -25,6 +26,10 @@ COUNTRY_TABLE = (0x332F260, 0x310)
 # player). CORRECTION (same day): after the console command `fow` (fog of war off) all 99 existing countries had 0
 # - it is a visibility flag, not an AI flag. It identifies the player only when exactly one country has 0.
 PLAYER_FLAG = (0xFA0, 0x1C0)
+# [hoi4.exe + COUNTRY_TABLE[0]] + 0x520 = slot of the player's country (int32, index in the tag order + 1). Found
+# 2026-10-13 by the console command `tag` (USA -> MEX -> USA): 68 -> 51 -> 68, the only value in the game state
+# following the player; works with fog of war off, where PLAYER_FLAG cannot tell the player apart.
+PLAYER_SLOT = 0x520
 # int32 at country + 0x484: number of states the country owns (0 = does not exist). 2026-10-10: equal to the
 # owner count of the save for 439/439 tags (99 existing, 340 not), next best location 437/439.
 OWNED_STATES = 0x484
@@ -87,6 +92,14 @@ def country_objects(memory, module_base: int, tags: list[str]) -> dict[str, int]
         if 0x10000 <= country < 0x7FFF_FFFF_FFFF:
             out[tag] = country
     return out
+
+
+def player_country(memory, module_base: int, tags: list[str]) -> str | None:
+    """Tag of the local player's country from the game state (None when not readable or out of range)."""
+    table = _ptr(memory, module_base + COUNTRY_TABLE[0])
+    raw = memory.read(table + PLAYER_SLOT, 4) if table else None
+    slot = struct.unpack("<i", raw)[0] if raw else 0
+    return tags[slot - 1] if 0 < slot <= len(tags) else None
 
 
 def player_tags(memory, module_base: int, tags: list[str]) -> list[str]:
@@ -560,7 +573,9 @@ def read_limited_bonuses(memory, country: int) -> list[dict]:
         bonus = struct.unpack_from("<q", raw, BONUS["bonus"])[0] / 100000
         categories = [_msvc_string(memory, c) for c in read_array(memory, item + BONUS["categories"], 50) if c]
         name = _msvc_string(memory, item + BONUS["name"])
-        if not 0 <= uses <= 1000 or not 0 <= bonus <= 100 or not name or None in categories:
+        # a bonus may have no name (USA 1936: +75 %, id 9, empty string) - only an unreadable one is wrong;
+        # used up bonuses keep 0 uses in memory (the service hides them)
+        if not 0 <= uses <= 1000 or not 0 <= bonus <= 100 or name is None or None in categories:
             raise PointerError("implausible", "Research bonus out of range - layout does not match")
         out.append({"id": bonus_id, "name": name, "bonus": bonus, "uses": uses, "categories": categories})
     return out
@@ -709,7 +724,7 @@ def read_focus(memory, country: int) -> dict:
         if fid:
             completed.append(fid)
     tree = _ptr(memory, country + FOCUS["tree"])
-    tree_id = _msvc_string(memory, tree + FOCUS["tree_id"]) if tree else None
+    tree_id = (_msvc_string(memory, tree + FOCUS["tree_id"]) if tree else None) or None
     if tree_id is not None and not re.fullmatch(r"[A-Za-z0-9_.\-]{1,200}", tree_id):
         raise PointerError("implausible", f"Focus tree id {tree_id!r} does not look like an id - layout does not match")
     return {"tree": tree_id, "current": current or None, "progress_days": progress, "completed": completed}
@@ -934,4 +949,80 @@ def read_justifications(memory, country: int) -> list[tuple[int, int]]:
         if not all(0 < s < 5000 for s in sides):
             raise PointerError("implausible", "Wargoal justification sides out of range - layout does not match")
         out.append(sides)
+    return out
+
+
+# Starting a focus (2026-10-13, USA 1936: the user picked USA_continue_the_new_deal in the paused game, memory
+# before/after): the game sets the focus progress object's definition (+ 0x10) and keeps the saved days (+ 0x38, at
+# most MAX_SAVED_FOCUS_PROGRESS = 10) - for which it takes political power ("Picking a focus will use 10 PP"). The
+# app's start (user's choice) drops the saved days instead: progress 0, political power unchanged.
+# The focuses of a tree: CNationalFocusTree + 0x30 = array of CNationalFocus* (read_array; USA 146 incl. shared).
+TREE_FOCUSES = 0x30
+
+
+def focus_definition(memory, country: int, focus_id: str) -> int | None:
+    """Address of the CNationalFocus with id `focus_id` in the country's focus tree, or None."""
+    tree = _ptr(memory, country + FOCUS["tree"])
+    if tree is None:
+        raise PointerError("unreadable", "The country's focus tree is not readable")
+    for definition in read_array(memory, tree + TREE_FOCUSES, 5000):
+        if definition and _msvc_string(memory, definition + FOCUS["id"]) == focus_id:
+            return definition
+    return None
+
+
+def write_focus_start(writer, country: int, definition: int) -> None:
+    """Makes `definition` the country's current focus with 0 days of progress. Only when no focus is selected."""
+    state = _ptr(writer, country + FOCUS["state"])
+    if state is None:
+        raise PointerError("unreadable", "Focus state of the country is not readable")
+    if _ptr(writer, state + FOCUS["definition"]) is not None:
+        raise PointerError("busy", "A focus is already selected")
+    writer.write(state + FOCUS["progress"], struct.pack("<q", 0))      # first: no saved days carried over
+    writer.write(state + FOCUS["definition"], struct.pack("<Q", definition))
+
+
+# Factories (2026-10-13, GER 1941 equal to the game's factory tooltip, fabryk.png: military 268 = owned 208 +
+# occupation 61 + subjects 2 - damaged 3; dockyards 23 = 11 + 12; civilian 182 = 71 + 71 + 10 + trade 30; energy
+# demand 4091.6 (97.1 %), generated 3974.0, 383 coal used). CProductionStatus holds one block per factory type
+# (military + 0x2b0, dockyards + 0x310, civilian + 0x370): + 0x8 = total before damage, + 0x18 = owned, + 0x20 =
+# damaged (fixed64 / 100000), + 0x44 = received from subjects, + 0x48 = given to the overlord (a subject: MAL 7
+# military, 12 civilian), + 0x58 = from trade (civilian) (int32), + 0x38 = energy coverage (fixed64). Energy: + 0x508
+# generated, + 0x530 demand, + 0x4f8 coal used, + 0x528 coal needed. The game shows whole numbers: total = floor(total)
+# - floor(damaged) - given, owned = floor(owned), subject relations = received - given, occupation = the rest
+# (civilian total = the verified CProductionStatus + 0x43c for 439/439 countries).
+FACTORY_BLOCKS = {"military": 0x2B0, "dockyards": 0x310, "civilian": 0x370}
+FACTORY_FIELDS = {"total": 0x8, "owned": 0x18, "damaged": 0x20, "energy_coverage": 0x38, "subjects": 0x44,
+                  "to_overlord": 0x48, "trade": 0x58}
+ENERGY = {"generated": 0x508, "demand": 0x530, "coal_used": 0x4F8, "coal_needed": 0x528}
+
+
+def read_factories(memory, country: int) -> dict:
+    """{"military"|"dockyards"|"civilian": {"total", "owned", "occupation", "subjects" (received - given to the
+    overlord), "trade", "damaged"} as the
+    game's factory tooltip shows them, "energy": {"demand", "generated", "coverage", "coal_used", "coal_needed"}}."""
+    status = _ptr(memory, country + PRODUCTION_STATUS)
+    raw = memory.read(status, 0x540) if status else None
+    if raw is None:
+        raise PointerError("unreadable", "The country's production status is not readable")
+    fx = lambda off: struct.unpack_from("<q", raw, off)[0] / 100000  # noqa: E731
+    i32 = lambda off: struct.unpack_from("<i", raw, off)[0]  # noqa: E731
+    out = {}
+    for kind, block in FACTORY_BLOCKS.items():
+        total, owned, damaged = (fx(block + FACTORY_FIELDS[k]) for k in ("total", "owned", "damaged"))
+        received, given = i32(block + FACTORY_FIELDS["subjects"]), i32(block + FACTORY_FIELDS["to_overlord"])
+        trade = i32(block + FACTORY_FIELDS["trade"]) if kind == "civilian" else 0
+        if not (0 <= owned <= total + 1e-6 <= 100_000 and 0 <= damaged <= total + 1e-6 and 0 <= received <= 10_000
+                and 0 <= given <= total + 1e-6 and 0 <= trade <= 10_000):
+            raise PointerError("implausible", f"{kind} factories out of range - layout does not match")
+        dmg = math.floor(damaged + 1e-6)
+        shown = math.floor(total + 1e-6) - dmg - given
+        out[kind] = {"total": shown, "owned": math.floor(owned + 1e-6), "subjects": received - given, "trade": trade,
+                     "damaged": dmg, "raw": round(total, 3)}
+        out[kind]["occupation"] = shown - out[kind]["owned"] - (received - given) - trade + dmg
+    energy = {k: round(fx(v), 3) for k, v in ENERGY.items()}
+    energy["coverage"] = round(fx(FACTORY_BLOCKS["military"] + FACTORY_FIELDS["energy_coverage"]), 5)
+    if not (0 <= energy["demand"] < 1e7 and 0 <= energy["generated"] < 1e7 and 0 <= energy["coverage"] <= 1.5):
+        raise PointerError("implausible", "Energy out of range - layout does not match")
+    out["energy"] = energy
     return out

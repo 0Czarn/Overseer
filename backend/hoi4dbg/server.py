@@ -72,6 +72,11 @@ def build_routes(svc: DebuggerService) -> list[Route]:
             raise LiveError("not_confirmed", "Direct memory writes must be enabled explicitly (local only)")
         return svc.construction_sort(apply=True)
 
+    def focus_autostart(body: dict) -> dict:
+        if body.get("confirm_local") is not True:
+            raise LiveError("not_confirmed", "Direct memory writes must be enabled explicitly (local only)")
+        return svc.focus_autostart(apply=True)
+
     def calibration(body: dict) -> dict:
         field, action = str(body.get("field", "")), body.get("action")
         if action == "start":
@@ -94,6 +99,7 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("GET", f"/api/countries/{tag}/research", lambda q, b, tag: svc.research(tag)),
         r("GET", f"/api/countries/{tag}/trade-advice", lambda q, b, tag: svc.trade_advice(
             tag, _str(q, "mode") or "surplus", _int(q, "limit", 25, 10, 100) / 100)),
+        r("GET", f"/api/countries/{tag}/factories", lambda q, b, tag: svc.factories(tag)),
         r("GET", f"/api/countries/{tag}/construction", lambda q, b, tag: svc.construction(tag)),
         r("GET", "/api/research/tabs", lambda q, b: svc.research_tabs()),
         r("GET", f"/api/countries/{tag}/research/tree", lambda q, b, tag: svc.research_tree(tag, (q.get("folder") or [""])[0])),
@@ -119,6 +125,8 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("GET", "/api/live/values", lambda q, b: {"data": live().values(_str(q, "tag").upper() or None)}),
         r("POST", "/api/live/calibration", lambda q, b: calibration(b)),
         r("POST", "/api/live/write", lambda q, b: live_write(b)),
+        r("GET", "/api/live/focus/autostart", lambda q, b: svc.focus_autostart(apply=False)),
+        r("POST", "/api/live/focus/autostart", lambda q, b: focus_autostart(b)),
         r("GET", "/api/live/construction/sort", lambda q, b: svc.construction_sort(apply=False)),
         r("POST", "/api/live/construction/sort", lambda q, b: construction_sort(b)),
         r("GET", "/api/live/stockpile", lambda q, b: svc.live_stockpile(_str(q, "tag").upper() or None)),
