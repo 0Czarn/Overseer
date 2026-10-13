@@ -636,6 +636,16 @@ class LiveService:
             raise LiveError("unsupported_version", "Live factory reading is only verified for 1.19.3.0.c01a")
         return {**self._with_country(process, tag, pointers.read_factories), "tag": tag, "read_at": self._clock()}
 
+    def doctrine_state(self, tag: str) -> dict:
+        """Live doctrines of `tag`: per folder the grand doctrine and each track's subdoctrine and mastery."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Live doctrine reading is only verified for 1.19.3.0.c01a")
+        key = (process["pid"], process.get("started"))
+        folders = self._with_country(process, tag, lambda mem, _c: pointers.read_doctrine_state(
+            mem, self._module_base[key], self._tags[process.get("install") or ""], tag))
+        return {"folders": folders, "tag": tag, "read_at": self._clock()}
+
     def advisors(self, tag: str) -> dict:
         """Live hired advisors and staff of `tag`: [{"slot", "id": character id}] (game memory)."""
         process = self._process()

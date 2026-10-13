@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 
-from . import __version__, construction as construction_mod, geography, trade as trade_mod, deficit, demo, equipment_changes, gamefiles, gfx, modifiers
+from . import __version__, construction as construction_mod, doctrines as doctrines_mod, geography, trade as trade_mod, deficit, demo, equipment_changes, gamefiles, gfx, modifiers
 from . import government as government_mod
 from . import mio as mio_mod
 from . import focus as focus_mod
@@ -1133,6 +1133,98 @@ class DebuggerService:
         data = {k: found[k] for k in ("military", "dockyards", "civilian", "energy")}
         return envelope(LIVE, {"tag": tag, **data, "icons": icons, "factories_source": "live"},
                         "Factories from game memory.")
+
+    def doctrines(self, tag: str) -> dict:
+        """Doctrines of `tag` like the game's doctrine screen (game memory): per folder the grand doctrine, each
+        track's subdoctrine, mastery, banked mastery, daily gain and rewards (unlocked or not, with their effects);
+        the other grand doctrines and subdoctrines that could be chosen; names, texts and icons from the game files."""
+        tag = tag.upper()
+        install = self._install_path()
+        if install is None:
+            return envelope(UNAVAILABLE, None, "Needs the game installation")
+        if self.live is None:
+            return envelope(UNAVAILABLE, None, "Needs the running game")
+        try:
+            state = self.live.doctrine_state(tag)["folders"]
+        except Exception as exc:  # game not running, main menu, other version
+            return envelope(UNAVAILABLE, None, f"Needs the running game: {exc}")
+        roots = self._game_roots(install)
+        defs = doctrines_mod.definitions(roots)
+        keys: set[str] = set()
+
+        def want(d):
+            if d:
+                keys.update(filter(None, [d.get("name"), d.get("desc")]))
+                for m in [d.get("modifiers") or {}] + [r["modifiers"] for r in d.get("rewards", [])] \
+                        + [ms["modifiers"] for ms in d.get("milestones", [])]:
+                    for k in m:
+                        stat, _, unit = k.partition("@")
+                        keys.update(filter(None, [f"MODIFIER_{stat.upper()}", stat, f"STAT_{stat.upper()}", unit]))
+                for t in (d.get("tactics") or []) + [t for r in d.get("rewards", []) for t in r["tactics"]] \
+                        + [t for ms in d.get("milestones", []) for t in ms["tactics"]]:
+                    keys.add(t)
+                for r in d.get("rewards", []):
+                    keys.add(f"{d['id']}_{r['id']}")
+        for f in defs["folders"]:
+            keys.add(f["name"] or "")
+        for t in defs["tracks"].values():
+            keys.add(t["name"] or "")
+        for d in list(defs["grand"].values()) + list(defs["subs"].values()):
+            want(d)
+        names = focus_mod.loc_names(install, keys)
+        loc = lambda k: (clean_loc(names[k], names) if k and names.get(k) else None)  # noqa: E731
+        sprites = gfx.sprites(roots)
+        icon = lambda sprite: gfx.icon_data_uri(sprites[sprite]) if sprite and sprites.get(sprite) else None  # noqa: E731
+
+        def mods(m: dict) -> list[dict]:
+            out = []
+            for k, v in m.items():
+                stat, _, unit = k.partition("@")
+                label = loc(f"MODIFIER_{stat.upper()}") or loc(f"STAT_{stat.upper()}") or loc(stat) \
+                    or stat.replace("_", " ").capitalize()
+                if unit:
+                    label = f"{label} ({loc(unit) or unit.replace('category_', '').replace('_', ' ')})"
+                out.append({"key": stat, "label": label, "value": v})
+            return out
+
+        def card(d, selected=False):
+            if not d:
+                return None
+            return {"id": d["id"], "name": loc(d["name"]) or d["id"].replace("_", " ").title(),
+                    "desc": loc(d["desc"]), "icon": icon(d["icon"]), "selected": selected,
+                    "modifiers": mods(d["modifiers"]), "tactics": [loc(t) or t for t in d["tactics"]]}
+
+        folders = []
+        for i, fdef in enumerate(defs["folders"]):
+            st = state[i] if i < len(state) else {"grand": None, "tracks": []}
+            g = doctrines_mod.resolve(st["grand"], defs, "grand")
+            track_ids = g["tracks"] if g else []
+            tracks = []
+            for j, t in enumerate(st["tracks"]):
+                tid = track_ids[j] if j < len(track_ids) else None
+                sub = doctrines_mod.resolve(t["sub"], defs, "subs", tid)
+                rewards = [{"name": loc(f"{sub['id']}_{r['id']}") or r["id"].replace("_", " ").capitalize(),
+                            "threshold": r["threshold"], "unlocked": k < t["rewards"],
+                            "modifiers": mods(r["modifiers"]), "tactics": [loc(x) or x for x in r["tactics"]]}
+                           for k, r in enumerate(sub["rewards"])] if sub else []
+                milestone = g["milestones"][j] if g and j < len(g["milestones"]) else None
+                tracks.append({
+                    "id": tid, "name": loc((defs["tracks"].get(tid) or {}).get("name")) or (tid or "").replace("_", " ").title(),
+                    "icon": icon((defs["tracks"].get(tid) or {}).get("icon")),
+                    "sub": {**card(sub, True), "rewards": rewards} if sub else None,
+                    "mastery": t["mastery"], "bank": t["bank"], "daily": t["daily"], "rewards_unlocked": t["rewards"],
+                    "max_mastery": rewards[-1]["threshold"] if rewards else None,
+                    "milestone": {"modifiers": mods(milestone["modifiers"]), "tactics": [loc(x) or x for x in milestone["tactics"]]}
+                    if milestone else None,
+                    "options": [card(o) for o in defs["subs"].values() if o["track"] == tid and (not sub or o["id"] != sub["id"])],
+                })
+            folders.append({
+                "id": fdef["id"], "name": loc(fdef["name"]) or fdef["id"].replace("_", " ").title(), "icon": icon(fdef["icon"]),
+                "grand": card(g, True), "tracks": tracks,
+                "grand_options": [card(o) for o in defs["grand"].values() if o["folder"] == fdef["id"] and (not g or o["id"] != g["id"])],
+            })
+        return envelope(LIVE, {"tag": tag, "folders": folders, "doctrine_source": "live"},
+                        "Doctrines from game memory; names, texts and icons from the game files.")
 
     def research_tabs(self) -> dict:
         """Tabs of the research screen (technology folders) for the installed game, enabled mods and owned DLCs,

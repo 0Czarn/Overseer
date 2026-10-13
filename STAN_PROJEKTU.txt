@@ -102,6 +102,16 @@ ZROBIONE
             WZÓR "At war" USTALONY (2026-10-13): -20% + war_stability_factor (DODAWANY, nie mnożony); suma z gry =
             numer 145 (SOV 0,02195 -> -17,80%; z POL 0,0025 -> -19,75%), bez zmian po miesiącu gry (kapitulacja
             18% bez wpływu). SOV 1941-10-21: wszystkie linie ST = podpowiedź gry (st3.png), bez UNKNOWN.
+[x] ZAKŁADKA DOCTRINES (2026-10-13, nowa, prośba użytkownika, Doktryny.png SOV 1941 - wartości = gra): foldery jak
+            w grze (Land / Naval / Air / Special Forces), główna doktryna (ikona, nazwa, opis, efekty, taktyki), tory z
+            subdoktryną, biegłością, biegłością w banku ("+68"), przyrostem dziennym i drabinką nagród I-V (próg,
+            odblokowana czy nie, efekty), kamień milowy toru, pozostałe doktryny do wyboru (wyszarzone, opis po
+            najechaniu). Pamięć: tor (TRACK_SIZE 0x60) +0x8 subdoktryna, +0x10 odblokowane nagrody, +0x18 biegłość,
+            +0x20 bank, +0x28 przyrost dzienny (fixed64). SOV: Individual Excellence 221 (2 nagrody), Artillery pusty
+            +68, Tank Destroyer Force 5, Dispersed Operations 148 (1). 439 państw bez błędu. Pliki gry:
+            common/doctrines (doctrines.py), progi nagród = suma mastery (domyślnie 100), nazwy nagród
+            <subdoktryna>_<nagroda>. Tylko odczyt.
+            [ ] do potwierdzenia: +0x28 to przyrost dzienny (szacunek "następna nagroda za N dni").
 [x] KAFELEK FABRYK w Country Editor (2026-10-13, prośba użytkownika, fabryk.png GER 1941 - wszystko = gra):
             wojskowe 268 (własne 208, okupacja +61, wasale +2, uszkodzone -3), stocznie 23 (11 + 12), cywilne 182
             (71 + 71 + 10 + handel 30), energia: zapotrzebowanie 4091,6 (97,1%), wytwarzanie 3974,0, węgiel 383 (+brak).

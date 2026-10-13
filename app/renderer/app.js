@@ -9,6 +9,7 @@ import countries from './views/countries.js';
 import countryEditor from './views/country-editor.js';
 import research from './views/research.js';
 import construction from './views/construction.js';
+import doctrines from './views/doctrines.js';
 import stateEditor from './views/state-editor.js';
 import focus from './views/focus.js';
 import equipment from './views/equipment.js';
@@ -16,7 +17,7 @@ import tools from './views/tools.js';
 import intel from './views/intel.js';
 import logs from './views/logs.js';
 
-const VIEWS = [dashboard, countries, countryEditor, research, construction, stateEditor, focus, equipment, tools, intel, logs];
+const VIEWS = [dashboard, countries, countryEditor, research, construction, doctrines, stateEditor, focus, equipment, tools, intel, logs];
 const STATUS_INTERVAL_MS = 3000;
 const PREFS_KEY = 'hoi4dbg.prefs';
 

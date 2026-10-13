@@ -1026,3 +1026,57 @@ def read_factories(memory, country: int) -> dict:
         raise PointerError("implausible", "Energy out of range - layout does not match")
     out["energy"] = energy
     return out
+
+
+# Doctrine mastery (2026-10-13, SOV 1941 equal to the game's doctrine screen, Doktryny.png): each track of a folder
+# (TRACK_SIZE bytes) holds + 0x8 the slotted subdoctrine (0 = empty), + 0x10 rewards unlocked (int32; 221 -> 2,
+# 148 -> 1, 5 -> 0), + 0x18 mastery (fixed64 / 100000: 221.82, 5.63, 148.0), + 0x20 banked mastery of an empty or
+# finished track (68.75 shown "+68"; at most MASTERY_BANK_MAX 200), + 0x28 mastery gained per day (fixed64).
+TRACK_FIELDS = {"rewards": 0x10, "mastery": 0x18, "bank": 0x20, "daily": 0x28}
+
+
+def read_doctrine_state(memory, module_base: int, tags: list[str], tag: str) -> list[dict]:
+    """[{"grand": name key or None, "tracks": [{"sub": name key or None, "mastery", "bank", "daily", "rewards"}]}]
+    folder by folder in the order of common/doctrines/folders (land, naval, air, special forces)."""
+    table = _ptr(memory, module_base + COUNTRY_TABLE[0])
+    system = _ptr(memory, table + DOCTRINE_SYSTEM) if table else None
+    array = _ptr(memory, system + DOCTRINE_COUNTRIES) if system else None
+    if array is None:
+        raise PointerError("no_doctrines", "The doctrine system is not readable")
+    slot = tags.index(tag) + 1
+    raw = memory.read(array + DOCTRINE_ENTRY * slot + 8, 24)
+    if not raw:
+        raise PointerError("unreadable", f"Doctrines of {tag} are not readable")
+    own_slot, folders, _cap, count = struct.unpack("<QQii", raw)
+    if own_slot != slot or not 0 <= count <= 16:
+        raise PointerError("implausible", "Doctrine entry does not belong to the country - layout does not match")
+
+    def name(template):
+        key = _msvc_string(memory, template + TEMPLATE_NAME) if template else None
+        if template and (not key or not re.fullmatch(r"[A-Za-z0-9_]+", key)):
+            raise PointerError("implausible", "A doctrine has no readable name - layout does not match")
+        return key
+    out = []
+    for k in range(count):
+        head = memory.read(folders + FOLDER_SIZE * k + FOLDER_GRAND, 0x18)
+        if not head:
+            raise PointerError("unreadable", "A doctrine folder is not readable")
+        grand, tracks, _tcap, tcount = struct.unpack("<QQii", head)
+        if not 0 <= tcount <= 16:
+            raise PointerError("implausible", "Doctrine tracks out of range - layout does not match")
+        items = []
+        for t in range(tcount):
+            tr = memory.read(tracks + TRACK_SIZE * t, TRACK_SIZE)
+            if not tr:
+                raise PointerError("unreadable", "A doctrine track is not readable")
+            fx = lambda off: struct.unpack_from("<q", tr, off)[0] / 100000  # noqa: E731
+            item = {"sub": name(struct.unpack_from("<Q", tr, TRACK_SUB)[0]),
+                    "rewards": struct.unpack_from("<i", tr, TRACK_FIELDS["rewards"])[0],
+                    "mastery": round(fx(TRACK_FIELDS["mastery"]), 3), "bank": round(fx(TRACK_FIELDS["bank"]), 3),
+                    "daily": round(fx(TRACK_FIELDS["daily"]), 4)}
+            if not (0 <= item["rewards"] <= 50 and 0 <= item["mastery"] <= 100_000 and 0 <= item["bank"] <= 100_000
+                    and 0 <= item["daily"] <= 1000):
+                raise PointerError("implausible", "Doctrine mastery out of range - layout does not match")
+            items.append(item)
+        out.append({"grand": name(grand), "tracks": items})
+    return out

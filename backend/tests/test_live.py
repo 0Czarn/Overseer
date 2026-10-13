@@ -1209,6 +1209,41 @@ class IdeaPointerTests(unittest.TestCase):
         self.assertEqual((pointers.read_factories(mem, country)["military"]["total"],
                           pointers.read_factories(mem, country)["military"]["subjects"]), (261, -5))
 
+    def test_read_doctrine_state(self):
+        # SOV 1941 (Doktryny.png): Infantry 221.8 mastery, 2 rewards; an empty track with 68.75 banked
+        mem = FakeMemory(0x4000)
+        module = BASE + 0x3000 - pointers.COUNTRY_TABLE[0]
+        table, system, array = BASE + 0x3800, BASE + 0x100, BASE + 0x200
+        tags = ["GER", "SOV"]
+        folders, tracks, template = BASE + 0x800, BASE + 0x900, BASE + 0xC00
+        mem.put(module + pointers.COUNTRY_TABLE[0], "Q", table)
+        mem.put(table + pointers.DOCTRINE_SYSTEM, "Q", system)
+        mem.put(system + pointers.DOCTRINE_COUNTRIES, "Q", array)
+        entry = array + pointers.DOCTRINE_ENTRY * 2
+        mem.put(entry + 8, "Q", 2)          # own slot (SOV)
+        mem.put(entry + 16, "Q", folders)
+        mem.put(entry + 24, "i", 1)
+        mem.put(entry + 28, "i", 1)
+        mem.put(folders + pointers.FOLDER_GRAND, "Q", template)
+        mem.put(folders + pointers.FOLDER_TRACKS, "Q", tracks)
+        mem.put(folders + pointers.FOLDER_TRACKS + 8, "i", 2)
+        mem.put(folders + pointers.FOLDER_TRACKS + 12, "i", 2)
+        mem.put(template + pointers.TEMPLATE_NAME, "16s", b"GRAND_X")
+        mem.put(template + pointers.TEMPLATE_NAME + 16, "Q", 7)
+        mem.put(template + pointers.TEMPLATE_NAME + 24, "Q", 15)
+        f = pointers.TRACK_FIELDS
+        mem.put(tracks + pointers.TRACK_SUB, "Q", template)
+        mem.put(tracks + f["rewards"], "i", 2)
+        mem.put(tracks + f["mastery"], "q", 22182300)
+        mem.put(tracks + f["daily"], "q", 70360)
+        mem.put(tracks + pointers.TRACK_SIZE + f["bank"], "q", 6875100)
+        self.assertEqual(pointers.read_doctrine_state(mem, module, tags, "SOV"), [{"grand": "GRAND_X", "tracks": [
+            {"sub": "GRAND_X", "rewards": 2, "mastery": 221.823, "bank": 0.0, "daily": 0.7036},
+            {"sub": None, "rewards": 0, "mastery": 0.0, "bank": 68.751, "daily": 0.0}]}])
+        mem.put(tracks + f["mastery"], "q", -500000)   # negative mastery: wrong layout
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_doctrine_state(mem, module, tags, "SOV")
+
     def test_read_research(self):
         mem = FakeMemory(0x4000)
         country, status, array = BASE + 0x100, BASE + 0x400, BASE + 0x600

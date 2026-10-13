@@ -5,7 +5,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const TABS = ['dashboard', 'countries', 'country-editor', 'research', 'construction', 'state-editor', 'focus', 'equipment', 'tools',
+const TABS = ['dashboard', 'countries', 'country-editor', 'research', 'construction', 'doctrines', 'state-editor', 'focus', 'equipment', 'tools',
   'intel', 'logs'];
 // HOI4DBG_SMOKE_TABS=focus,construction checks only these tabs
 const ONLY = (process.env.HOI4DBG_SMOKE_TABS || '').split(',').filter(Boolean);
@@ -127,6 +127,13 @@ function runSmoke(win, outDir, quit) {
               await waitFor(wc, `${count} === ${before}`, 10000);
               if (info.focusQueueAdd !== 1) result.failures.push(`${size.name}/focus: clicking a focus does not add it to the plan`);
             }
+          }
+          if (tab === 'doctrines') {
+            await waitFor(wc, `!!document.querySelector('.doc-tab, .live-panel-body .notice')`, 20000);
+            info.doctrines = await wc.executeJavaScript(`({ tabs: document.querySelectorAll('.doc-tab').length,
+              tracks: document.querySelectorAll('.doc-track').length,
+              notice: document.querySelector('.live-panel-body .notice')?.textContent ?? null })`);
+            if (!info.doctrines.tabs && !info.doctrines.notice) result.failures.push(`${size.name}/doctrines: shows nothing`);
           }
           if (tab === 'construction') {
             // queue rows, the empty-queue line, or the reason (game not running)
