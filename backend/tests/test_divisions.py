@@ -76,6 +76,19 @@ class DivisionDesignerTest(unittest.TestCase):
         self.assertAlmostEqual(s["reliability"], (3 * 1.0 + 0.8 + 0.8 + 0.84) / 6)   # infantry 0.972 + 0.05, capped
         self.assertEqual(res["missing_equipment"], [])
 
+    def test_equipment_cost_column_and_production_cost_range(self):
+        # POL Dywizja Piechoty (inf_pol.jpg) as 9 infantry + 1 hospital-like company: rifles 0.43 / 0.5, support 4
+        template = {"battalions": ["infantry"] * 9, "support": ["field_hospital"], "regimental": []}
+        costs = {"infantry_equipment": [0.43, 0.5], "support_equipment": [4.0]}
+        res = divisions.equipment_cost(template, self.tabs, self.equipment, costs)
+        self.assertEqual(res["equipment"], {"infantry_equipment": 900.0, "support_equipment": 30.0})
+        self.assertEqual((res["cost_min"], res["cost_max"]), (507.0, 570.0))   # 900 x 0.43 + 120 / 900 x 0.5 + 120
+        self.assertEqual((res["fuel_usage"], res["fuel_capacity"], res["no_design"]), (0.0, 0.0, []))
+        trucks = {**self.equipment, "infantry_equipment": {**self.equipment["infantry_equipment"], "fuel_consumption": 1.2}}
+        res = divisions.equipment_cost(template, self.tabs, trucks, {})
+        self.assertEqual((res["fuel_usage"], res["fuel_capacity"]), (10.8, 1036.8))   # 9 x 1.2, 96 hours of it
+        self.assertEqual((res["cost_min"], res["no_design"]), (0, ["infantry_equipment", "support_equipment"]))
+
     def test_locked_rewards_and_unknown_sub_units(self):
         s = self.stats(rewards=0)["stats"]
         self.assertAlmostEqual(s["defense"], 3 * 28.98 + 4.0 * 0.4)

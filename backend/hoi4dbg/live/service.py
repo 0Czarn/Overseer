@@ -661,17 +661,66 @@ class LiveService:
             raise LiveError("unsupported_version", "Live military reading is only verified for 1.19.3.0.c01a")
         key = (process["pid"], process.get("started"))
         tags = self._tags.setdefault(process.get("install") or "", pointers.tag_order(Path(process.get("install") or "")))
-        army, navy, air, reserve, free, designs, researched, doctrine_state, planes = self._with_country(
+        army, navy, air, reserve, free, designs, researched, doctrine_state, planes, costs = self._with_country(
             process, tag, lambda mem, c: (
                 pointers.read_army(mem, c), pointers.read_navy(mem, c),
                 pointers.read_air(mem, self._module_base[key], tags, tag), pointers.read_stockpile_planes(mem, c),
                 pointers.read_free_manpower(mem, self._module_base[key], tags, tag), pointers.read_designs(mem, c),
                 pointers.read_researched(mem, c), pointers.read_doctrine_state(mem, self._module_base[key], tags, tag),
-                pointers.read_plane_designs(mem, c)))
+                pointers.read_plane_designs(mem, c), pointers.read_design_costs(mem, c)))
         army["manpower_free"] = free
         return {"army": army, "navy": navy, "air": air, "air_reserve": reserve, "designs": designs,
-                "researched": researched, "doctrine_state": doctrine_state, "plane_designs": planes, "tag": tag,
+                "researched": researched, "doctrine_state": doctrine_state, "plane_designs": planes,
+                "design_costs": costs, "tag": tag,
                 "read_at": self._clock()}
+
+    def action_snapshot(self, tags: list[str], resources: list[str]) -> dict[str, dict]:
+        """{tag: snapshot} of the watched countries for the Players actions log (hoi4dbg/actions.py): focus, research, laws and
+        spirits, advisors, leader, wars, justifications, division templates, designs, construction queue, imports.
+        A part that cannot be read is left out (its changes are not logged that day)."""
+        def read(mem, base, order, _process):
+            countries = pointers.country_objects(mem, base, order)
+            cr_of = {t: pointers._ptr(mem, c + pointers.COUNTRY_RESOURCES) for t, c in countries.items()}
+            sellers = {cr: t for t, cr in cr_of.items() if cr}
+            out = {}
+            for tag in tags:
+                c = countries.get(tag)
+                if not c:
+                    continue
+                snap: dict = {}
+                parts = {
+                    "focus": lambda: pointers.read_focus(mem, c),
+                    "research": lambda: [s["technology"] for s in pointers.read_research(mem, c) if s["technology"]],
+                    "researched": lambda: pointers.read_researched(mem, c),
+                    "ideas": lambda: pointers.read_ideas(mem, c),
+                    "advisors": lambda: sorted({a["id"] for a in pointers.read_advisors(mem, c)}),
+                    "leader": lambda: (pointers.read_leader(mem, c) or {}).get("id"),
+                    "wars": lambda: sorted({w["enemy"] for w in pointers.read_wars(mem, c, order, tag)}),
+                    "justifications": lambda: sorted({order[t - 1] for _s, t in pointers.read_justifications(mem, c)
+                                                      if 0 < t <= len(order)}),
+                    "templates": lambda: {t["name"]: [t["grid"][k] for k in ("battalions", "support", "regimental")]
+                                          for t in pointers.read_army(mem, c)["templates"]},
+                    "designs": lambda: {str(d["id"]): d["name"] or d["type"] for d in pointers.read_design_costs(mem, c)},
+                    "construction": lambda: {str(q["id"]): f'{q["building"]}@{q["location"]}'
+                                             for q in pointers.read_construction(mem, c, base)},
+                    "trade": lambda: self._imports(mem, cr_of.get(tag), resources, sellers),
+                }
+                for key, fn in parts.items():
+                    try:
+                        snap[key] = fn()
+                    except (pointers.PointerError, KeyError, TypeError) as exc:
+                        self.log.debug("Players actions: %s of %s not read: %s", key, tag, exc)
+                out[tag] = snap
+            return out
+        return self._game_memory(read)
+
+    @staticmethod
+    def _imports(mem, cr: int | None, resources: list[str], sellers: dict[int, str]) -> dict[str, float]:
+        """{"seller resource": amount} of the import deals of the country with resources object `cr`."""
+        if not cr or not resources:
+            return {}
+        tokens = pointers.read_resources(mem, cr, resources).pop("_tokens")
+        return {f'{d["seller"]} {d["resource"]}': round(d["amount"], 2) for d in pointers.read_imports(mem, cr, tokens, sellers)}
 
     def advisors(self, tag: str) -> dict:
         """Live hired advisors and staff of `tag`: [{"slot", "id": character id}] (game memory)."""

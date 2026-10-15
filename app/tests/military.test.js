@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { designDate, designerLines, gridColumns, manpowerText, planeStatLines, shortCount, slotLabel, slotRows, splitDesigns, statText, unitLines } from '../renderer/views/military.js';
+import { designDate, designerLines, gridColumns, manpowerText, planeStatLines, productionCostText, shortCount, slotLabel, slotRows, splitDesigns, statText, unitLines } from '../renderer/views/military.js';
 
 test('counts shortened like the game top bar (SOV: 4,345,676 men in the field = 4M)', () => {
   assert.equal(shortCount(4345676), '4.34M');
@@ -33,7 +33,7 @@ test('designer stats cut off like the game (SOV Strelkovaya Diviziya, dywizja.pn
   assert.equal(groups['Base Stats'].HP, '301.7');
   assert.equal(groups['Base Stats']['Supply Use'], '0.76');
   assert.equal(groups['Base Stats']['Max Speed'], '4.0 km/h');
-  assert.equal(groups.Cost.Manpower, '11640');
+  assert.equal(groups['Equipment Cost'].Manpower, '11640');
   assert.equal(groups['Base Stats']['Exp. Loss'], '-25.00%');
   assert.equal(groups['Base Stats'].Organization, undefined);
 });
@@ -79,4 +79,14 @@ test('plane designer stats: three columns like the game, values cut off', () => 
   assert.deepEqual(lines.map(([t]) => t), ['Base Stats', 'Combat Stats', 'Misc. Stats']);
   assert.deepEqual(lines[0][1][0], ['Max Speed', '497.2 km/h']);   // the PZL P.23 (new) as air_temp_new.jpg
   assert.deepEqual(lines[2][1].slice(0, 2), [['Reliability', '80.0%'], ['Fuel Usage', '0.21']]);
+});
+
+test('Equipment Cost column and estimated production cost like the game (POL Dywizja Piechoty, inf_pol.jpg)', () => {
+  const cost = { equipment: { infantry_equipment: 940, support_equipment: 10 }, fuel_usage: 0, fuel_capacity: 0,
+    cost_min: 444.2, cost_max: 510, names: { infantry_equipment: 'Infantry Eq.', support_equipment: 'Support Eq.' } };
+  const groups = Object.fromEntries(designerLines({ manpower: 9500, training_time: 120 }, cost));
+  assert.deepEqual(groups['Equipment Cost'], [['Manpower', '9500'], ['Training Time', '120'], ['Fuel Capacity', '0.0'],
+    ['Fuel Usage', '0.00'], ['Infantry Eq.', '940'], ['Support Eq.', '10']]);
+  assert.equal(productionCostText(cost), '444 to 510');
+  assert.equal(productionCostText({ cost_min: 510, cost_max: 510.2 }), '510');
 });

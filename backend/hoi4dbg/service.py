@@ -111,6 +111,7 @@ def save_freshness(save_mtime: float, game: dict, now: float | None = None) -> d
 
 
 # plane design stats as the game's design tooltip names them (Air.png)
+MAX_ACTIONS = 3000   # newest events sent to the Players actions tab
 PLANE_STAT_LABELS = {"range": "Range", "air_defence": "Air Defense", "air_attack": "Air Attack", "air_agility": "Agility",
                      "air_superiority": "Air Superiority", "naval_strike_attack": "Naval Attack",
                      "naval_strike_targetting": "Naval Targeting", "maximum_speed": "Max Speed",
@@ -1242,6 +1243,8 @@ class DebuggerService:
         self._division_stats(install, army["templates"], found)
         ids = {u for t in army["templates"] for k in ("battalions", "support", "regimental") for u in t[k]}
         ids |= {sh["type"] for sh in navy["ships"]} | {g["role"] for g in air}
+        eq_ids = {a for t in army["templates"] for a in ((t.get("designer") or {}).get("cost") or {}).get("equipment", {})}
+        ids |= eq_ids | {f"{a}_short" for a in eq_ids}
         planes = found.get("plane_designs") or []
         ids |= {d["type"] for d in planes} | {s["module"] for d in planes for s in d.get("slots", []) if s["module"]}
         stat_keys = {k for g in air + reserve for k in (g["stats"] or {})}
@@ -1261,6 +1264,9 @@ class DebuggerService:
             units = {}
         priority = lambda u: (units.get(u) or {}).get("stats", {}).get("priority", 0)  # noqa: E731
         for t in army["templates"]:
+            cost = (t.get("designer") or {}).get("cost")
+            if cost:   # "Infantry Eq." as the designer
+                cost["names"] = {a: loc(f"{a}_short") or loc(a) or a.replace("_", " ") for a in cost["equipment"]}
             # the template's icon: the player's choice, else the battalion type the game puts first (highest priority)
             first = max(t["battalions"], key=lambda u: (priority(u), t["battalions"].count(u)), default=None)
             t["icon"] = {"template": t["icon"]} if t["icon"] >= 0 else {"unit": first}
@@ -1342,6 +1348,9 @@ class DebuggerService:
                 several.add(arch)
             else:
                 equipment[arch] = {**d["stats"], "design": d["name"]}
+        costs: dict[str, list[float]] = {}
+        for d in found.get("design_costs") or []:   # every design, outdated ones too: the cost range
+            costs.setdefault(deficit.archetype_of(d["type"], archetypes), []).append(d["cost"])
         for t in templates:
             res = divisions_mod.template_stats(t, tabs, equipment, mods, mults)
             if res is None:
@@ -1350,6 +1359,7 @@ class DebuggerService:
                      for a in tabs["units"].get(u, {}).get("need", {})}
             res["estimate"] = sorted(needs & several)
             res["designs"] = {a: equipment[a]["design"] for a in sorted(needs) if equipment.get(a, {}).get("design")}
+            res["cost"] = divisions_mod.equipment_cost(t, tabs, equipment, costs)
             t["designer"] = res
 
     def summary_games(self) -> dict:
@@ -1375,6 +1385,81 @@ class DebuggerService:
         for c in out["countries"]:
             c["name"] = names.get(c["tag"], c["tag"])
         return {"data": {"id": gid, "player": game["player"], "metric": metric, "by_faction": by_faction, **out}}
+
+    # -- Players actions (actions.py) ---------------------------------------------------------------
+    def action_snapshot(self, tags: list[str]) -> dict[str, dict]:
+        """Snapshots of `tags` for the IC recorder (live/service.action_snapshot with the game's resource order)."""
+        install = self._install_path()
+        if install is None or self.live is None:
+            return {}
+        return self.live.action_snapshot(tags, list(resource_order(self._game_roots(install))))
+
+    def players_actions(self, gid: str | None = None) -> dict:
+        """The Players actions log of a campaign (the one being recorded, else the newest): events with names from the
+        game files and the newest save, the watched countries."""
+        games = self.ic_history.games()
+        if gid is None or not any(g["id"] == gid for g in games):
+            gid = self.ic_history.active or (games[0]["id"] if games else None)
+        game = next((g for g in games if g["id"] == gid), None)
+        events = self.ic_history.actions(gid)[-MAX_ACTIONS:]
+        install = self._install_path()
+        keys = {e["id"] for e in events if e["kind"] in ("focus", "research", "researched", "ideas") and e.get("id")}
+        keys |= {str(e.get("detail") or "").split("@")[0] for e in events if e["kind"] == "construction"}
+        names = focus_mod.loc_names(install, keys) if install else {}
+        names.update({k: clean_loc(v, names) for k, v in names.items()})
+        countries = gamefiles.country_names(install) if install else {}
+        chars = self._character_names(install, {e["tag"] for e in events if e["kind"] in ("advisors", "leader")})
+        out = []
+        for e in events:
+            out.append({**e, "date": ic_history_mod.date_text(e["t"]),
+                        "name": self._action_name(e, names, countries, chars.get(e["tag"], {}))})
+        return {"data": {"game": gid, "games": [{"id": g["id"], "player": g["player"], "first": g["first"], "last": g["last"],
+                                                 "created": g["created"], "active": g["active"]} for g in games],
+                         "player": game and game["player"], "watched": self.ic_history.watched(),
+                         "countries": countries, "events": out, "limit": MAX_ACTIONS}}
+
+    def players_actions_watch(self, data) -> dict:
+        try:
+            tags = self.ic_history.set_watched((data or {}).get("tags"))
+        except ValueError as exc:
+            raise ReportError(str(exc)) from None
+        self.log.info("Players actions: watching %s", ", ".join(tags) or "the player only")
+        return {"data": {"watched": tags}}
+
+    def _character_names(self, install: Path | None, tags: set[str]) -> dict[str, dict[str, str]]:
+        """{tag: {character id: name}} from the newest save (advisors and leaders are characters)."""
+        picked = self._pick_save(None) if install and tags else None
+        out: dict[str, dict[str, str]] = {}
+        if not picked:
+            return out
+        for tag in tags:
+            try:
+                chars = (self.saves.politics(picked[0], tag).get("characters") or {})
+            except Exception:  # an old or broken save: ids stay
+                continue
+            loc = focus_mod.loc_names(install, {c["name"] or c["token"] for c in chars.values() if c.get("name") or c.get("token")})
+            out[tag] = {cid: loc.get(c["name"] or "") or loc.get(c["token"] or "") or c["token"] or cid for cid, c in chars.items()}
+        return out
+
+    @staticmethod
+    def _action_name(e: dict, names: dict, countries: dict, chars: dict) -> str:
+        """What the event is about, readable: a focus / technology / idea name, a country, a character, a design."""
+        kind, i, detail = e["kind"], str(e.get("id") or ""), e.get("detail")
+        if kind in ("focus", "research", "researched", "ideas"):
+            return names.get(i) or i.replace("_", " ")
+        if kind in ("wars", "justifications"):
+            return countries.get(i) or i
+        if kind in ("advisors", "leader"):
+            return chars.get(i) or f"character {i}"
+        if kind == "designs":
+            return str(detail or i)
+        if kind == "construction":
+            building, _, state = str(detail or "").partition("@")
+            return f"{names.get(building) or building.replace('_', ' ')} (state {state})"
+        if kind == "trade":
+            seller, _, resource = i.partition(" ")
+            return f"{resource} from {countries.get(seller) or seller}: {detail}"
+        return i
 
     def summary_delete(self, gid: str) -> dict:
         """Deletes a recorded campaign (not the one being recorded)."""

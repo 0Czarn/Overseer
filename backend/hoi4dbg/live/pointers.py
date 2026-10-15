@@ -1356,7 +1356,7 @@ def plane_stats(memory, variant: int) -> dict[str, float] | None:
 DESIGNS = {"current": 0xB8, "all": 0xA0, "type": 0x3F0, "type_id": 0x18}
 LAND_STATS = {"defense": 0x108, "breakthrough": 0x110, "hardness": 0x118, "soft_attack": 0x120, "hard_attack": 0x128,
               "air_attack": 0x280, "maximum_speed": 0x2F0, "armor_value": 0x2F8, "ap_attack": 0x300, "reliability": 0x308,
-              "build_cost_ic": 0x368}
+              "fuel_consumption": 0x328, "build_cost_ic": 0x368}   # fuel: GER trucks 1.2 as common/units/equipment
 
 
 def read_designs(memory, country: int) -> list[dict]:
@@ -1469,6 +1469,26 @@ def plane_design_ids(memory, country: int) -> list[int]:
         raw = memory.read(variant + DESIGN["id"], 4) if tid and is_plane_type(tid) else None
         if raw:
             out.append(struct.unpack("<i", raw)[0])
+    return out
+
+
+def read_design_costs(memory, country: int) -> list[dict]:
+    """[{"type", "cost", "id", "name"}] of every design of the country, outdated ones too - the division designer's "Estimated
+    Production Cost" goes from the cheapest to the dearest design of each equipment (POL 1936 infantry: 940 x 0.43 +
+    10 support x 4 = 444 to 940 x 0.5 + 40 = 510, as the game)."""
+    production = _ptr(memory, country + STOCKPILE["production"])
+    if production is None:
+        raise PointerError("unreadable", "Production object of the country is not readable")
+    out = []
+    for variant in read_array(memory, production + DESIGNS["all"], 5000):
+        tid = _type_id(memory, variant) if variant else None
+        raw = memory.read(variant, LAND_STATS["build_cost_ic"] + 8) if tid else None
+        if raw:
+            cost = struct.unpack_from("<q", raw, LAND_STATS["build_cost_ic"])[0] / 100000
+            if not 0 <= cost < 100_000:
+                raise PointerError("implausible", "Design cost out of range - layout does not match")
+            out.append({"type": tid, "cost": cost, "id": struct.unpack_from("<i", raw, DESIGN["id"])[0],
+                        "name": _msvc_string(memory, variant + VARIANT["name"], 120) or ""})
     return out
 
 

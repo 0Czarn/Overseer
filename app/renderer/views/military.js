@@ -63,13 +63,27 @@ const DESIGNER_GROUPS = [
     ['breakthrough', 'Breakthrough', (v) => cut(v, 1)], ['armor_value', 'Armor', (v) => cut(v, 1)],
     ['ap_attack', 'Piercing', (v) => cut(v, 1)], ['initiative', 'Initiative', (v) => `${cut(v * 100, 2)}%`],
     ['entrenchment', 'Entrenchment', (v) => cut(v, 1)], ['combat_width', 'Combat Width', (v) => cut(v, 0)]]],
-  ['Cost', [
-    ['manpower', 'Manpower', (v) => cut(v, 0)], ['training_time', 'Training Time', (v) => `${cut(v, 0)} days`]]],
+  ['Equipment Cost', [
+    ['manpower', 'Manpower', (v) => cut(v, 0)], ['training_time', 'Training Time', (v) => cut(v, 0)]]],
 ];
 
-/** [[group title, [[label, text]]]] of a template's designer stats (missing values left out). */
-export function designerLines(stats) {
-  return DESIGNER_GROUPS.map(([title, rows]) => [title, rows.filter(([k]) => stats[k] != null).map(([k, label, f]) => [label, f(stats[k])])]);
+/** [[group title, [[label, text]]]] of a template's designer stats (missing values left out); `cost` (backend
+ * divisions.equipment_cost) adds fuel and the equipment the division needs to the Equipment Cost column, as the game. */
+export function designerLines(stats, cost = null) {
+  const lines = DESIGNER_GROUPS.map(([title, rows]) => [title, rows.filter(([k]) => stats[k] != null).map(([k, label, f]) => [label, f(stats[k])])]);
+  if (cost) {
+    lines[lines.length - 1][1].push(['Fuel Capacity', cut(cost.fuel_capacity, 1)], ['Fuel Usage', cut(cost.fuel_usage, 2)],
+      ...Object.entries(cost.equipment).map(([a, n]) => [cost.names?.[a] ?? a, String(Math.round(n))]));
+  }
+  return lines;
+}
+
+/** "444 to 510" / "510" - the designer's Estimated Production Cost (cheapest to dearest design of each equipment). */
+export function productionCostText(cost) {
+  if (!cost) return null;
+  const lo = Math.round(cost.cost_min);
+  const hi = Math.round(cost.cost_max);
+  return lo === hi ? String(hi) : `${lo} to ${hi}`;
 }
 
 function designerBlock(d) {
@@ -80,9 +94,11 @@ function designerBlock(d) {
   const designs = Object.values(d.designs);
   return h('details', { class: 'mil-designer' },
     h('summary', null, 'Division designer stats', d.estimate.length ? h('span', { class: 'muted' }, ' (estimate)') : null),
-    h('div', { class: 'mil-designer-grid' }, designerLines(d.stats).map(([title, rows]) => h('div', { class: 'mil-designer-group' },
+    h('div', { class: 'mil-designer-grid' }, designerLines(d.stats, d.cost).map(([title, rows]) => h('div', { class: 'mil-designer-group' },
       h('div', { class: 'mil-part-title' }, title),
       rows.map(([label, text]) => h('div', { class: 'hoi-line' }, h('span', null, label), h('span', { class: 'hoi-num' }, text)))))),
+    d.cost ? h('div', { class: 'hoi-line mil-dd-prodcost' }, h('span', null, 'Estimated Production Cost'),
+      h('span', { class: 'hoi-num' }, productionCostText(d.cost))) : null,
     designs.length ? h('p', { class: 'muted mil-designer-note' }, `Equipment: ${designs.join(', ')}`) : null,
     notes.map((n) => h('p', { class: 'muted mil-designer-note' }, n)),
     h('p', { class: 'muted mil-designer-note', title: 'Reliability is still an estimate; doctrine milestones are not counted' },
@@ -174,9 +190,12 @@ function designerGraphic(t, names) {
       h('div', { class: 'mil-dd-regimental' },
         h('div', { class: 'mil-dd-regrow' }, (t.grid?.regimental ?? []).map((id) => slot(id, names, 'mil-slot-small'))),
         h('div', { class: 'mil-dd-label' }, 'Regimental Support'))),
-    t.designer ? h('div', { class: 'mil-dd-stats' }, designerLines(t.designer.stats).map(([title, rows]) => h('div', { class: 'mil-dd-group' },
-      h('div', { class: 'mil-dd-group-title' }, title),
-      rows.map(([label, text]) => h('div', { class: 'hoi-line' }, h('span', null, label), h('span', { class: 'hoi-num' }, text)))))) : null);
+    t.designer ? h('div', { class: 'mil-dd-side' },
+      h('div', { class: 'mil-dd-stats' }, designerLines(t.designer.stats, t.designer.cost).map(([title, rows]) => h('div', { class: 'mil-dd-group' },
+        h('div', { class: 'mil-dd-group-title' }, title),
+        rows.map(([label, text]) => h('div', { class: 'hoi-line' }, h('span', null, label), h('span', { class: 'hoi-num' }, text)))))),
+      t.designer.cost ? h('div', { class: 'mil-pdg-cost', title: 'From the cheapest to the dearest design of each equipment the country has' },
+        h('span', null, 'Estimated Production Cost:'), h('span', { class: 'hoi-num' }, productionCostText(t.designer.cost))) : null) : null);
 }
 
 function designerText(t) {

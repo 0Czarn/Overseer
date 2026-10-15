@@ -5,7 +5,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const TABS = ['dashboard', 'summary', 'countries', 'country-editor', 'research', 'construction', 'doctrines', 'state-editor', 'focus', 'equipment', 'tools',
+const TABS = ['dashboard', 'summary', 'actions', 'countries', 'country-editor', 'research', 'construction', 'doctrines', 'state-editor', 'focus', 'equipment', 'tools',
   'logs'];
 // HOI4DBG_SMOKE_TABS=focus,construction checks only these tabs
 const ONLY = (process.env.HOI4DBG_SMOKE_TABS || '').split(',').filter(Boolean);
@@ -128,6 +128,13 @@ function runSmoke(win, outDir, quit) {
               if (info.focusQueueAdd !== 1) result.failures.push(`${size.name}/focus: clicking a focus does not add it to the plan`);
             }
           }
+          if (tab === 'actions') {   // the log, its filters and the watched countries
+            await waitFor(wc, `!!document.querySelector('.pa-kinds, .pa-list .notice')`, 20000);
+            info.actions = await wc.executeJavaScript(`({ kinds: document.querySelectorAll('.pa-kind').length,
+              events: document.querySelectorAll('.pa-event').length, chips: document.querySelectorAll('.pa-chip').length,
+              notice: document.querySelector('.pa-list .notice')?.textContent ?? null })`);
+            if (!info.actions.kinds && !info.actions.notice) result.failures.push(`${size.name}/actions: shows nothing`);
+          }
           if (tab === 'summary') {
             await waitFor(wc, `!!document.querySelector('.lc-svg, .gs-charts .notice')`, 20000);
             info.summary = await wc.executeJavaScript(`({ charts: document.querySelectorAll('.lc-svg').length,
@@ -141,11 +148,17 @@ function runSmoke(win, outDir, quit) {
                 return [...document.querySelectorAll('.lc-tip')].map((t) => (t.hidden ? null : [...t.querySelectorAll('.lc-tip-row')].length));
               })()`);
               if (!info.summary.hover.every((n) => n > 0)) result.failures.push(`${size.name}/summary: hover shows no values in both charts`);
+              // the country list (the user's own preference may be the factions view)
+              await wc.executeJavaScript(`[...document.querySelectorAll('.gs-seg-btn')].find((b) => b.textContent === 'Countries')?.click()`);
+              await waitFor(wc, `!!document.querySelector('.gs-country')`, 10000);
+              // search for a tag the campaign has (the first country listed), it alone should be left
               info.summary.search = await wc.executeJavaScript(`(() => { const i = document.querySelector('.gs-search');
-                i.value = 'sov'; i.dispatchEvent(new Event('input'));
-                const n = [...document.querySelectorAll('.gs-country-tag')].map((e) => e.textContent);
-                i.value = ''; i.dispatchEvent(new Event('input')); return n; })()`);
-              if (!info.summary.search.includes('SOV') || info.summary.search.length > 3) result.failures.push(`${size.name}/summary: search does not filter`);
+                const want = document.querySelector('.gs-group .gs-country-tag')?.firstChild?.textContent ?? '';
+                i.value = want.toLowerCase(); i.dispatchEvent(new Event('input'));
+                const n = [...document.querySelectorAll('.gs-country-tag')].map((e) => e.firstChild?.textContent);
+                i.value = ''; i.dispatchEvent(new Event('input')); return { want, n }; })()`);
+              const { want, n } = info.summary.search;
+              if (!want || !n.includes(want) || n.length > 3) result.failures.push(`${size.name}/summary: search does not filter`);
               await wc.executeJavaScript(`(() => { const c = document.querySelector('.gs-color'); c.value = '#ffffff';
                 c.dispatchEvent(new Event('change')); })()`);
               await waitFor(wc, `[...document.querySelectorAll('.lc-line')].some((l) => l.getAttribute('stroke') === '#ffffff')`, 10000);
@@ -200,8 +213,10 @@ function runSmoke(win, outDir, quit) {
               await wc.executeJavaScript(`[...document.querySelectorAll('.mil-view-btn')].find((b) => b.textContent === 'Graphic').click()`);
               await waitFor(wc, `!!document.querySelector('.mil-dd')`, 10000);
               await wc.executeJavaScript(`document.querySelector('.mil-tpl-open').scrollIntoView()`);
+              await sleep(500);
               wc.invalidate();   // a hidden window: repaint before the screenshot
-              await sleep(1200);
+              await sleep(1500);
+              fs.writeFileSync(path.join(outDir, `${size.name}-army-designer.png`), (await wc.capturePage()).toPNG());
             }
             if (await waitFor(wc, `!!document.querySelector('.mil-design-head')`, 15000)) {   // a plane design unfolds into its modules
               await wc.executeJavaScript(`(() => { localStorage.removeItem('hoi4dbg.planeView'); document.querySelector('.mil-design-head').click(); })()`);

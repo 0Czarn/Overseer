@@ -24,6 +24,8 @@ import threading
 import time
 from pathlib import Path
 
+from . import actions as actions_mod
+
 POLL_SECONDS = 0.25
 MAX_STEP = 30   # days between two polls that still count as the game running (more = a save was loaded)
 FACTION_EVERY = 7
@@ -97,6 +99,7 @@ def loss_deltas(before: dict | None, now: dict) -> dict[str, list[float | None]]
 
 
 TAG = re.compile(r"^[A-Z0-9]{2,4}$")
+MAX_WATCHED = 20
 MAX_GROUPS = 30
 
 
@@ -198,6 +201,8 @@ class IcHistory:
         """[{"id", "player", "first", "last", "days", "active"}], newest first."""
         out = []
         for path in sorted(self.folder.glob("*.jsonl")) if self.folder.exists() else []:
+            if "." in path.stem:   # <id>.actions.jsonl: a campaign's Players actions, not a campaign
+                continue
             rows = self._lines(path.stem)
             meta = next((r["meta"] for r in rows if "meta" in r), {})
             days = [r for r in rows if "t" in r]
@@ -256,6 +261,7 @@ class IcHistory:
             path.unlink()
             (self.folder / f"{gid}.groups.json").unlink(missing_ok=True)
             (self.folder / f"{gid}.designs.json").unlink(missing_ok=True)
+            (self.folder / f"{gid}.actions.jsonl").unlink(missing_ok=True)
 
     def _choose(self, player: str, t: int) -> str:
         """The campaign file a sample of `player` at day `t` belongs to (cutting replayed days)."""
@@ -278,10 +284,53 @@ class IcHistory:
     def _cut(self, gid: str, t: int) -> None:
         rows = [r for r in self._lines(gid) if "t" not in r or r["t"] < t]
         self._path(gid).write_text("".join(json.dumps(r, separators=(",", ":")) + "\n" for r in rows), encoding="utf-8")
+        events = self.actions(gid)   # actions of replayed days did not happen in this timeline
+        if any(e["t"] >= t for e in events):
+            self._actions_path(gid).write_text("".join(json.dumps(e, separators=(",", ":")) + "\n" for e in events
+                                                       if e["t"] < t), encoding="utf-8")
         seen = self.designs(gid)   # designs first seen on a replayed day: the game may give their ids to new ones
         kept = {tag: {i: v for i, v in ids.items() if v[1] or v[0] < t} for tag, ids in seen.items()}
         if kept != seen:
             self._designs_path(gid).write_text(json.dumps(kept, separators=(",", ":")), encoding="utf-8")
+
+    # -- Players actions (actions.py): the watched countries and the events of each campaign --
+    def _actions_path(self, gid: str) -> Path:
+        self._path(gid)   # checks the id
+        return self.folder / f"{gid}.actions.jsonl"
+
+    def actions(self, gid: str | None) -> list[dict]:
+        """Events of a campaign in the order they were recorded."""
+        try:
+            text = self._actions_path(gid).read_text(encoding="utf-8") if gid else ""
+        except OSError:
+            return []
+        out = []
+        for line in text.splitlines():
+            try:
+                out.append(json.loads(line))
+            except ValueError:   # a line cut by a crash
+                continue
+        return out
+
+    def add_actions(self, gid: str, events: list[dict]) -> None:
+        with self._actions_path(gid).open("a", encoding="utf-8") as f:
+            f.write("".join(json.dumps(e, separators=(",", ":")) + "\n" for e in events))
+
+    def watched(self) -> list[str]:
+        """Countries watched for Players actions besides the player (all campaigns)."""
+        try:
+            tags = json.loads((self.folder / "actions-watch.json").read_text(encoding="utf-8")).get("tags", [])
+        except (OSError, ValueError, AttributeError):
+            return []
+        return [t for t in tags if isinstance(t, str) and TAG.match(t)][:MAX_WATCHED]
+
+    def set_watched(self, tags) -> list[str]:
+        if not isinstance(tags, list) or not all(isinstance(t, str) and TAG.match(t) for t in tags):
+            raise ValueError("tags must be a list of country tags")
+        tags = sorted(set(tags))[:MAX_WATCHED]
+        self.folder.mkdir(parents=True, exist_ok=True)
+        (self.folder / "actions-watch.json").write_text(json.dumps({"tags": tags}), encoding="utf-8")
+        return tags
 
     # -- the day a plane design was first seen (the game keeps no creation date, live/pointers.read_plane_designs) --
     def _designs_path(self, gid: str) -> Path:
@@ -330,7 +379,7 @@ class IcHistory:
 class IcRecorder:
     """Background thread: polls the game date and records a sample when a new day starts."""
 
-    def __init__(self, live, history: IcHistory, log) -> None:
+    def __init__(self, live, history: IcHistory, log, actions=None) -> None:
         self.live, self.history, self.log = live, history, log
         self.last_t: int | None = None   # last recorded day
         self.seen_t: int | None = None   # day of the previous poll
@@ -338,6 +387,9 @@ class IcRecorder:
         self._stop = threading.Event()
         self._last_faction_t = -FACTION_EVERY
         self._losses: dict | None = None   # combat log of the last recorded day (loss_deltas)
+        self.actions = actions             # tags -> {tag: snapshot} (Players actions), None = off
+        self._snaps: dict[str, dict] = {}  # last snapshot per watched country
+        self._snaps_gid: str | None = None
 
     def start(self) -> None:
         threading.Thread(target=self._run, name="ic-recorder", daemon=True).start()
@@ -358,8 +410,9 @@ class IcRecorder:
         if t is not None and t != previous:   # a game started since the user turned it on gets it too
             self.live.ensure_combat_log_patch()
         if t is None or previous is None or not 0 < t - previous <= MAX_STEP:
-            if t != previous:   # another game state: its combat log does not continue the last one
+            if t != previous:   # another game state: its combat log and snapshots do not continue the last ones
                 self._losses = None
+                self._snaps = {}
             return False
         with_factions = t - self._last_faction_t >= FACTION_EVERY or self.last_t is None or t < self.last_t
         sample = self.live.ic_snapshot(with_factions)
@@ -382,10 +435,29 @@ class IcRecorder:
         gid = self.history.add(sample)
         if designs is not None:
             self.history.note_designs(gid, t, designs)
+        if self.actions is not None:
+            self._record_actions(gid, t, sample.get("player"))
         if with_factions:
             self._last_faction_t = t
         self.last_t = t
         return True
+
+    def _record_actions(self, gid: str, t: int, player: str | None) -> None:
+        """Snapshot of the player and the watched countries; what changed since the day before becomes events."""
+        if gid != self._snaps_gid:   # another campaign: a new baseline
+            self._snaps, self._snaps_gid = {}, gid
+        tags = sorted({player, *self.history.watched()} - {None})
+        try:
+            snaps = self.actions(tags)
+        except Exception as exc:  # the IC history is still worth recording
+            self.log.info("Players actions not read: %s", exc)
+            return
+        events = []
+        for tag, snap in snaps.items():
+            events += [{"t": t, "tag": tag, **e} for e in actions_mod.diff(self._snaps.get(tag), snap)]
+            self._snaps[tag] = snap
+        if events:
+            self.history.add_actions(gid, events)
 
     def _lock(self) -> bool:
         """Only one app instance records (a second one - e.g. the smoke test - stays passive): an OS lock on

@@ -186,6 +186,32 @@ def _sub_unit(unit: dict, equipment: dict[str, dict], mods: list, mults: list, a
     return s
 
 
+FUEL_CAPACITY_HOURS = 96   # NDefines.NMilitary.FUEL_CAPACITY_DEFAULT_HOURS: a division holds 96 hours of its usage
+
+
+def equipment_cost(template: dict, tabs: dict, equipment: dict[str, dict], costs: dict[str, list[float]]) -> dict | None:
+    """The designer's "Equipment Cost" column beyond manpower and training time: {"equipment": {archetype: amount},
+    "fuel_usage", "fuel_capacity", "cost_min", "cost_max"} - amounts from the sub-units' need, fuel from the designs used
+    (x own_equipment_fuel_consumption_mult), the cost range over the country's cheapest and dearest design of each
+    equipment (`costs` = {archetype: [build cost of every design]}). None when a sub-unit is unknown."""
+    ids = list(template["battalions"]) + list(template["support"]) + list(template["regimental"])
+    units = tabs["units"]
+    if not ids or any(u not in units for u in ids):
+        return None
+    need: dict[str, float] = {}
+    fuel = 0.0
+    for u in ids:
+        mult = units[u]["stats"].get("own_equipment_fuel_consumption_mult", 1.0)
+        for archetype, amount in units[u]["need"].items():
+            need[archetype] = need.get(archetype, 0.0) + amount
+            fuel += (equipment.get(archetype) or {}).get("fuel_consumption", 0.0) * mult
+    known = [a for a in need if costs.get(a)]
+    return {"equipment": need, "fuel_usage": round(fuel, 4), "fuel_capacity": round(fuel * FUEL_CAPACITY_HOURS, 2),
+            "cost_min": round(sum(need[a] * min(costs[a]) for a in known), 2),
+            "cost_max": round(sum(need[a] * max(costs[a]) for a in known), 2),
+            "no_design": sorted(a for a in need if not costs.get(a))}
+
+
 def template_stats(template: dict, tabs: dict, equipment: dict[str, dict], mods: list, mults: list) -> dict | None:
     """Designer stats of a template ({"battalions", "support", "regimental": [sub-unit ids]}). `equipment` =
     {archetype: stats of the design used}. None when a sub-unit is unknown."""

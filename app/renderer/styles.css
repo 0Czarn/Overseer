@@ -653,6 +653,9 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
 .mil-pdg-stats { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .mil-pdg-stats .mil-dd-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); flex: none; }
 @media (max-width: 900px) { .mil-pdg-stats .mil-dd-stats { grid-template-columns: minmax(0, 1fr); } }
+.mil-dd-side { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.mil-dd-side .mil-dd-stats { flex: none; }
+.mil-dd-prodcost { margin-top: 6px; font-weight: 700; }
 .mil-pdg-cost { display: flex; justify-content: space-between; padding: 4px 10px; border-radius: 3px; background: #11161c;
   border: 1px solid #2a333e; font-weight: 700; }
 .mil-pd-label { font-size: 10px; line-height: 1.1; text-align: center; color: #9fb0c2; padding: 0 3px; overflow-wrap: anywhere; }
@@ -986,3 +989,35 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
 .lc-tip-row { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: center; }
 .lc-tip-value { font-variant-numeric: tabular-nums; color: var(--text); }
 @media (max-width: 900px) { .gs-body { grid-template-columns: minmax(0, 1fr); } }
+
+/* Players actions: watched countries, kind filters, a timeline by game day */
+.pa-controls { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; font-size: 13px; }
+.pa-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.pa-field { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.pa-label { color: var(--text-muted); font-size: 12px; }
+.pa-field select { max-width: min(460px, 100%); }
+.pa-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 12px; background: var(--bg-elev);
+  border: 1px solid var(--border); font-size: 12px; }
+.pa-chip-player { border-color: var(--accent); color: var(--accent); }
+.pa-chip-x { background: none; border: 0; color: var(--text-muted); cursor: pointer; padding: 0 2px; font-size: 14px; line-height: 1; }
+.pa-chip-x:hover { color: var(--bad); }
+.pa-add { width: 110px; }
+.pa-kinds { display: flex; flex-wrap: wrap; gap: 4px; }
+.pa-kind { border: 1px solid var(--border); background: var(--bg-elev); color: var(--text-muted); border-radius: 12px; padding: 2px 10px;
+  font: inherit; font-size: 12px; cursor: pointer; opacity: 0.6; }
+.pa-kind-on { opacity: 1; color: var(--text); border-color: var(--pa-hue, var(--border)); }
+.pa-search { width: 180px; }
+.pa-list { display: flex; flex-direction: column; gap: 10px; }
+.pa-day { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
+.pa-date { font-weight: 700; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+.pa-event { display: grid; grid-template-columns: 44px 130px 110px minmax(0, 1fr); gap: 8px; align-items: center; padding: 3px 0;
+  border-top: 1px solid var(--border); font-size: 13px; }
+.pa-event:first-of-type { border-top: 0; }
+.pa-tagbadge { font-family: var(--mono); font-size: 12px; font-weight: 700; }
+.pa-kind-badge { font-size: 11px; padding: 1px 6px; border-radius: 3px; border-left: 3px solid var(--pa-hue, var(--border));
+  background: var(--bg-elev-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pa-action { color: var(--text-muted); font-size: 12px; }
+.pa-name { overflow-wrap: anywhere; }
+.pa-k-focus { --pa-hue: #c98500; } .pa-k-research { --pa-hue: #3987e5; } .pa-k-ideas { --pa-hue: #9085e9; }
+.pa-k-people { --pa-hue: #d55181; } .pa-k-war { --pa-hue: #e66767; } .pa-k-army { --pa-hue: #199e70; } .pa-k-build { --pa-hue: #8a8a8a; }
+@media (max-width: 700px) { .pa-event { grid-template-columns: 44px minmax(0, 1fr); } .pa-action, .pa-name { grid-column: 2; } }

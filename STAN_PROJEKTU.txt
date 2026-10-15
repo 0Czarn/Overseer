@@ -150,6 +150,13 @@ ZROBIONE
                 priority z common/units; HQ 121). Ikony: GFX_unit_<id>_icon_medium (pasek 2 klatek, 1. klatka),
                 /api/military/icons pobierane raz (przecinki kodowane - most IPC ich nie przepuszcza).
                 Kłódek i "+" z gry brak (nie wiadomo, które pola są zablokowane).
+            [x] KOLUMNA "EQUIPMENT COST" (2026-10-15, inf_pol.jpg - POL Dywizja Piechoty = gra): Manpower, Training Time, Fuel
+                Capacity, Fuel Usage, sprzęt wg rodzaju ("Infantry Eq." 940, "Support Eq." 10 - suma need, nazwy <rodzaj>_short)
+                i Estimated Production Cost 444 to 510 = need x najtańszy / najdroższy projekt każdego rodzaju, jaki państwo ma
+                (z przestarzałymi: karabiny 0,43 / 0,5, wsparcie 4; [produkcja]+0xA0, koszt +0x368), zaokrąglone. Paliwo:
+                zużycie = suma fuel_consumption sprzętu (projekt +0x328, ciężarówka 1,2) x own_equipment_fuel_consumption_mult
+                jednostki, pojemność = zużycie x 96 h (FUEL_CAPACITY_DEFAULT_HOURS).
+                [ ] paliwo dywizji zmotoryzowanych / pancernych nie porównane z grą (brak screena)
             POPRAWKA (2026-10-15): doktryny GER (i inne) "Doctrine entry does not belong to the country" - numer państwa
                 we wpisie doktryn to int32, czytany był jako int64 (górne 4 bajty to inne dane, u GER 0x7FF7...). Psuło też
                 kafelek Air Force. 439/439 państw czyta się bez błędu.
@@ -485,6 +492,17 @@ DO ZROBIENIA (w tej kolejności)
             (POST /api/summary/games/<id>/delete; usuwa plik i grupy; nagrywanej kampanii nie da się usunąć).
             [ ] historia tylko z dni, gdy aplikacja działała (nie da się odtworzyć wstecz)
             [ ] gracz odczytany jako GER w grze SOV (2026-10-13) - sprawdzić, czy użyto `tag`
+[x] ZAKŁADKA "PLAYERS ACTIONS" (2026-10-15, prośba użytkownika; wybory: dziennik zmian, wybrane państwa): rejestrator
+            raz na dzień gry robi obraz gracza i obserwowanych państw (live/service.action_snapshot, 0,2 s dla 2 państw):
+            focus, badania, zbadane, idee (prawa/duchy), doradcy, przywódca, wojny, uzasadnienia, szablony dywizji,
+            projekty sprzętu (+0xA0, id/nazwa), kolejka budowy, importy; hoi4dbg/actions.py porównuje z dniem wcześniej.
+            Zdarzenia w ic-history/<kampania>.actions.jsonl (usuwane z odtworzonych dni i razem z kampanią), obserwowane
+            państwa w ic-history/actions-watch.json (max 20, gracz zawsze). Widok: kampania, obserwowane (dodaj/usuń),
+            filtry 12 rodzajów, państwo, szukaj, oś czasu wg dni od najnowszych, nazwy z gry (imiona postaci z zapisu).
+            Pierwszy dzień po starcie aplikacji / wczytaniu zapisu = punkt odniesienia (bez zdarzeń).
+            POPRAWKA przy okazji: lista kampanii brała plik <id>.actions.jsonl za kampanię (glob *.jsonl).
+            [ ] linie produkcji fabryk (co produkują) - nie odczytywane
+            [ ] potwierdzić na żywo: kilka dni gry z otwartą aplikacją -> wpisy w zakładce
 [ ] Krok G  Game Tools (narzędzia lokalne)
             (zakładka Intelligence Lab USUNIĘTA 2026-10-13 na prośbę użytkownika - była tylko na danych DEMO)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)
