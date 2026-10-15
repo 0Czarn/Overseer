@@ -204,12 +204,22 @@ function runSmoke(win, outDir, quit) {
               await sleep(1200);
             }
             if (await waitFor(wc, `!!document.querySelector('.mil-design-head')`, 15000)) {   // a plane design unfolds into its modules
-              await wc.executeJavaScript(`document.querySelector('.mil-design-head').click()`);
-              await waitFor(wc, `!!document.querySelector('.mil-design-body')`, 10000);
-              await waitFor(wc, `!!document.querySelector('.mil-pd-img')`, 10000);
+              await wc.executeJavaScript(`(() => { localStorage.removeItem('hoi4dbg.planeView'); document.querySelector('.mil-design-head').click(); })()`);
+              await waitFor(wc, `!!document.querySelector('.mil-pdg')`, 10000);
+              await waitFor(wc, `!!document.querySelector('.mil-pdg-plane')`, 15000);
               info.planeDesign = await wc.executeJavaScript(`(() => { document.querySelector('.mil-design-open').scrollIntoView();
-                return { designs: document.querySelectorAll('.mil-design').length, slots: document.querySelectorAll('.mil-pd-slot').length,
-                  icons: document.querySelectorAll('.mil-pd-img').length }; })()`);
+                return { designs: document.querySelectorAll('.mil-design').length, slots: document.querySelectorAll('.mil-pdg .mil-pd-slot').length,
+                  locked: document.querySelectorAll('.mil-pd-locked').length, blueprint: !!document.querySelector('.mil-pdg-plane') }; })()`);
+              if (info.planeDesign.slots !== 12) result.failures.push(`${size.name}/air: the plane designer should show 5 + 7 slots`);
+              await wc.executeJavaScript(`[...document.querySelectorAll('.mil-design-view .mil-view-btn')].find((b) => b.textContent === 'Text').click()`);
+              await waitFor(wc, `!document.querySelector('.mil-pdg')`, 10000);
+              await wc.executeJavaScript(`[...document.querySelectorAll('.mil-design-view .mil-view-btn')].find((b) => b.textContent === 'Graphic').click()`);
+              await waitFor(wc, `!!document.querySelector('.mil-pdg-plane')`, 10000);
+              await wc.executeJavaScript(`document.querySelector('.mil-design-open').scrollIntoView()`);
+              await sleep(500);
+              wc.invalidate();   // a hidden window keeps the old frame until it repaints
+              await sleep(1500);
+              fs.writeFileSync(path.join(outDir, `${size.name}-air-designer.png`), (await wc.capturePage()).toPNG());
               wc.invalidate();
               await sleep(1200);
             }

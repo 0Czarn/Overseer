@@ -1231,7 +1231,9 @@ GRID_SIDE = 5
 SUBUNIT_ID = 0x18
 NAVY = {"fleets": 0x278, "task_forces": 0xB8, "ships": 0x348, "ship_type": 0x98, "ship_variants": 0x60}
 AIR = {"manager": 0x690, "by_country": 0x30, "pools": 0x58, "role": 0x20, "wings": 0x28, "wing_variants": 0x1F8}
-PLANE_STATS = {"range": 0x270, "air_defence": 0x278, "air_attack": 0x280, "air_agility": 0x288,
+# surface / sub detection (2026-10-15): GER Do 22 with floats 5 / 3 as the module (+ 5 / + 3), 0 for the others
+PLANE_STATS = {"surface_detection": 0x198, "sub_detection": 0x1A0,
+               "range": 0x270, "air_defence": 0x278, "air_attack": 0x280, "air_agility": 0x288,
                "air_superiority": 0x298, "naval_strike_attack": 0x2A0, "naval_strike_targetting": 0x2A8,
                "maximum_speed": 0x2F0, "reliability": 0x308, "weight": 0x318, "thrust": 0x320,
                "fuel_consumption": 0x328, "build_cost_ic": 0x368}

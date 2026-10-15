@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { designDate, designerLines, gridColumns, manpowerText, shortCount, slotLabel, slotRows, splitDesigns, statText, unitLines } from '../renderer/views/military.js';
+import { designDate, designerLines, gridColumns, manpowerText, planeStatLines, shortCount, slotLabel, slotRows, splitDesigns, statText, unitLines } from '../renderer/views/military.js';
 
 test('counts shortened like the game top bar (SOV: 4,345,676 men in the field = 4M)', () => {
   assert.equal(shortCount(4345676), '4.34M');
@@ -70,4 +70,13 @@ test('plane designer slots: weapons on top, engine and specials below', () => {
   const [top, bottom] = slotRows(slots);
   assert.deepEqual(top.map((s) => slotLabel(s.slot)), ['Main weapon', 'Weapon 2']);
   assert.deepEqual(bottom.map((s) => slotLabel(s.slot)), ['Engine', 'Special 1']);
+});
+
+test('plane designer stats: three columns like the game, values cut off', () => {
+  const lines = planeStatLines({ maximum_speed: 497.25, range: 550, weight: 8, thrust: 16, air_defence: 10, air_attack: 11,
+    air_agility: 43, air_superiority: 1, naval_strike_attack: 1, naval_strike_targetting: 1, reliability: 0.8, fuel_consumption: 0.21,
+    surface_detection: 0, sub_detection: 0 });
+  assert.deepEqual(lines.map(([t]) => t), ['Base Stats', 'Combat Stats', 'Misc. Stats']);
+  assert.deepEqual(lines[0][1][0], ['Max Speed', '497.2 km/h']);   // the PZL P.23 (new) as air_temp_new.jpg
+  assert.deepEqual(lines[2][1].slice(0, 2), [['Reliability', '80.0%'], ['Fuel Usage', '0.21']]);
 });

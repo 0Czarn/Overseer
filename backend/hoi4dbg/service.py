@@ -115,7 +115,8 @@ PLANE_STAT_LABELS = {"range": "Range", "air_defence": "Air Defense", "air_attack
                      "air_superiority": "Air Superiority", "naval_strike_attack": "Naval Attack",
                      "naval_strike_targetting": "Naval Targeting", "maximum_speed": "Max Speed",
                      "reliability": "Reliability", "weight": "Weight", "thrust": "Thrust", "fuel_consumption": "Fuel Usage",
-                     "build_cost_ic": "Production Cost"}
+                     "build_cost_ic": "Production Cost", "surface_detection": "Surface Detection",
+                     "sub_detection": "Sub Detection"}
 
 
 @functools.lru_cache(maxsize=2)
@@ -1302,10 +1303,12 @@ class DebuggerService:
                         "seen": ic_history_mod.date_text(day[0]) if day else None, "seen_before": bool(day and day[1])})
         return out
 
-    def military_icons(self, units: list[str], templates: list[int], modules: list[str] | None = None) -> dict:
+    def military_icons(self, units: list[str], templates: list[int], modules: list[str] | None = None,
+                       blueprints: list[str] | None = None) -> dict:
         """Icons of the designers: {"units": {sub-unit id: data URI}, "templates": {icon number: data URI}, "modules":
-        {plane module id: data URI}} (GFX_unit_<id>_icon_medium, GFX_div_templ_<n>_large, GFX_EMI_<id>); fetched once by
-        the Army and Air Force tiles, not on every refresh."""
+        {plane module id: data URI}, "blueprints": {plane type: data URI}, "designer": {"background", "locked"}}
+        (GFX_unit_<id>_icon_medium, GFX_div_templ_<n>_large, GFX_EMI_<id>, GFX_TC_<type>); fetched once by the Army
+        and Air Force tiles, not on every refresh."""
         install = self._install_path()
         if install is None:
             return {"data": {"units": {}, "templates": {}}}
@@ -1313,7 +1316,11 @@ class DebuggerService:
         return {"data": {
             "units": {u: gfx.sprite_uri(roots, f"GFX_unit_{u}_icon_medium") for u in units[:200] if re.fullmatch(r"\w{1,80}", u)},
             "templates": {str(n): gfx.sprite_uri(roots, f"GFX_div_templ_{n}_large") for n in templates[:200]},
-            "modules": {m: gfx.sprite_uri(roots, f"GFX_EMI_{m}") for m in (modules or [])[:200] if re.fullmatch(r"\w{1,80}", m)}}}
+            "modules": {m: gfx.sprite_uri(roots, f"GFX_EMI_{m}") for m in (modules or [])[:200] if re.fullmatch(r"\w{1,80}", m)},
+            # the plane designer: the airframe's blueprint (GFX_TC_<type>), its background and the locked slot
+            "blueprints": {b: gfx.sprite_uri(roots, f"GFX_TC_{b}") for b in (blueprints or [])[:100] if re.fullmatch(r"\w{1,80}", b)},
+            "designer": {"background": gfx.sprite_uri(roots, "GFX_generic_plane_blueprint_background"),
+                         "locked": gfx.sprite_uri(roots, "GFX_EMSI_locked")} if blueprints else {}}}
 
     def _division_stats(self, install: Path, templates: list[dict], found: dict) -> None:
         """Adds "designer" (stats like the game's division designer, divisions.py) to each template; an estimate when

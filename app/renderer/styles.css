@@ -634,6 +634,27 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
   background: linear-gradient(180deg, #1b232c, #10161d); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06); }
 .mil-pd-empty { background: #18202a; opacity: 0.75; }
 .mil-pd-img { max-width: 62px; max-height: 40px; object-fit: contain; }
+.mil-pd-locked { background: #151b22; opacity: 0.8; }
+.mil-design-view { margin: 8px 10px 0; }
+/* the plane designer: slots above and below the airframe's blueprint, stats beside */
+.mil-pdg { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; padding: 8px 10px 10px; }
+.mil-pdg-left { flex: 0 1 490px; min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 3px;
+  background: #1a1f26; border: 1px solid #10161d; }
+.mil-pdg-title { display: flex; flex-direction: column; padding: 4px 8px; background: #11161c; border: 1px solid #2a333e; border-radius: 3px; }
+.mil-pdg-name { font-weight: 700; color: var(--hoi-text); }
+.mil-pdg-type { font-size: 12px; color: #e8c86a; }
+.mil-pdg-row { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; }
+.mil-pdg-row .mil-pd-slot { width: auto; height: 44px; }
+.mil-pdg-blueprint { position: relative; aspect-ratio: 508 / 248; border-radius: 3px; border: 1px solid #10161d; overflow: hidden;
+  background-color: #3b4a5a; background-size: cover; background-position: center; }
+.mil-pdg-plane { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.mil-pdg-caption { position: absolute; top: 8px; left: 0; right: 0; text-align: center; font-size: 12px; color: #e9f0f7;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); z-index: 1; }
+.mil-pdg-stats { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.mil-pdg-stats .mil-dd-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); flex: none; }
+@media (max-width: 900px) { .mil-pdg-stats .mil-dd-stats { grid-template-columns: minmax(0, 1fr); } }
+.mil-pdg-cost { display: flex; justify-content: space-between; padding: 4px 10px; border-radius: 3px; background: #11161c;
+  border: 1px solid #2a333e; font-weight: 700; }
 .mil-pd-label { font-size: 10px; line-height: 1.1; text-align: center; color: #9fb0c2; padding: 0 3px; overflow-wrap: anywhere; }
 .mil-more { margin-top: 8px; }
 .mil-more summary { cursor: pointer; font-weight: 600; margin-bottom: 6px; }

@@ -169,6 +169,14 @@ ZROBIONE
                     bomb_locks / aircraft_cannon_1_1x / engine_2_1x / lmg_defense_turret; Ju 87 dive_brakes_small, Do 22 floats.
                     Po rozwinięciu projektu: rząd uzbrojenia i rząd silnik + specjalne z ikonami GFX_EMI_<moduł>, puste
                     sloty opisane; nazwy modułów z lokalizacji ("1x Engine I"). Kłódek z gry brak (sloty spoza typu).
+                [x] WIDOK GRAFICZNY PROJEKTU SAMOLOTU (2026-10-15, jak Plane Designer; przełącznik Graphic | Text, zapamiętany):
+                    5 slotów uzbrojenia nad planem, 7 (silnik + specjalne) pod nim, sloty spoza płatowca z kłódką GFX_EMSI_locked
+                    (He 111: 4 broni + 1 kłódka, silnik + 4 specjalne + 2 kłódki; P.23 jak air_temp_new.jpg: 3 + 4 kłódki);
+                    plan GFX_TC_<typ> na tle GFX_generic_plane_blueprint_background; statystyki Base / Combat / Misc. +
+                    koszt. Nowe offsety: +0x198 surface_detection, +0x1A0 sub_detection (Do 22 z pływakami 5 / 3).
+                    [ ] nieodczytane: Supply Use (gra wylicza - nie ma w wariancie), Ground Attack, Strat. Bombing, Night Penalty,
+                        Minelaying, Minesweeping (w 1936 wszędzie 0 - nie było czym ich namierzyć). Kolorowy obrazek samolotu
+                        (override_sprite / kultura graficzna) - nie odczytany.
 [x] ZAKŁADKA DOCTRINES (2026-10-13, nowa, prośba użytkownika, Doktryny.png SOV 1941 - wartości = gra): foldery jak
             w grze (Land / Naval / Air / Special Forces), główna doktryna (ikona, nazwa, opis, efekty, taktyki), tory z
             subdoktryną, biegłością, biegłością w banku ("+68"), przyrostem dziennym i drabinką nagród I-V (próg,

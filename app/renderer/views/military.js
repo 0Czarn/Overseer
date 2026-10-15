@@ -97,7 +97,32 @@ export function gridColumns(slots) {
 }
 
 // icons of the designer, fetched once (GET /api/military/icons) and kept for the session: unit id / template number
-const icons = { units: new Map(), templates: new Map(), modules: new Map() };
+const icons = { units: new Map(), templates: new Map(), modules: new Map(), blueprints: new Map(), designer: {} };
+const PLANE_VIEW_KEY = 'hoi4dbg.planeView';
+// slots in the game's plane designer: 5 weapons above the blueprint, 7 below (engine and specials); more are locked
+const PLANE_SLOTS = { top: 5, bottom: 7 };
+// the designer's stats the debugger has no memory offset for yet (supply use is computed by the game)
+const PLANE_UNREAD = ['Supply Use', 'Ground Attack', 'Strat. Bombing', 'Night Penalty', 'Minelaying', 'Minesweeping'];
+
+// [title, [[key, label, format]]] as the plane designer's Base / Combat / Misc. Stats
+const PLANE_GROUPS = [
+  ['Base Stats', [['maximum_speed', 'Max Speed', (v) => `${cut(v, 1)} km/h`], ['range', 'Range', (v) => `${Math.round(v)} km`],
+    ['weight', 'Weight', (v) => cut(v, 1)], ['thrust', 'Thrust', (v) => cut(v, 1)]]],
+  ['Combat Stats', [['air_defence', 'Air Defense', (v) => cut(v, 1)], ['air_attack', 'Air Attack', (v) => cut(v, 1)],
+    ['air_agility', 'Agility', (v) => cut(v, 1)], ['air_superiority', 'Air Superiority', (v) => cut(v, 2)],
+    ['naval_strike_attack', 'Naval Attack', (v) => cut(v, 2)], ['naval_strike_targetting', 'Naval Targeting', (v) => cut(v, 2)]]],
+  ['Misc. Stats', [['reliability', 'Reliability', (v) => `${cut(v * 100, 1)}%`], ['fuel_consumption', 'Fuel Usage', (v) => cut(v, 2)],
+    ['surface_detection', 'Surface Detection', (v) => cut(v, 1)], ['sub_detection', 'Sub Detection', (v) => cut(v, 1)]]],
+];
+
+/** [[group title, [[label, text]]]] of a plane design like the game's designer (zero values shown, as the game does). */
+export function planeStatLines(stats) {
+  return PLANE_GROUPS.map(([title, rows]) => [title, rows.filter(([k]) => stats[k] != null).map(([k, label, f]) => [label, f(stats[k])])]);
+}
+
+function saveView(key, v) {
+  try { localStorage.setItem(key, v); } catch { /* preference only */ }
+}
 
 /** "Main weapon" / "Weapon 2" / "Engine" / "Special 1" - a plane designer slot (the game has no name for them). */
 export function slotLabel(slot) {
@@ -117,8 +142,8 @@ export function slotRows(slots) {
 }
 const VIEW_KEY = 'hoi4dbg.armyView';
 
-function loadView() {
-  try { return localStorage.getItem(VIEW_KEY) === 'text' ? 'text' : 'graphic'; } catch { return 'graphic'; }
+function loadView(key = VIEW_KEY) {
+  try { return localStorage.getItem(key) === 'text' ? 'text' : 'graphic'; } catch { return 'graphic'; }
 }
 
 function iconImg(uri, alt, cls) {
@@ -267,6 +292,7 @@ export function splitDesigns(designs) {
 }
 
 export function airPanel(ctx, tag) {
+  let planeView = loadView(PLANE_VIEW_KEY);
   let designTab = 'current';
   const openDesigns = new Set();
   let last = null;
@@ -287,10 +313,48 @@ export function airPanel(ctx, tag) {
         h('span', { class: 'mil-tpl-caret' }, isOpen ? '▾' : '▸')),
       note ? h('div', { class: 'mil-design-note' }, note) : null,
       isOpen ? h('div', { class: 'mil-design-body' },
-        d.slots?.length ? h('div', { class: 'mil-pd' }, slotRows(d.slots).map((row) => h('div', { class: 'mil-pd-row' },
-          row.map((s) => moduleSlot(s))))) : null,
-        h('div', { class: 'mil-stats mil-design-stats' }, Object.entries(d.stats).filter(([, v]) => v)
-          .map(([k, v]) => h('div', { class: 'hoi-line' }, h('span', null, labels[k] ?? k), h('span', { class: 'hoi-num' }, statText(k, v)))))) : null);
+        h('div', { class: 'mil-view mil-design-view' }, [['graphic', 'Graphic'], ['text', 'Text']].map(([v, label]) =>
+          h('button', { class: `mil-view-btn ${planeView === v ? 'mil-view-on' : ''}`, 'aria-pressed': String(planeView === v),
+            onclick: () => { planeView = v; saveView(PLANE_VIEW_KEY, v); draw(...last); } }, label))),
+        planeView === 'graphic' ? planeGraphic(d) : planeText(d, labels)) : null);
+  }
+
+  /** The design drawn like the game's plane designer: weapon slots, the airframe's blueprint, engine and special slots
+   * (the slots the airframe lacks locked), the stats in three columns. */
+  function planeGraphic(d) {
+    const [top, bottom] = slotRows(d.slots ?? []);
+    const row = (slots, size) => h('div', { class: 'mil-pdg-row' },
+      slots.map((s) => moduleSlot(s)), Array.from({ length: Math.max(0, size - slots.length) }, () => lockedSlot()));
+    const bp = icons.blueprints.get(d.type);
+    const bg = icons.designer.background;
+    return h('div', { class: 'mil-pdg' },
+      h('div', { class: 'mil-pdg-left' },
+        h('div', { class: 'mil-pdg-title' }, h('span', { class: 'mil-pdg-name' }, d.name), h('span', { class: 'mil-pdg-type' }, d.type_name)),
+        row(top, PLANE_SLOTS.top),
+        h('div', { class: 'mil-pdg-blueprint', style: bg ? { backgroundImage: `url("${bg}")` } : null },
+          h('div', { class: 'mil-pdg-caption' }, d.type_name),
+          bp ? h('img', { class: 'mil-pdg-plane', src: bp, alt: '', draggable: 'false' }) : null),
+        row(bottom, PLANE_SLOTS.bottom)),
+      h('div', { class: 'mil-pdg-stats' },
+        h('div', { class: 'mil-dd-stats' }, planeStatLines(d.stats).map(([title, rows]) => h('div', { class: 'mil-dd-group' },
+          h('div', { class: 'mil-dd-group-title' }, title),
+          rows.map(([label, text]) => h('div', { class: 'hoi-line' }, h('span', null, label), h('span', { class: 'hoi-num' }, text)))))),
+        h('div', { class: 'mil-pdg-cost' }, h('span', null, 'Production Cost:'), h('span', { class: 'hoi-num' }, cut(d.stats.build_cost_ic ?? 0, 2))),
+        h('p', { class: 'muted mil-designer-note' }, `Not read from the game yet: ${PLANE_UNREAD.join(', ')}.`)));
+  }
+
+  function planeText(d, labels) {
+    return h('div', null,
+      d.slots?.length ? h('div', { class: 'mil-part mil-pd-text' }, h('div', { class: 'mil-part-title' }, 'Modules'),
+        h('div', { class: 'mil-part-list' }, d.slots.map((s) => h('span', null, `${slotLabel(s.slot)}: ${s.module_name ?? '—'}`)))) : null,
+      h('div', { class: 'mil-stats mil-design-stats' }, Object.entries(d.stats).filter(([, v]) => v)
+        .map(([k, v]) => h('div', { class: 'hoi-line' }, h('span', null, labels[k] ?? k), h('span', { class: 'hoi-num' }, statText(k, v))))));
+  }
+
+  function lockedSlot() {
+    const uri = icons.designer.locked;
+    return h('div', { class: 'mil-pd-slot mil-pd-locked', title: 'Not available on this airframe' },
+      uri ? h('img', { class: 'mil-pd-img', src: uri, alt: 'locked', draggable: 'false' }) : h('span', { class: 'mil-pd-label' }, '🔒'));
   }
 
   function moduleSlot(s) {
@@ -304,11 +368,16 @@ export function airPanel(ctx, tag) {
 
   async function fetchModuleIcons(designs) {
     const missing = [...new Set(designs.flatMap((d) => (d.slots ?? []).map((s) => s.module)))].filter((m) => m && !icons.modules.has(m));
-    if (!missing.length) return;
+    const types = [...new Set(designs.map((d) => d.type))].filter((t) => t && !icons.blueprints.has(t));
+    if (!missing.length && !types.length) return;
     missing.forEach((m) => icons.modules.set(m, null));   // asked once even when the game has no icon
+    types.forEach((t) => icons.blueprints.set(t, null));
     try {
-      const res = (await ctx.api.get(`/api/military/icons?modules=${encodeURIComponent(missing.join(','))}`)).data;
+      const q = `modules=${encodeURIComponent(missing.join(','))}&blueprints=${encodeURIComponent(types.join(','))}`;
+      const res = (await ctx.api.get(`/api/military/icons?${q}`)).data;
       Object.entries(res.modules ?? {}).forEach(([k, v]) => icons.modules.set(k, v));
+      Object.entries(res.blueprints ?? {}).forEach(([k, v]) => icons.blueprints.set(k, v));
+      if (res.designer?.background) Object.assign(icons.designer, res.designer);
       if (last) draw(...last);
     } catch (err) {
       ctx.api.log?.('warn', `Plane module icons unavailable: ${err.message}`);
