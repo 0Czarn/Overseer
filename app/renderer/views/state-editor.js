@@ -1,6 +1,7 @@
 import { h, card, demoBanner, keyValues, notice, select, sourceBadge, table, viewHeader } from '../lib/dom.js';
 import { filterByText, humanize } from '../lib/format.js';
 import { loadCountries, tagChip } from './shared.js';
+import { refreshControl } from '../lib/refresh.js';
 import { numberLocale } from '../lib/options.js';
 
 function chips(tags) {
@@ -41,12 +42,24 @@ function detail(state) {
   ].filter(Boolean);
 }
 
+// Save: the newest save (every detail, a snapshot). Live: game memory (owner, controller, cores, claims, category,
+// buildings, resources, manpower - no province buildings), re-read every few seconds or with the ↻ button.
+const SOURCE_KEY = 'hoi4dbg.stateSource';
+const loadSource = () => { try { return localStorage.getItem(SOURCE_KEY) === 'live' ? 'live' : 'save'; } catch { return 'save'; } };
+
 export default {
   id: 'state-editor',
   title: 'State Editor',
   short: 'SE',
   async render(root, ctx) {
-    const [res, countries] = await Promise.all([ctx.api.get('/api/states'), loadCountries(ctx)]);
+    let source = loadSource();
+    const fetchStates = () => ctx.api.get(`/api/states${source === 'live' ? '?source=live' : ''}`);
+    let [res, countries] = await Promise.all([fetchStates(), loadCountries(ctx)]);
+    let control = null;
+    const badgeHost = h('span');
+    const noteHost = h('div');
+    const controlHost = h('span');
+    const sourceSeg = h('div', { class: 'gs-seg', role: 'group', 'aria-label': 'Data source' });
     let owner = '';
     let text = '';
     let selected = res.data[0]?.id;
@@ -66,12 +79,39 @@ export default {
       ...(rows.length > 400 ? [h('p', { class: 'hint' }, `Showing 400 of ${rows.length} states - use the filter or the country selector.`)] : []));
       detailHost.replaceChildren(...[detail(res.data.find((s) => s.id === selected))].flat());
     };
+    function meta() {
+      badgeHost.replaceChildren(sourceBadge(res.source, res.note));
+      noteHost.replaceChildren(res.source === 'demo' ? demoBanner(res.note) : h('p', { class: 'hint' }, res.note));
+      sourceSeg.replaceChildren(...[['save', 'Save'], ['live', 'Live']].map(([k, label]) => h('button', {
+        class: `gs-seg-btn ${source === k ? 'gs-seg-on' : ''}`, 'aria-pressed': String(source === k),
+        title: k === 'live' ? 'From game memory - re-read every few seconds (no province buildings)' : 'From the newest save - a snapshot',
+        onclick: () => setSource(k) }, label)));
+      control?.stop();
+      control = source === 'live' ? refreshControl('state-editor', 'States', () => reload()) : null;
+      controlHost.replaceChildren(...(control ? [control.el] : []));
+    }
+    async function reload() {
+      try {
+        res = await fetchStates();
+      } catch (err) {
+        res = { source: 'unavailable', data: [], note: err.message };
+      }
+      if (!res.data.some((s) => s.id === selected)) selected = res.data[0]?.id;
+      meta();
+      rerender();
+    }
+    function setSource(k) {
+      if (k === source) return;
+      source = k;
+      try { localStorage.setItem(SOURCE_KEY, k); } catch { /* preference only */ }
+      reload();
+    }
+    meta();
     rerender();
 
     root.append(
-      viewHeader('State Editor', 'Owner vs controller, buildings, resources, cores and claims.',
-        sourceBadge(res.source, res.note)),
-      res.source === 'demo' ? demoBanner(res.note) : h('p', { class: 'hint' }, res.note),
+      viewHeader('State Editor', 'Owner vs controller, buildings, resources, cores and claims.', sourceSeg, controlHost, badgeHost),
+      noteHost,
       h('div', { class: 'split' },
         card('States', [
           h('div', { class: 'toolbar' },
@@ -85,5 +125,6 @@ export default {
         card('Details', [detailHost, h('button', { class: 'btn', disabled: true,
           title: 'Editing not available yet' }, 'Edit state (not available)')])),
     );
+    return () => control?.stop();
   },
 };

@@ -128,6 +128,21 @@ function runSmoke(win, outDir, quit) {
               if (info.focusQueueAdd !== 1) result.failures.push(`${size.name}/focus: clicking a focus does not add it to the plan`);
             }
           }
+          if (tab === 'state-editor' && size.name === 'wide') {   // Save / Live switch: both list states (the user's choice restored)
+            info.states = await wc.executeJavaScript(`(async () => {
+              const btn = (label) => [...document.querySelectorAll('.view-header .gs-seg-btn')].find((b) => b.textContent === label);
+              const before = document.querySelector('.view-header .gs-seg-on')?.textContent;
+              const rows = async (label) => { btn(label)?.click(); for (let i = 0; i < 60; i += 1) {
+                await new Promise((r) => setTimeout(r, 250));
+                if (btn(label)?.classList.contains('gs-seg-on') && document.querySelectorAll('#view table tbody tr').length) break; }
+                return document.querySelectorAll('#view table tbody tr').length; };
+              const live = await rows('Live');
+              const save = await rows('Save');
+              if (before) btn(before)?.click();
+              return { live, save };
+            })()`);
+            if (!info.states.save) result.failures.push(`${size.name}/state-editor: the save view lists no states`);
+          }
           if (tab === 'options') {   // style, eye, background images; no stray "null" text
             info.options = await wc.executeJavaScript(`({ rows: document.querySelectorAll('.opt-row').length,
               gallery: !!document.querySelector('.opt-gallery .opt-thumb-add'),

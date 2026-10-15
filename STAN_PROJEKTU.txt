@@ -594,6 +594,17 @@ DO ZROBIENIA (w tej kolejności)
             pliku (desktop-options.json, navOrder) + localStorage jako zapas (localStorage gubił ostatnią zmianę przy
             twardym zamknięciu). Options poza listą przesuwanych zakładek, na dole paska bocznego (#nav-pinned), nie
             do przesunięcia ani ukrycia; Ctrl+1..9 / Ctrl+Tab chodzą po zwykłych zakładkach.
+[x] CONSUMER GOODS żółto-złote (2026-10-15): modyfikatory consumer_goods* klasą hoi-cg (#e8c547), nie dobry/zły.
+[x] AUTO-SORT FABRYK WOJSKOWYCH (2026-10-15): construction.factory_first_order(lines, "civ"|"mil"); POST/GET
+            /api/live/construction/sort z kind; w zakładce Construction dwa przełączniki (cywilne / wojskowe),
+            wykluczają się (localStorage hoi4dbg.constructionSort = civ|mil, stary civSort przejęty).
+[x] STATE EDITOR LIVE (2026-10-15): przełącznik Save / Live + tryby Live / On refresh (↻). Pamięć: CState
+            (RTTI .?AVCState@@, [stan gry+0x2C8]): +0x98 roszczenia, +0xB0 rdzenie (int32 sloty), +0x898 kategoria
+            (nazwa +0x18), +0x140 indeks typ budynku -> slot w +0x158 (CBuilding*, poziom = dolne 16 bitów +0x40), +0x1F0
+            zasoby (16 B: fixed64, kolejność common/resources), właściciel/kontroler/manpower jak wcześniej
+            (pointers.read_states, 1081 regionów w 0,4 s). Porównanie z autosave 1943.05: kategorie, zasoby, roszczenia
+            100%; budynki 20 różnic i 1 właściciel = zmiany od autosave; rdzenie państw dynamicznych (D01...) pomijane.
+            Na żywo bez budynków prowincji i kontrolerów pojedynczych prowincji (tylko w widoku Save).
 [ ] Krok G  Game Tools (narzędzia lokalne)
             (zakładka Intelligence Lab USUNIĘTA 2026-10-13 na prośbę użytkownika - była tylko na danych DEMO)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)

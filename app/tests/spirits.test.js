@@ -16,4 +16,6 @@ test('higher costs and penalties are bad', () => {
   assert.equal(modifierClass('land_doctrine_cost_factor', 0.2), 'hoi-neg');
   assert.equal(modifierClass('civilian_intel_to_others', -25), 'hoi-pos');
   assert.equal(modifierClass('x', 0), '');
+  assert.equal(modifierClass('consumer_goods_factor', -0.05), 'hoi-cg');   // gold either way
+  assert.equal(modifierClass('consumer_goods_expected_value', 0.1), 'hoi-cg');
 });

@@ -367,8 +367,12 @@ class DebuggerService:
                                "editable": False}, "Country identity from game files and the newest save; "
                         "values come from /save-values and live memory.")
 
-    def states(self, owner: str | None = None) -> dict:
-        """States of the newest save (snapshot) with names and provinces from the game files; DEMO without them."""
+    def states(self, owner: str | None = None, source: str = "save") -> dict:
+        """States of the newest save (snapshot) with names and provinces from the game files; DEMO without them.
+        source="live": from game memory instead (live/service.states) - province buildings and the controllers of
+        single provinces are not read live."""
+        if source == "live":
+            return self._states_live(owner)
         install = self._install_path()
         picked = self._pick_save(None)
         items, note, source = None, None, DEMO
@@ -390,6 +394,31 @@ class DebuggerService:
             owner = owner.upper()
             items = [s for s in items if owner in (s["owner"], s["controller"])]
         return envelope(source, items, note)
+
+    def _states_live(self, owner: str | None) -> dict:
+        install = self._install_path()
+        if install is None or self.live is None:
+            return envelope(UNAVAILABLE, [], "Needs the game installation and live game access")
+        roots = self._game_roots(install)
+        try:
+            res = self.live.states(list(construction_mod.buildings(roots)), list(resource_order(roots)))
+        except Exception as exc:  # game not running, main menu, loading, another version
+            return envelope(UNAVAILABLE, [], f"Live states not readable: {exc}")
+        definitions, names = gamefiles.state_definitions(install), gamefiles.state_names(install)
+        items = []
+        for st in res["states"]:
+            definition = definitions.get(st["id"]) or {}
+            if not definition and not st["owner"]:
+                continue   # an unused slot of the state table
+            key = definition.get("name_key") or ""
+            items.append({**st, "name": names.get(key, key or f"State {st['id']}"),
+                          "controllers": {st["controller"]: len(definition.get("provinces") or [])} if st["controller"] else {},
+                          "provinces": len(definition.get("provinces") or []), "province_buildings": None})
+        if owner:
+            owner = owner.upper()
+            items = [s for s in items if owner in (s["owner"], s["controller"])]
+        return envelope(LIVE, items, f"{len(items)} states from game memory ({res.get('date') or 'date unknown'}); "
+                                     "province buildings only in the save view.")
 
     def _focus_context(self, tag: str, live_first: bool = False):
         """(state, focuses of its tree with statuses) or None. State from the newest save, or with `live_first`
@@ -1037,13 +1066,15 @@ class DebuggerService:
                                "game_date": found.get("date")},
                         "Construction queue from game memory.")
 
-    def construction_sort(self, apply: bool) -> dict:
-        """Player's construction queue with civilian factories closest to completion first (live/service.py
-        sort_construction); moved lines named by their state like the construction tab."""
+    def construction_sort(self, apply: bool, kind: str = "civ") -> dict:
+        """Player's construction queue with civilian ("civ") or military ("mil") factories closest to completion first
+        (live/service.py sort_construction); moved lines named by their state like the construction tab."""
+        if kind not in construction_mod.SORT_BUILDINGS:
+            raise ReportError("kind must be civ or mil")
         if self.live is None:
             from .live.service import LiveError   # live is optional (--no-game): imported only here
             raise LiveError("disabled", "Live game access is disabled (--no-game)")
-        res = self.live.sort_construction(apply)
+        res = self.live.sort_construction(apply, kind)
         install = self._install_path()
         if install is not None:
             names = gamefiles.state_names(install)

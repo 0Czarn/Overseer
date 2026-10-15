@@ -136,13 +136,22 @@ def rows(lines: list[dict], names: dict[str, str], state_names: dict[str, str], 
     return out
 
 
-def civilian_first_order(lines: list[dict]) -> list[int]:
-    """New queue order (indices into `lines`): civilian factories being built on top, the one closest to completion
-    first (it gets the factories and finishes soonest, then builds more), the rest below in its own order. Repairs
-    and other buildings keep their relative order; equal progress keeps the current order."""
-    def civilian(line: dict) -> bool:
-        return line["kind"] == "building" and line["building"] == "industrial_complex" and line["levels"] > 0
-    civ = sorted((i for i, line in enumerate(lines) if civilian(line)),
+SORT_BUILDINGS = {"civ": "industrial_complex", "mil": "arms_factory"}   # auto-sort kinds (Construction tab)
+
+
+def factory_first_order(lines: list[dict], kind: str = "civ") -> list[int]:
+    """New queue order (indices into `lines`): factories of `kind` ("civ" civilian, "mil" military) being built on top,
+    the one closest to completion first (it gets the factories and finishes soonest), the rest below in its own order.
+    Repairs and other buildings keep their relative order; equal progress keeps the current order."""
+    building = SORT_BUILDINGS[kind]
+
+    def wanted(line: dict) -> bool:
+        return line["kind"] == "building" and line["building"] == building and line["levels"] > 0
+    top = sorted((i for i, line in enumerate(lines) if wanted(line)),
                  key=lambda i: -(lines[i]["produced"] / lines[i]["cost"] if lines[i]["cost"] else 0))
-    picked = set(civ)
-    return civ + [i for i in range(len(lines)) if i not in picked]
+    picked = set(top)
+    return top + [i for i in range(len(lines)) if i not in picked]
+
+
+def civilian_first_order(lines: list[dict]) -> list[int]:
+    return factory_first_order(lines, "civ")

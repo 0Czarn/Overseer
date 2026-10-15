@@ -52,5 +52,8 @@ test('auto-sort message only when the queue was changed', () => {
   assert.equal(sortMessage({ applied: true, moved: [
     { building: 'industrial_complex', location: 568, state_name: 'Krasnoyarsk', progress: 0.876, to: 1 },
     { building: 'arms_factory', location: 400, progress: 0.5, to: 2 }] }),
-  'Construction queue sorted (2 moved): Krasnoyarsk 87% → 1');
+  'Construction queue sorted, civilian factories first (2 moved): Krasnoyarsk 87% → 1');
+  assert.equal(sortMessage({ applied: true, kind: 'mil', moved: [
+    { building: 'arms_factory', location: 400, state_name: 'Silesia', progress: 0.5, to: 1 }] }),
+  'Construction queue sorted, military factories first (1 moved): Silesia 50% → 1');
 });

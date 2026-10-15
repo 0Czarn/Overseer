@@ -1372,6 +1372,75 @@ def read_army(memory, country: int) -> dict:
     return {"divisions": len(divisions), **men, "templates": templates}
 
 
+# The rest of a CState for the live State Editor (2026-10-15, autosave 1943.05 vs memory: Berlin, Montenegro, Greece,
+# Belgium, Estonia...): + 0x98 claims and + 0xb0 cores = int32 arrays of country slots (MNT: claims ITA ALB, cores
+# MNT YUG); + 0x898 = CStateCategory*, its name std::string at + 0x18 ("rural"); + 0x140 = int32[56] building type
+# index -> slot in + 0x158 (CBuilding*; index i = building type i - 1 in the game's file order, -1 = none), the level
+# = low 16 bits of int32 CBuilding + 0x40 (both halves equal in every state checked: Berlin 5 12 10 2 6 3 = the save);
+# + 0x1f0 = resources, 16-byte entries (fixed64 amount, type) in the order of common/resources (oil ... coal).
+STATE_MORE = {"claims": 0x98, "cores": 0xB0, "category": 0x898, "category_name": 0x18, "building_index": 0x140,
+              "buildings": 0x158, "building_level": 0x40, "resources": 0x1F0}
+BUILDING_TYPES = 56
+
+
+def read_states(memory, module_base: int, tags: list[str], buildings: list[str], resources: list[str]) -> list[dict]:
+    """[{"id", "owner", "controller", "cores", "claims", "category", "buildings": {type: level}, "resources":
+    {type: amount}, "manpower": {"available", "locked", "total"}}] of every state (game memory). `buildings` and
+    `resources`: the type names in the game's order (construction.buildings, resource_order)."""
+    table = _ptr(memory, module_base + COUNTRY_TABLE[0])
+    if table is None:
+        raise PointerError("no_country_table", "The game state is not readable")
+    tag_of = lambda slot: tags[slot - 1] if 0 < slot <= len(tags) else None  # noqa: E731
+
+    def slots(address: int) -> list[str]:
+        raw = memory.read(address, 16)
+        data, _cap, size = struct.unpack("<Qii", raw) if raw else (0, 0, 0)
+        if not 0 <= size <= 500:
+            raise PointerError("implausible", "State country list out of range - layout does not match")
+        items = memory.read(data, 4 * size) if size else b""
+        return sorted(t for t in (tag_of(v) for v in struct.unpack(f"<{size}i", items or bytes(4 * size))) if t)
+
+    out = []
+    names: dict[int, str | None] = {}
+    for sid, state in enumerate(read_array(memory, table + STATES, 5000)):
+        if not state:
+            continue
+        head = memory.read(state + STATE["owner"], 8)
+        men = memory.read(state + STATE["available"], 12)
+        if not head or not men:
+            continue
+        owner, controller = struct.unpack("<ii", head)
+        available, locked, total = struct.unpack("<iii", men)
+        if not 0 <= available < 10**9 or not 0 <= total < 10**10:
+            raise PointerError("implausible", "State manpower out of range - layout does not match")
+        cat = _ptr(memory, state + STATE_MORE["category"])
+        if cat not in names:
+            names[cat] = _msvc_string(memory, cat + STATE_MORE["category_name"], 60) if cat else None
+        built = {}
+        index_ptr = _ptr(memory, state + STATE_MORE["building_index"])
+        index = memory.read(index_ptr, 4 * BUILDING_TYPES) if index_ptr else None
+        if index:
+            objects = read_array(memory, state + STATE_MORE["buildings"], BUILDING_TYPES)
+            for i, slot in enumerate(struct.unpack(f"<{BUILDING_TYPES}i", index)):
+                if slot < 0 or i == 0 or slot >= len(objects) or not objects[slot]:
+                    continue
+                raw = memory.read(objects[slot] + STATE_MORE["building_level"], 2)
+                level = struct.unpack("<H", raw)[0] if raw else 0
+                if level:
+                    built[buildings[i - 1] if i - 1 < len(buildings) else f"building_{i}"] = level
+        res = memory.read(state + STATE_MORE["resources"], 16 * len(resources)) or b""
+        amounts = {}
+        for i, name in enumerate(resources):
+            if 16 * i + 8 <= len(res):
+                v = struct.unpack_from("<q", res, 16 * i)[0] / 100000
+                if v:
+                    amounts[name] = round(v, 3)
+        out.append({"id": sid, "owner": tag_of(owner), "controller": tag_of(controller), "cores": slots(state + STATE_MORE["cores"]),
+                    "claims": slots(state + STATE_MORE["claims"]), "category": names[cat], "buildings": built,
+                    "resources": amounts, "manpower": {"available": available, "locked": locked, "total": total}})
+    return out
+
+
 def read_free_manpower(memory, module_base: int, tags: list[str], tag: str) -> int:
     """Free manpower of `tag`: the available manpower of the states it controls (game memory)."""
     table = _ptr(memory, module_base + COUNTRY_TABLE[0])

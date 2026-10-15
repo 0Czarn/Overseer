@@ -580,9 +580,9 @@ class LiveService:
             pointers.read_date(mem, self._module_base[key])))
         return {"lines": lines, "factories": factories, "date": date, "tag": tag, "read_at": self._clock()}
 
-    def sort_construction(self, apply: bool) -> dict:
-        """Civilian factories with the most progress first in the PLAYER's construction queue (see
-        construction.civilian_first_order). apply=False only reports the new order; apply=True writes it into game
+    def sort_construction(self, apply: bool, kind: str = "civ") -> dict:
+        """Civilian ("civ") or military ("mil") factories with the most progress first in the PLAYER's construction
+        queue (see construction.factory_first_order). apply=False only reports the new order; apply=True writes it into game
         memory (LOCAL write, single player only) and checks it by reading the queue again."""
         process = self._process()
         if not pointers.supported(process.get("version")):
@@ -597,7 +597,7 @@ class LiveService:
             data, slots = pointers.construction_slots(mem, country)
             if len(slots) != len(lines):
                 raise LiveError("queue_changed", "The construction queue changed while it was read - try again")
-            order = construction_mod.civilian_first_order(lines)
+            order = construction_mod.factory_first_order(lines, kind)
             changed = 0
             if apply and order != list(range(len(lines))):
                 changed = pointers.write_construction_order(mem, data, slots, order)
@@ -606,12 +606,12 @@ class LiveService:
             return lines, order, changed
         lines, order, changed = self._with_country(process, tag, run, writer=apply)
         if changed:
-            self.log.warning("LOCAL memory write %s construction queue: civilian factories by progress, %d slots moved",
-                             tag, changed)
+            self.log.warning("LOCAL memory write %s construction queue: %s factories by progress, %d slots moved",
+                             tag, "military" if kind == "mil" else "civilian", changed)
         moved = [{"from": k + 1, "to": i + 1, "building": lines[k]["building"], "location": lines[k]["location"],
                   "progress": lines[k]["produced"] / lines[k]["cost"] if lines[k]["cost"] else None}
                  for i, k in enumerate(order) if k != i]
-        return {"tag": tag, "sorted": not moved or bool(changed), "applied": bool(changed), "moved": moved,
+        return {"tag": tag, "kind": kind, "sorted": not moved or bool(changed), "applied": bool(changed), "moved": moved,
                 "scope": "local" if changed else None, "read_at": self._clock()}
 
     def start_focus(self, focus_id: str) -> dict:
@@ -917,6 +917,15 @@ class LiveService:
             return self._game_memory(lambda mem, base, _tags, _p: ic_history.day_number(pointers.read_date(mem, base)))
         except LiveError:
             return None
+
+    def states(self, buildings: list[str], resources: list[str]) -> dict:
+        """Every state of the running game (pointers.read_states): owner, controller, cores, claims, category,
+        buildings, resources, manpower; {"states", "date", "read_at"}."""
+        def read(mem, base, tags, _p):
+            t = ic_history.day_number(pointers.read_date(mem, base))
+            return {"states": pointers.read_states(mem, base, tags, buildings, resources),
+                    "date": ic_history.date_text(t) if t is not None else None}
+        return {**self._game_memory(read), "read_at": self._clock()}
 
     def overlay(self) -> dict:
         """The player's values for the overlay window (one memory read): {"tag", "date", "values": {field: value},

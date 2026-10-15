@@ -1184,6 +1184,36 @@ class IdeaPointerTests(unittest.TestCase):
         with self.assertRaises(pointers.PointerError):
             pointers.read_justifications(mem, country)
 
+    def test_live_states_like_the_save(self):   # Montenegro 1943 (autosave): claims ITA ALB, cores MNT YUG, tungsten 8
+        mem = FakeMemory(0x8000)
+        module, table = BASE - pointers.COUNTRY_TABLE[0], BASE + 0x100
+        mem.put(module + pointers.COUNTRY_TABLE[0], "Q", table)
+        states, state, index, objects, building, cat, lists = (BASE + 0x400, BASE + 0x1000, BASE + 0x2000, BASE + 0x2200,
+                                                                 BASE + 0x2400, BASE + 0x2600, BASE + 0x2800)
+        tags = ["ITA", "ALB", "MNT", "YUG"]
+        mem.put(table + pointers.STATES, "Qii", states, 2, 2)
+        mem.put(states, "QQ", 0, state)                                    # slot 0 empty, state 1
+        mem.put(state + pointers.STATE["owner"], "ii", 3, 3)
+        mem.put(state + pointers.STATE["available"], "iii", 27087, 973605, 1024847)
+        mem.put(state + pointers.STATE_MORE["claims"], "Qii", lists, 2, 2)
+        mem.put(lists, "ii", 1, 2)
+        mem.put(state + pointers.STATE_MORE["cores"], "Qii", lists + 0x10, 2, 2)
+        mem.put(lists + 0x10, "ii", 4, 3)
+        mem.put(state + pointers.STATE_MORE["category"], "Q", cat)
+        mem.put(cat + 0x18, "5s", b"rural")
+        mem.put(cat + 0x28, "QQ", 5, 15)
+        mem.put(state + pointers.STATE_MORE["building_index"], "Q", index)
+        mem.put(index, f"{pointers.BUILDING_TYPES}i", *([-1] * pointers.BUILDING_TYPES))
+        mem.put(index + 4 * 2, "i", 0)                                      # type 1 = arms_factory -> slot 0
+        mem.put(state + pointers.STATE_MORE["buildings"], "Qii", objects, 1, 1)
+        mem.put(objects, "Q", building)
+        mem.put(building + pointers.STATE_MORE["building_level"], "I", 0x40004)   # level 4 (both halves)
+        mem.put(state + pointers.STATE_MORE["resources"] + 16 * 3, "q", 800000)  # tungsten 8
+        [got] = pointers.read_states(mem, module, tags, ["infrastructure", "arms_factory"], ["oil", "aluminium", "rubber", "tungsten"])
+        self.assertEqual(got, {"id": 1, "owner": "MNT", "controller": "MNT", "cores": ["MNT", "YUG"], "claims": ["ALB", "ITA"],
+                               "category": "rural", "buildings": {"arms_factory": 4}, "resources": {"tungsten": 8.0},
+                               "manpower": {"available": 27087, "locked": 973605, "total": 1024847}})
+
     def test_combat_log_skips_a_dynamic_countrys_log_and_odd_items(self):
         mem = FakeMemory(0x8000)
         module, table = BASE - pointers.COUNTRY_TABLE[0], BASE + 0x100

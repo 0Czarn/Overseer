@@ -82,7 +82,7 @@ def build_routes(svc: DebuggerService) -> list[Route]:
     def construction_sort(body: dict) -> dict:
         if body.get("confirm_local") is not True:
             raise LiveError("not_confirmed", "Direct memory writes must be enabled explicitly (local only)")
-        return svc.construction_sort(apply=True)
+        return svc.construction_sort(apply=True, kind=str(body.get("kind") or "civ"))
 
     def focus_autostart(body: dict) -> dict:
         if body.get("confirm_local") is not True:
@@ -136,7 +136,7 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("GET", f"/api/countries/{tag}/research/tree", lambda q, b, tag: svc.research_tree(tag, (q.get("folder") or [""])[0])),
         r("GET", f"/api/countries/{tag}/save-values",
           lambda q, b, tag: svc.country_save_values(tag, _str(q, "name") or None)),
-        r("GET", "/api/states", lambda q, b: svc.states(_str(q, "owner") or None)),
+        r("GET", "/api/states", lambda q, b: svc.states(_str(q, "owner") or None, _str(q, "source") or "save")),
         r("GET", f"/api/focus/{tag}/state", lambda q, b, tag: svc.focus_state(tag)),
         r("GET", f"/api/focus/{tag}", lambda q, b, tag: svc.focus(tag)),
         r("POST", f"/api/focus/{tag}/queue", lambda q, b, tag: svc.set_focus_queue(tag, b.get("queue"))),
@@ -166,7 +166,7 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("POST", "/api/live/focus/autostart", lambda q, b: focus_autostart(b)),
         r("GET", "/api/live/fog-of-war", lambda q, b: {"data": live().fog_of_war()}),
         r("POST", "/api/live/fog-of-war", lambda q, b: fog_of_war(b)),
-        r("GET", "/api/live/construction/sort", lambda q, b: svc.construction_sort(apply=False)),
+        r("GET", "/api/live/construction/sort", lambda q, b: svc.construction_sort(apply=False, kind=_str(q, "kind") or "civ")),
         r("POST", "/api/live/construction/sort", lambda q, b: construction_sort(b)),
         r("GET", "/api/live/stockpile", lambda q, b: svc.live_stockpile(_str(q, "tag").upper() or None)),
         r("POST", "/api/live/stockpile", lambda q, b: stockpile_write(b)),

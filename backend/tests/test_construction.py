@@ -40,6 +40,9 @@ class ConstructionRowsTest(unittest.TestCase):
                  line("industrial_complex", 9000), line("rail_way", 0, kind="railway"), line("industrial_complex", 1000)]
         self.assertEqual(construction.civilian_first_order(lines), [3, 1, 5, 0, 2, 4])
         self.assertEqual(construction.civilian_first_order([line("industrial_complex", 9000)]), [0])
+        # the military auto-sort: military factories (arms_factory) by progress on top, civilian ones keep their order
+        lines.append(line("arms_factory", 9500))
+        self.assertEqual(construction.factory_first_order(lines, "mil"), [6, 0, 1, 2, 3, 4, 5])
 
     def test_date_over_the_year_end(self):
         # day 360 = 27 Dec (no leap years)

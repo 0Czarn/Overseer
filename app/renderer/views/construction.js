@@ -3,7 +3,7 @@
 import { h, notice, viewHeader } from '../lib/dom.js';
 import { livePanel } from '../lib/refresh.js';
 import { countryPicker, tagChip } from './shared.js';
-import { setSortEnabled, sortEnabled } from '../lib/construction-sort.js';
+import { setSortMode, sortMode } from '../lib/construction-sort.js';
 
 /** "87%" - progress of the level being built, cut to whole percent like the game tooltip. */
 export function progressPct(progress) {
@@ -128,28 +128,40 @@ export function constructionPanel(ctx, tag) {
   });
 }
 
-/** "Civilian factories first" switch: the app keeps the player's queue sorted, civilian factories closest to
- *  completion on top (LOCAL game memory write, single player only). Shows what a sort would move now. */
+/** Auto-sort switches - civilian OR military factories first (they exclude each other): the app keeps the player's
+ *  queue sorted, those factories closest to completion on top (LOCAL game memory write, single player only). Shows
+ *  what a sort would move now. */
+const SORT_KINDS = [['civ', 'civilian'], ['mil', 'military']];
+
 function sortSwitch(ctx) {
   const info = h('span', { class: 'muted cons-sort-info' });
-  const box = h('input', { type: 'checkbox', checked: sortEnabled() });
+  const boxes = {};
   const preview = async () => {
+    const mode = sortMode() ?? 'civ';
     try {
-      const r = await ctx.api.get('/api/live/construction/sort');
+      const r = await ctx.api.get(`/api/live/construction/sort?kind=${mode}`);
+      const what = mode === 'mil' ? 'military' : 'civilian';
       info.textContent = r.moved.length
-        ? `${r.tag}: ${r.moved.length} line${r.moved.length === 1 ? '' : 's'} would move`
-        : `${r.tag}: queue already in this order`;
+        ? `${r.tag}: ${r.moved.length} line${r.moved.length === 1 ? '' : 's'} would move (${what} first)`
+        : `${r.tag}: queue already in this order (${what} first)`;
     } catch (err) {
       info.textContent = `Not available: ${err.message}`;
     }
   };
-  box.addEventListener('change', () => { setSortEnabled(box.checked); preview(); });
-  preview();
-  return h('div', { class: 'cons-sort' },
-    h('label', { class: 'cons-sort-label', title: 'Your country only. The app moves civilian factories being built to the '
+  const labels = SORT_KINDS.map(([kind, word]) => {
+    boxes[kind] = h('input', { type: 'checkbox', checked: sortMode() === kind || null });
+    boxes[kind].addEventListener('change', () => {
+      setSortMode(boxes[kind].checked ? kind : null);
+      for (const [k] of SORT_KINDS) boxes[k].checked = sortMode() === k;   // the other one goes off
+      preview();
+    });
+    return h('label', { class: 'cons-sort-label', title: `Your country only. The app moves ${word} factories being built to the `
       + 'top of the construction queue, the one with the most progress first, every few seconds while this is on. '
-      + 'Writes game memory on this computer only; refused in multiplayer.' },
-    box, h('span', null, 'Auto-sort: civilian factories closest to completion first')), info);
+      + 'Only one of the two auto-sorts can be on. Writes game memory on this computer only; refused in multiplayer.' },
+    boxes[kind], h('span', null, `Auto-sort: ${word} factories closest to completion first`));
+  });
+  preview();
+  return h('div', { class: 'cons-sort' }, ...labels, info);
 }
 
 export default {

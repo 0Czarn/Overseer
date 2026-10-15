@@ -21,6 +21,7 @@ export function modifierLine(m) {
 
 export function modifierClass(key, value) {
   if (!value) return '';
+  if (/consumer_goods/.test(key)) return 'hoi-cg';   // consumer goods: gold, neither good nor bad (as the user wants)
   return (value > 0) !== BAD_WHEN_HIGH.test(key) ? 'hoi-pos' : 'hoi-neg';
 }
 
