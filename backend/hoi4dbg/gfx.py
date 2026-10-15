@@ -30,6 +30,29 @@ def sprites(roots: tuple[str, ...]) -> dict[str, str]:
     return out
 
 
+FRAMES_RE = re.compile(r'name\s*=\s*"?(GFX_[A-Za-z0-9_.\-]+)"?[^{}]*?noOfFrames\s*=\s*(\d+)', re.I)
+
+
+@lru_cache(maxsize=2)
+def sprite_frames(roots: tuple[str, ...]) -> dict[str, int]:
+    """{sprite name: noOfFrames} of the sprites that are horizontal strips (unit icons: 2 - normal and white)."""
+    out: dict[str, int] = {}
+    for root in map(Path, roots):
+        for path in sorted((root / "interface").rglob("*.gfx")):
+            src = path.read_text(encoding="utf-8-sig", errors="replace")
+            out.update((name, int(n)) for name, n in FRAMES_RE.findall(src))
+    return out
+
+
+def sprite_uri(roots: tuple[str, ...], name: str) -> str | None:
+    """data: URI of a sprite's first frame."""
+    texture = sprites(roots).get(name)
+    if not texture:
+        return None
+    frames = sprite_frames(roots).get(name, 1)
+    return frame_data_uri(texture, 1, frames) if frames > 1 else icon_data_uri(texture)
+
+
 def _png(width: int, height: int, rgba: bytes) -> bytes:
     def chunk(kind: bytes, data: bytes) -> bytes:
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)

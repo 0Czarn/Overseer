@@ -89,39 +89,149 @@ function designerBlock(d) {
       'From the game files, the newest designs, researched technologies and unlocked doctrines.'));
 }
 
-function templateCard(t) {
+export const GRID_SIDE = 5;
+
+/** Columns of the designer grid: [[unit id | null] x 5 rows] x 5 (the backend's slot = column * 5 + row). */
+export function gridColumns(slots) {
+  return Array.from({ length: GRID_SIDE }, (_, c) => Array.from({ length: GRID_SIDE }, (_, r) => slots?.[c * GRID_SIDE + r] ?? null));
+}
+
+// icons of the designer, fetched once (GET /api/military/icons) and kept for the session: unit id / template number
+const icons = { units: new Map(), templates: new Map(), modules: new Map() };
+
+/** "Main weapon" / "Weapon 2" / "Engine" / "Special 1" - a plane designer slot (the game has no name for them). */
+export function slotLabel(slot) {
+  if (slot === 'fixed_main_weapon_slot') return 'Main weapon';
+  const aux = /^fixed_auxiliary_weapon_slot_(\d+)$/.exec(slot);
+  if (aux) return `Weapon ${Number(aux[1]) + 1}`;
+  if (slot === 'engine_type_slot') return 'Engine';
+  const special = /^special_type_slot_(\d+)$/.exec(slot);
+  if (special) return `Special ${special[1]}`;
+  return slot.replace(/_slot$/, '').replace(/_/g, ' ');
+}
+
+/** [weapon slots, engine and special slots] - the plane designer's top and bottom row. */
+export function slotRows(slots) {
+  const weapon = (s) => s.slot.includes('weapon');
+  return [slots.filter(weapon), slots.filter((s) => !weapon(s))];
+}
+const VIEW_KEY = 'hoi4dbg.armyView';
+
+function loadView() {
+  try { return localStorage.getItem(VIEW_KEY) === 'text' ? 'text' : 'graphic'; } catch { return 'graphic'; }
+}
+
+function iconImg(uri, alt, cls) {
+  return uri ? h('img', { class: cls, src: uri, alt, draggable: 'false' }) : h('span', { class: `${cls} mil-icon-missing` }, alt.slice(0, 2));
+}
+
+function templateIcon(t) {
+  const uri = t.icon?.template != null ? icons.templates.get(String(t.icon.template)) : icons.units.get(t.icon?.unit);
+  return h('span', { class: 'mil-tpl-icon' }, uri ? h('img', { src: uri, alt: '', draggable: 'false' }) : null);
+}
+
+function slot(id, names, cls = '') {
+  if (!id) return h('div', { class: `mil-slot mil-slot-empty ${cls}`.trim() });
+  return h('div', { class: `mil-slot ${cls}`.trim(), title: names[id] ?? id }, iconImg(icons.units.get(id), names[id] ?? id, 'mil-slot-img'));
+}
+
+/** The template drawn like the game's division designer: battalion columns, support companies, regimental support. */
+function designerGraphic(t, names) {
+  const cols = gridColumns(t.grid?.battalions);
+  const width = t.designer?.stats?.combat_width;
+  return h('div', { class: 'mil-dd' },
+    h('div', { class: 'mil-dd-board' },
+      width != null ? h('div', { class: 'mil-dd-width', title: 'Combat width' }, cut(width, 0)) : null,
+      h('div', { class: 'mil-dd-main' },
+        h('div', { class: 'mil-dd-cols' }, cols.map((col) => h('div', { class: 'mil-dd-col' }, col.map((id) => slot(id, names))))),
+        h('div', { class: 'mil-dd-support' }, h('div', { class: 'mil-dd-label' }, 'Support'),
+          (t.grid?.support ?? []).map((id) => slot(id, names, 'mil-slot-small')))),
+      h('div', { class: 'mil-dd-regimental' },
+        h('div', { class: 'mil-dd-regrow' }, (t.grid?.regimental ?? []).map((id) => slot(id, names, 'mil-slot-small'))),
+        h('div', { class: 'mil-dd-label' }, 'Regimental Support'))),
+    t.designer ? h('div', { class: 'mil-dd-stats' }, designerLines(t.designer.stats).map(([title, rows]) => h('div', { class: 'mil-dd-group' },
+      h('div', { class: 'mil-dd-group-title' }, title),
+      rows.map(([label, text]) => h('div', { class: 'hoi-line' }, h('span', null, label), h('span', { class: 'hoi-num' }, text)))))) : null);
+}
+
+function designerText(t) {
   const part = (title, units) => (units.length ? h('div', { class: 'mil-part' },
     h('div', { class: 'mil-part-title' }, title), h('div', { class: 'mil-part-list' }, unitLines(units).map((l) => h('span', null, l)))) : null);
-  return h('div', { class: `mil-template ${t.count ? '' : 'mil-unused'}` },
-    h('div', { class: 'mil-template-head' }, h('span', { class: 'mil-template-name' }, t.name),
-      h('span', { class: 'mil-count', title: 'Divisions with this template' }, t.count)),
-    part('Battalions', t.battalions), part('Support', t.support), part('Regimental Support', t.regimental),
-    designerBlock(t.designer));
+  return h('div', { class: 'mil-dd-text' }, part('Battalions', t.battalions), part('Support', t.support),
+    part('Regimental Support', t.regimental), designerBlock(t.designer));
 }
 
 export function armyPanel(ctx, tag) {
-  return livePanel(ctx, {
-    title: 'Army', url: url(tag), liveParts,
-    render(body, res) {
-      const a = res.data?.army;
-      if (!a) {
-        body.replaceChildren(notice('warn', `Army unavailable: ${res.note}`));
-        return;
-      }
-      const used = a.templates.filter((t) => t.count);
-      const unused = a.templates.filter((t) => !t.count);
-      body.replaceChildren(
-        h('div', { class: 'mil-bigs' },
-          bigNumber('Divisions', a.divisions, 'Divisions in the field'),
-          bigNumber('Free manpower', manpowerText(a.manpower_free), `${a.manpower_free?.toLocaleString() ?? '—'} men available in the states the country controls`),
-          bigNumber('Manpower in the field', shortCount(a.manpower_field), `${a.manpower_field?.toLocaleString() ?? '—'} men in the divisions`),
-          bigNumber('In training', shortCount(a.manpower_training), `${a.manpower_training?.toLocaleString() ?? '—'} men in divisions being trained`),
-          bigNumber('Templates in use', used.length, `${a.templates.length} templates in all`)),
-        h('div', { class: 'mil-templates' }, used.map(templateCard)),
-        unused.length ? h('details', { class: 'mil-more' }, h('summary', null, `Templates not in use (${unused.length})`),
-          h('div', { class: 'mil-templates' }, unused.map(templateCard))) : null);
-    },
-  });
+  const open = new Set();   // template names unfolded - kept across refreshes
+  let view = loadView();
+  let last = null;          // [body, res] of the last drawing, redrawn when icons arrive or the view changes
+
+  async function fetchIcons(a) {
+    const units = [...new Set(a.templates.flatMap((t) => [t.icon?.unit, ...Object.values(t.grid ?? {}).flat()]))]
+      .filter((u) => u && !icons.units.has(u));
+    const nums = [...new Set(a.templates.map((t) => t.icon?.template).filter((n) => n != null && !icons.templates.has(String(n))))];
+    if (!units.length && !nums.length) return;
+    units.forEach((u) => icons.units.set(u, null));   // asked once even when the game has no icon
+    nums.forEach((n) => icons.templates.set(String(n), null));
+    try {
+      // commas encoded: the IPC bridge allows only [A-Za-z0-9_-.=&%] in a query
+      const q = `units=${encodeURIComponent(units.join(','))}&templates=${encodeURIComponent(nums.join(','))}`;
+      const res = (await ctx.api.get(`/api/military/icons?${q}`)).data;
+      Object.entries(res.units).forEach(([k, v]) => icons.units.set(k, v));
+      Object.entries(res.templates).forEach(([k, v]) => icons.templates.set(k, v));
+      if (last) draw(...last);
+    } catch (err) {   // names stay in place of icons
+      ctx.api.log?.('warn', `Army icons unavailable: ${err.message}`);
+    }
+  }
+
+  function templateRow(t, names) {
+    const isOpen = open.has(t.name);
+    const toggle = () => { if (isOpen) open.delete(t.name); else open.add(t.name); draw(...last); };
+    const setView = (v) => (e) => {
+      e.stopPropagation();
+      view = v;
+      try { localStorage.setItem(VIEW_KEY, v); } catch { /* preference only */ }
+      draw(...last);
+    };
+    return h('div', { class: `mil-tpl ${t.count ? '' : 'mil-unused'} ${isOpen ? 'mil-tpl-open' : ''}`.trim() },
+      h('button', { class: 'mil-tpl-head', 'aria-expanded': String(isOpen), onclick: toggle },
+        templateIcon(t),
+        h('span', { class: 'mil-tpl-name' }, t.name),
+        h('span', { class: 'mil-count', title: 'Divisions with this template' }, t.count),
+        h('span', { class: 'mil-tpl-caret' }, isOpen ? '▾' : '▸')),
+      isOpen ? h('div', { class: 'mil-tpl-body' },
+        h('div', { class: 'mil-view' }, [['graphic', 'Graphic'], ['text', 'Text']].map(([v, label]) =>
+          h('button', { class: `mil-view-btn ${view === v ? 'mil-view-on' : ''}`, 'aria-pressed': String(view === v), onclick: setView(v) }, label))),
+        view === 'graphic' ? designerGraphic(t, names) : designerText(t)) : null);
+  }
+
+  function draw(body, res) {
+    last = [body, res];
+    const a = res.data?.army;
+    if (!a) {
+      body.replaceChildren(notice('warn', `Army unavailable: ${res.note}`));
+      return;
+    }
+    fetchIcons(a);
+    const names = a.unit_names ?? {};
+    const used = a.templates.filter((t) => t.count);
+    const unused = a.templates.filter((t) => !t.count);
+    body.replaceChildren(
+      h('div', { class: 'mil-bigs' },
+        bigNumber('Divisions', a.divisions, 'Divisions in the field'),
+        bigNumber('Free manpower', manpowerText(a.manpower_free), `${a.manpower_free?.toLocaleString() ?? '—'} men available in the states the country controls`),
+        bigNumber('Manpower in the field', shortCount(a.manpower_field), `${a.manpower_field?.toLocaleString() ?? '—'} men in the divisions`),
+        bigNumber('In training', shortCount(a.manpower_training), `${a.manpower_training?.toLocaleString() ?? '—'} men in divisions being trained`),
+        bigNumber('Templates in use', used.length, `${a.templates.length} templates in all`)),
+      h('div', { class: 'mil-tpls' }, used.map((t) => templateRow(t, names))),
+      unused.length ? h('details', { class: 'mil-more', open: open.has(' unused') || null,
+        ontoggle: (e) => { if (e.target.open) open.add(' unused'); else open.delete(' unused'); } },
+      h('summary', null, `Templates not in use (${unused.length})`),
+      h('div', { class: 'mil-tpls' }, unused.map((t) => templateRow(t, names)))) : null);
+  }
+
+  return livePanel(ctx, { title: 'Army', url: url(tag), liveParts, render: draw });
 }
 
 function planeRow(p, labels, count) {
@@ -132,15 +242,104 @@ function planeRow(p, labels, count) {
     stats ?? h('p', { class: 'muted' }, 'No design stats'));
 }
 
+/** "1936.05.18" / "before 1936.05.01" / "unknown" - when a design was first seen (the game keeps no creation date). */
+export function designDate(d) {
+  if (!d.seen) return 'unknown';
+  return d.seen_before ? `before ${d.seen}` : d.seen;
+}
+
+/** {current, decommissioned}: designs split by the game's outdated flag; base airframes (no own name) after named ones;
+ * each design gets "replacedBy" (the designs made from it) and "olderCount" (its outdated ancestors). */
+export function splitDesigns(designs) {
+  const byId = new Map(designs.map((d) => [d.id, d]));
+  const children = new Map();
+  for (const d of designs) if (d.parent != null) (children.get(d.parent) ?? children.set(d.parent, []).get(d.parent)).push(d);
+  const same = (a, b) => (a.family ?? a.name) === (b.family ?? b.name) && !!(a.family ?? a.name);   // one plane's versions
+  const older = (d) => {
+    let n = 0;
+    for (let p = byId.get(d.parent); p && same(p, d) && p.outdated && n < 50; p = byId.get(p.parent)) n += 1;
+    return n;
+  };
+  const rows = designs.map((d) => ({ ...d, base: d.name === d.type_name, olderCount: older(d),
+    replacedBy: (children.get(d.id) ?? []).filter((c) => same(c, d)).map((c) => c.name) }));
+  const order = (a, b) => a.base - b.base;
+  return { current: rows.filter((d) => !d.outdated).sort(order), decommissioned: rows.filter((d) => d.outdated).sort(order) };
+}
+
 export function airPanel(ctx, tag) {
-  return livePanel(ctx, {
-    title: 'Air Force', url: url(tag), liveParts,
-    render(body, res) {
+  let designTab = 'current';
+  const openDesigns = new Set();
+  let last = null;
+
+  function designRow(d, labels) {
+    const key = String(d.id);
+    const isOpen = openDesigns.has(key);
+    const toggle = () => { if (isOpen) openDesigns.delete(key); else openDesigns.add(key); draw(...last); };
+    const note = d.outdated ? (d.replacedBy.length ? 'replaced by a newer version' : 'outdated')
+      : (d.olderCount ? `${d.olderCount} older version${d.olderCount > 1 ? 's' : ''} in Decommissioned` : null);
+    return h('div', { class: `mil-design ${d.outdated ? 'mil-design-old' : ''} ${isOpen ? 'mil-design-open' : ''}`.trim() },
+      h('button', { class: 'mil-design-head', 'aria-expanded': String(isOpen), onclick: toggle },
+        h('span', { class: 'mil-design-names' }, h('span', { class: 'mil-design-name' }, d.name),
+          d.base ? null : h('span', { class: 'mil-design-type' }, d.type_name)),
+        h('span', { class: 'mil-design-cost', title: 'Production cost (IC)' }, (d.stats.build_cost_ic ?? 0).toFixed(1).replace(/\.0$/, '')),
+        h('span', { class: 'mil-design-date', title: 'Game day the debugger first saw this design - the game keeps no creation date' },
+          designDate(d)),
+        h('span', { class: 'mil-tpl-caret' }, isOpen ? '▾' : '▸')),
+      note ? h('div', { class: 'mil-design-note' }, note) : null,
+      isOpen ? h('div', { class: 'mil-design-body' },
+        d.slots?.length ? h('div', { class: 'mil-pd' }, slotRows(d.slots).map((row) => h('div', { class: 'mil-pd-row' },
+          row.map((s) => moduleSlot(s))))) : null,
+        h('div', { class: 'mil-stats mil-design-stats' }, Object.entries(d.stats).filter(([, v]) => v)
+          .map(([k, v]) => h('div', { class: 'hoi-line' }, h('span', null, labels[k] ?? k), h('span', { class: 'hoi-num' }, statText(k, v)))))) : null);
+  }
+
+  function moduleSlot(s) {
+    const title = `${slotLabel(s.slot)}: ${s.module_name ?? 'empty'}`;
+    if (!s.module) return h('div', { class: 'mil-pd-slot mil-pd-empty', title }, h('span', { class: 'mil-pd-label' }, slotLabel(s.slot)));
+    const uri = icons.modules.get(s.module);
+    return h('div', { class: 'mil-pd-slot', title },
+      uri ? h('img', { class: 'mil-pd-img', src: uri, alt: s.module_name ?? s.module, draggable: 'false' })
+        : h('span', { class: 'mil-pd-label' }, s.module_name ?? s.module));
+  }
+
+  async function fetchModuleIcons(designs) {
+    const missing = [...new Set(designs.flatMap((d) => (d.slots ?? []).map((s) => s.module)))].filter((m) => m && !icons.modules.has(m));
+    if (!missing.length) return;
+    missing.forEach((m) => icons.modules.set(m, null));   // asked once even when the game has no icon
+    try {
+      const res = (await ctx.api.get(`/api/military/icons?modules=${encodeURIComponent(missing.join(','))}`)).data;
+      Object.entries(res.modules ?? {}).forEach(([k, v]) => icons.modules.set(k, v));
+      if (last) draw(...last);
+    } catch (err) {
+      ctx.api.log?.('warn', `Plane module icons unavailable: ${err.message}`);
+    }
+  }
+
+  function designsBlock(a) {
+    const { current, decommissioned } = splitDesigns(a.designs ?? []);
+    const tab = designTab === 'decommissioned' && decommissioned.length ? 'decommissioned' : 'current';
+    const list = tab === 'current' ? current : decommissioned;
+    return h('div', { class: 'mil-designs' },
+      h('div', { class: 'mil-designs-head' }, h('span', { class: 'mil-part-title' }, 'Designs'),
+        h('div', { class: 'mil-view' }, [['current', `Current (${current.length})`], ['decommissioned', `Decommissioned (${decommissioned.length})`]]
+          .map(([v, label]) => h('button', { class: `mil-view-btn ${tab === v ? 'mil-view-on' : ''}`, 'aria-pressed': String(tab === v),
+            disabled: (v === 'decommissioned' && !decommissioned.length) || null,
+            onclick: () => { designTab = v; draw(...last); } }, label)))),
+      list.length ? h('div', { class: 'mil-design-list' }, list.map((d) => designRow(d, a.stat_labels)))
+        : h('p', { class: 'muted' }, 'No plane designs.'),
+      h('p', { class: 'muted mil-designer-note' }, 'Dates: the game day the debugger first saw a design ("before" - it existed '
+        + 'when the recording of this campaign began). The game itself keeps no creation date.'));
+  }
+
+  function draw(body, res) {
+    last = [body, res];
+    {
       const a = res.data?.air;
       if (!a) {
         body.replaceChildren(notice('warn', `Air force unavailable: ${res.note}`));
         return;
       }
+      fetchModuleIcons(a.designs ?? []);
       const roles = {};
       for (const w of a.wings) (roles[w.role_name] ??= []).push(w);
       const reserve = a.reserve.reduce((n, r) => n + r.amount, 0);
@@ -153,9 +352,12 @@ export function airPanel(ctx, tag) {
           ws.map((w) => planeRow(w, a.stat_labels, Math.round(w.planes))))))
           : h('p', { class: 'muted' }, 'No air wings deployed.'),
         a.reserve.length ? h('details', { class: 'mil-more' }, h('summary', null, `In the stockpile (${a.reserve.length} designs)`),
-          h('div', { class: 'mil-role' }, a.reserve.map((r) => planeRow(r, a.stat_labels, Math.round(r.amount))))) : null);
-    },
-  });
+          h('div', { class: 'mil-role' }, a.reserve.map((r) => planeRow(r, a.stat_labels, Math.round(r.amount))))) : null,
+        designsBlock(a));
+    }
+  }
+
+  return livePanel(ctx, { title: 'Air Force', url: url(tag), liveParts, render: draw });
 }
 
 export function navyPanel(ctx, tag) {

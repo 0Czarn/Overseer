@@ -993,7 +993,7 @@ class IdeaPointerTests(unittest.TestCase):
         mem.put(root + pointers.DOCTRINE_SYSTEM, "Q", system)
         mem.put(system + pointers.DOCTRINE_COUNTRIES, "Q", array)
         entry = array + pointers.DOCTRINE_ENTRY * 3    # SOV: slot 3 of the country table
-        mem.put(entry + 8, "Q", 3)
+        mem.put(entry + 8, "Q", 0x7FF7_0000_0003)   # int32 slot; the next 4 bytes are other data (GER 1936: 0x7ff7...)
         mem.put(entry + pointers.DOCTRINE_FOLDERS, "Q", folders)
         mem.put(entry + pointers.DOCTRINE_FOLDERS + 12, "i", 2)           # land and naval folder
         mem.put(folders + pointers.FOLDER_GRAND, "Q", grand)
@@ -1280,6 +1280,53 @@ class IdeaPointerTests(unittest.TestCase):
         with self.assertRaises(pointers.PointerError):
             pointers.read_doctrine_state(mem, module, tags, "SOV")
 
+    def test_read_plane_designs_outdated_version_name_and_parent(self):
+        # POL 1936: PZL P.23 old (outdated, 19 IC) -> new (23.5 IC); PZL P.24 "Mk1"; a land design is left out
+        mem = FakeMemory(0x8000)
+        country, prod, array = BASE + 0x100, BASE + 0x1000, BASE + 0x1100
+        old, new, rifle, plane_t, rifle_t = BASE + 0x2000, BASE + 0x3000, BASE + 0x4000, BASE + 0x5000, BASE + 0x5100
+
+        def string(at, text):
+            mem.put(at, "16s", text.encode())
+            mem.put(at + 16, "Q", len(text))
+            mem.put(at + 24, "Q", 15)
+        mem.put(country + pointers.STOCKPILE["production"], "Q", prod)
+        mem.put(prod + pointers.DESIGNS["all"], "Q", array)
+        mem.put(prod + pointers.DESIGNS["all"] + 8, "i", 3)
+        mem.put(prod + pointers.DESIGNS["all"] + 12, "i", 3)
+        for i, v in enumerate((old, new, rifle)):
+            mem.put(array + 8 * i, "Q", v)
+        string(plane_t + pointers.DESIGNS["type_id"], "small_plane_cas")
+        string(rifle_t + pointers.DESIGNS["type_id"], "infantry_equip")
+        for v, vid, t, cost, outdated in ((old, 1713, plane_t, 19, 1), (new, 4505, plane_t, 23.5, 0), (rifle, 9, rifle_t, 0.5, 0)):
+            mem.put(v + pointers.DESIGNS["type"], "Q", t)
+            mem.put(v + pointers.DESIGN["id"], "i", vid)
+            mem.put(v + pointers.PLANE_STATS["build_cost_ic"], "q", round(cost * 100000))
+            mem.put(v + pointers.PLANE_STATS["reliability"], "q", 80000)
+            mem.regions_data[BASE][v - BASE + pointers.DESIGN["outdated"]] = outdated
+            string(v + pointers.VARIANT["name"], "PZL P.23")
+        string(new + pointers.DESIGN["version_name"], "Mk2")
+        slots, fitted, engine = BASE + 0x6000, BASE + 0x6400, BASE + 0x6800   # the type's slots, the new P.23's modules
+        mem.put(plane_t + pointers.TYPE_SLOTS["array"], "Q", slots)
+        mem.put(plane_t + pointers.TYPE_SLOTS["array"] + 8, "i", 2)
+        mem.put(plane_t + pointers.TYPE_SLOTS["array"] + 12, "i", 2)
+        for i, (token, name) in enumerate(((0x7017, "main_slot"), (0x7019, "engine_slot"))):
+            mem.put(slots + i * pointers.TYPE_SLOTS["size"] + pointers.TYPE_SLOTS["token"], "i", token)
+            string(slots + i * pointers.TYPE_SLOTS["size"] + pointers.TYPE_SLOTS["name"], name)
+        mem.put(new + pointers.MODULES["array"], "Q", fitted)
+        mem.put(new + pointers.MODULES["array"] + 8, "i", 1)
+        mem.put(new + pointers.MODULES["array"] + 12, "i", 1)
+        mem.put(fitted, "i", 0x7019)
+        mem.put(fitted + 8, "Q", engine)
+        string(engine + pointers.MODULES["module_id"], "engine_2_1x")
+        mem.put(new + pointers.DESIGN["parent"], "Q", old)
+        designs = pointers.read_plane_designs(mem, country)
+        self.assertEqual([(d["id"], d["name"], d["family"], d["outdated"], d["parent"], d["stats"]["build_cost_ic"]) for d in designs],
+                         [(1713, "PZL P.23", "PZL P.23", True, None, 19.0), (4505, "PZL P.23 Mk2", "PZL P.23", False, 1713, 23.5)])
+        self.assertEqual(designs[1]["slots"], [{"slot": "main_slot", "module": None},
+                                               {"slot": "engine_slot", "module": "engine_2_1x"}])
+        self.assertEqual(pointers.plane_design_ids(mem, country), [1713, 4505])
+
     def test_read_army_and_plane_stats(self):
         # SOV 1941 (Army.png): divisions counted per template; the battalion grid skips empty slots
         mem = FakeMemory(0x4000)
@@ -1310,6 +1357,10 @@ class IdeaPointerTests(unittest.TestCase):
         self.assertEqual((army["divisions"], army["manpower_field"], army["manpower_training"]), (2, 4345676, 295000))
         self.assertEqual((army["templates"][0]["name"], army["templates"][0]["count"], army["templates"][0]["battalions"]),
                          ("Strelkovaya", 2, ["infantry", "infantry"]))
+        # the designer's grid keeps the empty slot (column * 5 + row); the icon field is 0 here (a chosen icon)
+        self.assertEqual(army["templates"][0]["grid"]["battalions"][:4], ["infantry", None, "infantry", None])
+        self.assertEqual((len(army["templates"][0]["grid"]["battalions"]), army["templates"][0]["grid"]["support"],
+                          army["templates"][0]["icon"]), (25, [None] * 5, 0))
         # I-16 design stats (Air.png)
         variant = BASE + 0x2000
         for key, value in (("range", 550), ("air_agility", 43), ("maximum_speed", 425), ("reliability", 0.8)):

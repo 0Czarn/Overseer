@@ -141,6 +141,34 @@ ZROBIONE
             [ ] ludzie w lotnictwie / marynarce / garnizonie (6K / 38,1K / 59,43K) - nie są osobnym polem
                 (szukane w obiekcie państwa i 2 skokach dalej); gra liczy je z samolotów/statków/garnizonów
             [ ] wyposażenie armii (90%), Total Manpower 4.64M (= 2,95% ludności rdzennej + 0,206% nierdzennej)
+            [x] LISTA SZABLONÓW I PROJEKTANT (2026-10-15, Div_designer.jpg, Templates_list.jpg): lista jak "Division
+                Templates" (ikona, nazwa, liczba dywizji); kliknięcie rozwija projekt: widok Graphic (siatka 5x5 batalionów,
+                kolumna Support, rząd Regimental Support, szerokość bojowa, statystyki Base/Combat/Cost) albo Text (jak
+                wcześniej); wybór widoku zapamiętany. Pamięć: siatka batalionów slot = kolumna*5 + rząd (tablica kończy się na
+                ostatnim zajętym, puste = pusty id), wsparcie slot = rząd, pułkowe slot = kolumna; szablon +0x1C0 =
+                template_counter (ikona gracza GFX_div_templ_<n>_large, -1 = automatyczna: batalion o najwyższym
+                priority z common/units; HQ 121). Ikony: GFX_unit_<id>_icon_medium (pasek 2 klatek, 1. klatka),
+                /api/military/icons pobierane raz (przecinki kodowane - most IPC ich nie przepuszcza).
+                Kłódek i "+" z gry brak (nie wiadomo, które pola są zablokowane).
+            POPRAWKA (2026-10-15): doktryny GER (i inne) "Doctrine entry does not belong to the country" - numer państwa
+                we wpisie doktryn to int32, czytany był jako int64 (górne 4 bajty to inne dane, u GER 0x7FF7...). Psuło też
+                kafelek Air Force. 439/439 państw czyta się bez błędu.
+            [x] PROJEKTY SAMOLOTÓW (2026-10-15, air_prod_tab.jpg, air_temp_old/new.jpg; POL 8 projektów = ekran produkcji):
+                [produkcja]+0xA0 wszystkie projekty; wariant +0xC id sprzętu, +0x28 nazwa, +0x48 nazwa wersji ("Mk1" w
+                "PZL P.24 Mk1"), +0x3F8 projekt, z którego powstał (nowy P.23 -> stary P.23), +0x424 przestarzały (bajt;
+                = brak na liście najnowszych +0xB8), statystyki PLANE_STATS (P.23 nowy: 23,5 IC, 497,25 km/h, gra 497,2).
+                Kafelek Air Force > Designs: Current / Decommissioned, nazwa, typ (np. Basic Close Air Support), koszt,
+                data, statystyki po kliknięciu, "N older versions" / "replaced by a newer version".
+                DATA: gra NIE przechowuje daty utworzenia (ani w wariancie, ani w zapisie; +0x410 to maska ról, nie licznik).
+                Decyzja użytkownika: rejestrator raz na dzień gry zapisuje dzień pierwszego zobaczenia każdego projektu
+                (wszystkie państwa, 0,1 s) w ic-history/<kampania>.designs.json; projekty istniejące przy pierwszym odczycie
+                = "before <data>"; wczytanie wcześniejszego zapisu usuwa daty z odtworzonych dni (id mogą się powtórzyć).
+                [x] MODUŁY SAMOLOTU (2026-10-15, = zapis modules={ slot = moduł } i Plane Designer): wariant +0xB8 = wpisy
+                    16 B {int32 numer slotu, CEquipmentModule*} (moduł +0x18 id); typ sprzętu +0x70 = sloty po 0x50 B (+0x8
+                    numer, 0x7017 = fixed_main_weapon_slot, +0x30 nazwa) w kolejności projektanta, z pustymi. Nowy P.23:
+                    bomb_locks / aircraft_cannon_1_1x / engine_2_1x / lmg_defense_turret; Ju 87 dive_brakes_small, Do 22 floats.
+                    Po rozwinięciu projektu: rząd uzbrojenia i rząd silnik + specjalne z ikonami GFX_EMI_<moduł>, puste
+                    sloty opisane; nazwy modułów z lokalizacji ("1x Engine I"). Kłódek z gry brak (sloty spoza typu).
 [x] ZAKŁADKA DOCTRINES (2026-10-13, nowa, prośba użytkownika, Doktryny.png SOV 1941 - wartości = gra): foldery jak
             w grze (Land / Naval / Air / Special Forces), główna doktryna (ikona, nazwa, opis, efekty, taktyki), tory z
             subdoktryną, biegłością, biegłością w banku ("+68"), przyrostem dziennym i drabinką nagród I-V (próg,
@@ -442,6 +470,11 @@ DO ZROBIENIA (w tej kolejności)
             [x] PAŃSTWA BEZ LOGU: projekt sprzętu +0x1C = numer państwa-twórcy (SOV = 3, zapis: creator="SOV"); straty
                 "enemy" z logów przypisane twórcy - państwo bez własnego logu ma jako straty w walce sprzęt zniszczony mu
                 przez państwa z logiem (bez attrition). Zdobyty / z Lend-Lease sprzęt liczy się twórcy.
+            POPRAWKI UI (2026-10-15, graph_ui.jpg, graph_camp.jpg): wybrany przycisk (np. Factories > Military) nie
+            podświetlał się - kliknięty przycisk miał fokus, a odświeżenie paska było blokowane przy fokusie w nim (blokada
+            tylko dla otwartej listy <select>); wyraźniejsze podświetlenie, etykieta i przyciski grupy razem. Kampanie:
+            własna lista z datami gry i datą rozpoczęcia nagrywania ("started 2026-10-15 09:53") oraz przyciskiem Delete
+            (POST /api/summary/games/<id>/delete; usuwa plik i grupy; nagrywanej kampanii nie da się usunąć).
             [ ] historia tylko z dni, gdy aplikacja działała (nie da się odtworzyć wstecz)
             [ ] gracz odczytany jako GER w grze SOV (2026-10-13) - sprawdzić, czy użyto `tag`
 [ ] Krok G  Game Tools (narzędzia lokalne)

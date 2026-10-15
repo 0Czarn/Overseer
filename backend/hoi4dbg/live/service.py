@@ -661,15 +661,17 @@ class LiveService:
             raise LiveError("unsupported_version", "Live military reading is only verified for 1.19.3.0.c01a")
         key = (process["pid"], process.get("started"))
         tags = self._tags.setdefault(process.get("install") or "", pointers.tag_order(Path(process.get("install") or "")))
-        army, navy, air, reserve, free, designs, researched, doctrine_state = self._with_country(
+        army, navy, air, reserve, free, designs, researched, doctrine_state, planes = self._with_country(
             process, tag, lambda mem, c: (
                 pointers.read_army(mem, c), pointers.read_navy(mem, c),
                 pointers.read_air(mem, self._module_base[key], tags, tag), pointers.read_stockpile_planes(mem, c),
                 pointers.read_free_manpower(mem, self._module_base[key], tags, tag), pointers.read_designs(mem, c),
-                pointers.read_researched(mem, c), pointers.read_doctrine_state(mem, self._module_base[key], tags, tag)))
+                pointers.read_researched(mem, c), pointers.read_doctrine_state(mem, self._module_base[key], tags, tag),
+                pointers.read_plane_designs(mem, c)))
         army["manpower_free"] = free
         return {"army": army, "navy": navy, "air": air, "air_reserve": reserve, "designs": designs,
-                "researched": researched, "doctrine_state": doctrine_state, "tag": tag, "read_at": self._clock()}
+                "researched": researched, "doctrine_state": doctrine_state, "plane_designs": planes, "tag": tag,
+                "read_at": self._clock()}
 
     def advisors(self, tag: str) -> dict:
         """Live hired advisors and staff of `tag`: [{"slot", "id": character id}] (game memory)."""
@@ -979,7 +981,14 @@ class LiveService:
             except pointers.PointerError as exc:   # the IC values are still worth recording
                 self.log.info("Combat log not readable: %s", exc)
                 losses = None
-            return {"t": t, "player": player, "countries": out, "factions": factions, "losses": losses}
+            designs = {}
+            for tag, c in countries.items():   # plane designs, for the day each was first seen
+                try:
+                    designs[tag] = pointers.plane_design_ids(mem, c)
+                except pointers.PointerError:
+                    continue
+            return {"t": t, "player": player, "countries": out, "factions": factions, "losses": losses,
+                    "designs": {k: v for k, v in designs.items() if v}}
         return self._game_memory(read)
 
     def stockpile(self, tag: str | None = None) -> dict:

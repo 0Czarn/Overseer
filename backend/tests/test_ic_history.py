@@ -194,6 +194,38 @@ class GroupsTest(unittest.TestCase):
             history.set_groups("NOPE_1", {})
 
 
+class DeleteTest(unittest.TestCase):
+    def test_a_campaign_and_its_groups_are_deleted_but_not_the_one_being_recorded(self):
+        history = IcHistory(Path(tempfile.mkdtemp()))
+        old = history.add({"t": day(1936, 1, 2), "player": "SOV", "countries": {"SOV": [1.0]}})
+        history.set_groups(old, {"custom": ["Mine"], "assign": {"SOV": "Mine"}})
+        new = history.add({"t": day(1941, 6, 1), "player": "GER", "countries": {"GER": [1.0]}})
+        with self.assertRaises(ValueError):
+            history.delete(new)                                       # being recorded
+        history.delete(old)
+        self.assertEqual([g["id"] for g in history.games()], [new])
+        self.assertFalse((history.folder / f"{old}.groups.json").exists())
+        with self.assertRaises(FileNotFoundError):
+            history.delete(old)
+
+
+class DesignDatesTest(unittest.TestCase):
+    def test_first_seen_day_of_plane_designs_and_replayed_days_dropped(self):
+        history = IcHistory(Path(tempfile.mkdtemp()))
+        t0 = day(1936, 5, 1)
+        gid = history.add({"t": t0, "player": "POL", "countries": {"POL": [1.0]}})
+        history.note_designs(gid, t0, {"POL": [1711, 1713]})                  # existing when the recording began
+        history.add({"t": t0 + 5, "player": "POL", "countries": {"POL": [1.0]}})
+        history.note_designs(gid, t0 + 5, {"POL": [1711, 1713, 4505], "GER": [1374]})   # P.23 new; GER: new country
+        self.assertEqual(history.designs(gid), {"POL": {"1711": [t0, True], "1713": [t0, True], "4505": [t0 + 5, False]},
+                                                "GER": {"1374": [t0 + 5, False]}})
+        history.add({"t": t0 + 3, "player": "POL", "countries": {"POL": [1.0]}})   # an earlier save loaded
+        self.assertEqual(history.designs(gid), {"POL": {"1711": [t0, True], "1713": [t0, True]}, "GER": {}})
+        history.add({"t": day(1941, 1, 1), "player": "GER", "countries": {"GER": [1.0]}})
+        history.delete(gid)
+        self.assertEqual(history.designs(gid), {})
+
+
 class WastedAndLossesTest(unittest.TestCase):
     def test_idle_factories_at_the_countrys_own_output(self):
         ic = {"mil": 75.0, "nav": 0.0, "civ": 120.0, "amil": 30, "anav": 0, "aciv": 30}

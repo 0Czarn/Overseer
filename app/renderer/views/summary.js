@@ -89,6 +89,16 @@ export function matches(country, search) {
   return !q || country.tag.toLowerCase().includes(q) || (country.name ?? '').toLowerCase().includes(q);
 }
 
+/** "2026-10-15 09:28" of the backend's "2026-10-15 09:28:01" - the real day and time the recording began. */
+export function startedText(created) {
+  return created ? created.slice(0, 16) : 'unknown';
+}
+
+/** "POL · 1936.01.02 → 1936.05.15 (114 days)" - the game dates a campaign covers. */
+export function gameLabel(g) {
+  return `${g.player ?? '?'} · ${g.first ?? '-'} → ${g.last ?? '-'} (${g.days} ${g.days === 1 ? 'day' : 'days'})`;
+}
+
 export default {
   id: 'summary',
   title: 'Game summary',
@@ -122,6 +132,14 @@ export default {
     let newGroup = '';
     let patch = null;   // combat log for every country: {enabled, state, error} (backend live/code_patch.py)
     let patchBusy = false;
+    let campaignOpen = false;   // the campaign list is unfolded
+    const closeCampaigns = (e) => {
+      if (!campaignOpen || (e.type === 'keydown' ? e.key !== 'Escape' : e.target.closest?.('.gs-camp'))) return;
+      campaignOpen = false;
+      renderControls();
+    };
+    document.addEventListener('click', closeCampaigns);
+    document.addEventListener('keydown', closeCampaigns);
 
     const query = (groupsFrom) => {
       const p = new URLSearchParams({ metric: prefs.metric });
@@ -232,22 +250,59 @@ export default {
       return el;
     }
 
-    function gameLabel(g) {
-      return `${g.player ?? '?'} · ${g.first ?? '-'} → ${g.last ?? '-'} (${g.days} days)${g.active ? ' · recording' : ''}`;
+    async function deleteGame(g) {
+      if (!window.confirm(`Delete the campaign ${gameLabel(g)}, started ${startedText(g.created)}?\n\n`
+        + 'Its recorded days and groups are removed for good.')) return;
+      try {
+        await ctx.api.post(`${gameUrl(g.id)}/delete`, {});
+      } catch (err) {
+        charts.prepend(notice('warn', `Campaign not deleted: ${err.message}`));
+        return;
+      }
+      if (prefs.game === g.id) prefs.game = null;
+      if (prefs.compare === g.id) prefs.compare = null;
+      load();
+    }
+
+    // The campaign list: game dates, the real date the recording began, and a delete button (not for the campaign
+    // being recorded). A list of its own - a <select> cannot hold buttons.
+    function campaignPicker() {
+      const cur = games.find((g) => g.id === prefs.game);
+      const toggle = () => { campaignOpen = !campaignOpen; renderControls(); };
+      return h('div', { class: 'gs-camp' },
+        h('button', { class: 'gs-camp-btn', 'aria-haspopup': 'listbox', 'aria-expanded': String(campaignOpen), onclick: toggle },
+          cur ? [h('span', null, gameLabel(cur)), h('span', { class: 'gs-camp-started' }, `started ${startedText(cur.created)}`)]
+            : h('span', null, games.length ? 'Choose a campaign' : 'No campaign yet'),
+          h('span', { class: 'gs-camp-caret' }, '▾')),
+        campaignOpen ? h('div', { class: 'gs-camp-list', role: 'listbox' }, games.map((g) =>
+          h('div', { class: `gs-camp-row ${g.id === prefs.game ? 'gs-camp-on' : ''}`, role: 'option',
+            'aria-selected': String(g.id === prefs.game),
+            onclick: () => { campaignOpen = false; prefs.game = g.id; renderControls(); load(); } },
+          h('span', { class: 'gs-camp-main' }, gameLabel(g)),
+          h('span', { class: 'gs-camp-started' }, `started ${startedText(g.created)}`),
+          g.active ? h('span', { class: 'gs-camp-rec', title: 'Being recorded - it can be deleted once another game runs' }, 'recording')
+            : h('button', { class: 'btn btn-small btn-ghost gs-camp-del', title: 'Delete this campaign',
+              onclick: (e) => { e.stopPropagation(); deleteGame(g); } }, 'Delete')))) : null);
     }
 
     function renderControls() {
-      const opts = games.map((g) => [g.id, gameLabel(g)]);
+      const opts = games.map((g) => [g.id, `${gameLabel(g)} · started ${startedText(g.created)}`]);
+      // a click shows the new choice at once; the data follows from load()
+      const pick = (apply) => (v) => { apply(v); renderControls(); load(); };
       const seg = (items, value, onPick) => h('div', { class: 'gs-seg' }, items.map(([v, label]) =>
-        h('button', { class: `gs-seg-btn ${v === value ? 'gs-seg-on' : ''}`, onclick: () => onPick(v) }, label)));
+        h('button', { class: `gs-seg-btn ${v === value ? 'gs-seg-on' : ''}`, 'aria-pressed': String(v === value),
+          onclick: () => onPick(v) }, label)));
       controls.replaceChildren(
-        h('label', null, 'Campaign ', select(opts, prefs.game, (v) => { prefs.game = v; load(); })),
-        h('label', null, 'Compare with ', select(opts.filter(([v]) => v !== prefs.game), prefs.compare,
-          (v) => { prefs.compare = v || null; load(); }, '-')),
-        ...[['IC a day', IC_METRICS], ['Factories', FACTORY_METRICS], ['Wasted IC', WASTED_METRICS], ['IC lost', LOSS_METRICS]]
-          .flatMap(([label, list]) => [h('span', { class: 'gs-seg-label' }, label),
-            seg(list.map(([k, , b]) => [k, b]), prefs.metric, (v) => { prefs.metric = v; load(); })]),
-        seg([[false, 'Countries'], [true, 'Factions']], prefs.factions, (v) => { prefs.factions = v; load(); }));
+        h('div', { class: 'gs-row' },
+          h('div', { class: 'gs-field' }, h('span', { class: 'gs-seg-label' }, 'Campaign'), campaignPicker()),
+          h('label', { class: 'gs-field' }, h('span', { class: 'gs-seg-label' }, 'Compare with'),
+            select(opts.filter(([v]) => v !== prefs.game), prefs.compare, pick((v) => { prefs.compare = v || null; }), '-'))),
+        h('div', { class: 'gs-row' },
+          ...[['IC a day', IC_METRICS], ['Factories', FACTORY_METRICS], ['Wasted IC', WASTED_METRICS], ['IC lost', LOSS_METRICS]]
+            .map(([label, list]) => h('div', { class: 'gs-field' }, h('span', { class: 'gs-seg-label' }, label),
+              seg(list.map(([k, , b]) => [k, b]), prefs.metric, pick((v) => { prefs.metric = v; })))),
+          h('div', { class: 'gs-field' }, h('span', { class: 'gs-seg-label' }, 'Show'),
+            seg([[false, 'Countries'], [true, 'Factions']], prefs.factions, pick((v) => { prefs.factions = v; })))));
     }
 
     function renderPicker() {
@@ -378,7 +433,8 @@ export default {
         if (!games.some((g) => g.id === prefs.game)) prefs.game = (games.find((g) => g.active) ?? games[0])?.id;
         if (prefs.compare && (!games.some((g) => g.id === prefs.compare) || prefs.compare === prefs.game)) prefs.compare = null;
         renderStatus();
-        if (!controls.contains(document.activeElement)) renderControls();   // do not close an open list
+        const focused = document.activeElement;   // do not close an open <select> (a focused button is fine)
+        if (!(controls.contains(focused) && focused.tagName === 'SELECT')) renderControls();
         main = prefs.game ? await fetchGame(prefs.game) : null;
         if (main && !prefs.factions && !prefs.tags.length) {   // first visit: the player and the biggest producers
           prefs.tags = [...new Set([main.player, ...main.countries.map((c) => c.tag)].filter((t) => main.countries.some((c) => c.tag === t)))].slice(0, 5);
@@ -401,6 +457,11 @@ export default {
     }
 
     await load();
-    return () => { stopped = true; clearTimeout(timer); };
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      document.removeEventListener('click', closeCampaigns);
+      document.removeEventListener('keydown', closeCampaigns);
+    };
   },
 };

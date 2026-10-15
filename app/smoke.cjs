@@ -151,9 +151,13 @@ function runSmoke(win, outDir, quit) {
               await waitFor(wc, `[...document.querySelectorAll('.lc-line')].some((l) => l.getAttribute('stroke') === '#ffffff')`, 10000);
             }
             if (info.summary.charts) {   // factory counts: one chart (a level, no cumulative)
-              await wc.executeJavaScript(`document.querySelectorAll('.gs-seg')[1].querySelectorAll('.gs-seg-btn')[1].click()`);
+              await wc.executeJavaScript(`(() => { const b = document.querySelectorAll('.gs-seg')[1].querySelectorAll('.gs-seg-btn')[1]; b.focus(); b.click(); })()`);
               await waitFor(wc, `document.querySelector('.lc-title')?.textContent === 'Military factories'`, 10000);
               info.summary.factoryCharts = await wc.executeJavaScript(`document.querySelectorAll('.lc-svg').length`);
+              // the clicked button is the highlighted one, even while it keeps the focus
+              info.summary.highlight = await wc.executeJavaScript(`[...document.querySelectorAll('.gs-field')]
+                .filter((f) => f.querySelector('.gs-seg-on')).map((f) => f.firstChild.textContent + ':' + f.querySelector('.gs-seg-on').textContent)`);
+              if (!info.summary.highlight.some((t) => t.startsWith('Factories:'))) result.failures.push(`${size.name}/summary: the chosen metric is not highlighted`);
               if (info.summary.factoryCharts !== 1) result.failures.push(`${size.name}/summary: factory view should show one chart`);
             }
             if (info.summary.charts && size.name === 'wide') {   // factions: a new group, a country moved into it
@@ -182,6 +186,33 @@ function runSmoke(win, outDir, quit) {
               tracks: document.querySelectorAll('.doc-track').length,
               notice: document.querySelector('.live-panel-body .notice')?.textContent ?? null })`);
             if (!info.doctrines.tabs && !info.doctrines.notice) result.failures.push(`${size.name}/doctrines: shows nothing`);
+            if (await waitFor(wc, `!!document.querySelector('.mil-tpl-head')`, 15000)) {   // a template unfolds into the designer
+              await wc.executeJavaScript(`(() => { localStorage.removeItem('hoi4dbg.armyView'); document.querySelector('.mil-tpl-head').click(); })()`);
+              await waitFor(wc, `!!document.querySelector('.mil-dd')`, 10000);
+              await waitFor(wc, `!!document.querySelector('.mil-slot-img[src]')`, 10000).catch(() => {});
+              info.designer = await wc.executeJavaScript(`(() => { document.querySelector('.mil-tpl-open').scrollIntoView();
+                return { slots: document.querySelectorAll('.mil-dd-cols .mil-slot').length,
+                  units: document.querySelectorAll('.mil-dd-cols .mil-slot:not(.mil-slot-empty)').length,
+                  icons: document.querySelectorAll('.mil-slot-img[src]').length }; })()`);
+              if (info.designer.slots !== 25) result.failures.push(`${size.name}/army: the designer grid is not 5 x 5`);
+              await wc.executeJavaScript(`[...document.querySelectorAll('.mil-view-btn')].find((b) => b.textContent === 'Text').click()`);
+              await waitFor(wc, `!!document.querySelector('.mil-dd-text')`, 10000);
+              await wc.executeJavaScript(`[...document.querySelectorAll('.mil-view-btn')].find((b) => b.textContent === 'Graphic').click()`);
+              await waitFor(wc, `!!document.querySelector('.mil-dd')`, 10000);
+              await wc.executeJavaScript(`document.querySelector('.mil-tpl-open').scrollIntoView()`);
+              wc.invalidate();   // a hidden window: repaint before the screenshot
+              await sleep(1200);
+            }
+            if (await waitFor(wc, `!!document.querySelector('.mil-design-head')`, 15000)) {   // a plane design unfolds into its modules
+              await wc.executeJavaScript(`document.querySelector('.mil-design-head').click()`);
+              await waitFor(wc, `!!document.querySelector('.mil-design-body')`, 10000);
+              await waitFor(wc, `!!document.querySelector('.mil-pd-img')`, 10000);
+              info.planeDesign = await wc.executeJavaScript(`(() => { document.querySelector('.mil-design-open').scrollIntoView();
+                return { designs: document.querySelectorAll('.mil-design').length, slots: document.querySelectorAll('.mil-pd-slot').length,
+                  icons: document.querySelectorAll('.mil-pd-img').length }; })()`);
+              wc.invalidate();
+              await sleep(1200);
+            }
           }
           if (tab === 'construction') {
             // queue rows, the empty-queue line, or the reason (game not running)

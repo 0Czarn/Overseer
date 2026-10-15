@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { designerLines, manpowerText, shortCount, statText, unitLines } from '../renderer/views/military.js';
+import { designDate, designerLines, gridColumns, manpowerText, shortCount, slotLabel, slotRows, splitDesigns, statText, unitLines } from '../renderer/views/military.js';
 
 test('counts shortened like the game top bar (SOV: 4,345,676 men in the field = 4M)', () => {
   assert.equal(shortCount(4345676), '4.34M');
@@ -36,4 +36,38 @@ test('designer stats cut off like the game (SOV Strelkovaya Diviziya, dywizja.pn
   assert.equal(groups.Cost.Manpower, '11640');
   assert.equal(groups['Base Stats']['Exp. Loss'], '-25.00%');
   assert.equal(groups['Base Stats'].Organization, undefined);
+});
+
+test('designer grid: slot = column * 5 + row, short arrays padded with empty slots', () => {
+  const slots = ['infantry', 'infantry', 'infantry', null, null, 'infantry', null, null, null, null, 'artillery_brigade'];
+  const cols = gridColumns(slots);
+  assert.equal(cols.length, 5);
+  assert.deepEqual(cols[0], ['infantry', 'infantry', 'infantry', null, null]);
+  assert.deepEqual(cols[1], ['infantry', null, null, null, null]);
+  assert.deepEqual(cols[2], ['artillery_brigade', null, null, null, null]);
+  assert.deepEqual(cols[4], [null, null, null, null, null]);
+});
+
+test('plane designs: outdated ones apart, older versions counted, dates first seen', () => {
+  const d = (id, name, type, outdated, parent, extra = {}) => ({ id, name, type_name: type, outdated, parent, stats: {}, ...extra });
+  const designs = [
+    d(1695, 'Inter-War Small Airframe', 'Inter-War Small Airframe', true, null),
+    d(1711, 'PZL P.11', 'Inter-War Small Airframe', true, 1695),
+    d(1713, 'PZL P.23', 'Basic Close Air Support', true, null),
+    d(4505, 'PZL P.23', 'Basic Close Air Support', false, 1713),
+    d(1697, 'Basic Small Airframe', 'Basic Small Airframe', false, null)];
+  const { current, decommissioned } = splitDesigns(designs);
+  assert.deepEqual(current.map((x) => [x.id, x.olderCount]), [[4505, 1], [1697, 0]]);   // named designs first
+  assert.deepEqual(decommissioned.map((x) => [x.id, x.replacedBy.length]), [[1711, 0], [1713, 1], [1695, 0]]);
+  assert.equal(designDate({ seen: '1936.05.18', seen_before: false }), '1936.05.18');
+  assert.equal(designDate({ seen: '1936.05.01', seen_before: true }), 'before 1936.05.01');
+  assert.equal(designDate({ seen: null }), 'unknown');
+});
+
+test('plane designer slots: weapons on top, engine and specials below', () => {
+  const slots = [{ slot: 'fixed_main_weapon_slot', module: 'bomb_locks' }, { slot: 'fixed_auxiliary_weapon_slot_1', module: null },
+    { slot: 'engine_type_slot', module: 'engine_2_1x' }, { slot: 'special_type_slot_1', module: 'lmg_defense_turret' }];
+  const [top, bottom] = slotRows(slots);
+  assert.deepEqual(top.map((s) => slotLabel(s.slot)), ['Main weapon', 'Weapon 2']);
+  assert.deepEqual(bottom.map((s) => slotLabel(s.slot)), ['Engine', 'Special 1']);
 });

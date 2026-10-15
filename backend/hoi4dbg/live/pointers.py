@@ -454,7 +454,7 @@ def read_doctrines(memory, module_base: int, tags: list[str], tag: str) -> list[
     raw = memory.read(entry + 8, 24)
     if not raw:
         raise PointerError("unreadable", f"Doctrines of {tag} are not readable")
-    own_slot, folders, _cap, count = struct.unpack("<QQii", raw)
+    own_slot, folders, _cap, count = struct.unpack("<i4xQii", raw)   # int32 slot: the next 4 bytes are other data
     if own_slot != slot or not 0 <= count <= 16:
         raise PointerError("implausible", "Doctrine entry does not belong to the country - layout does not match")
     out = []
@@ -1162,7 +1162,7 @@ def read_doctrine_state(memory, module_base: int, tags: list[str], tag: str) -> 
     raw = memory.read(array + DOCTRINE_ENTRY * slot + 8, 24)
     if not raw:
         raise PointerError("unreadable", f"Doctrines of {tag} are not readable")
-    own_slot, folders, _cap, count = struct.unpack("<QQii", raw)
+    own_slot, folders, _cap, count = struct.unpack("<i4xQii", raw)   # int32 slot: the next 4 bytes are other data
     if own_slot != slot or not 0 <= count <= 16:
         raise PointerError("implausible", "Doctrine entry does not belong to the country - layout does not match")
 
@@ -1222,7 +1222,12 @@ ARMY = {"divisions": 0x290, "templates": 0x1B8, "division_template": 0x3B8, "man
 # "Free Manpower: 461.56K" (by owner: 462 574 - occupied states do not count).
 STATES = 0x2C8
 STATE = {"owner": 0xC8, "controller": 0xCC, "available": 0x848, "locked": 0x84C, "total": 0x850}
-DIVISION_TEMPLATE = {"name": 0x20, "battalions": 0x68, "support": 0x88, "regimental": 0xA8}
+DIVISION_TEMPLATE = {"name": 0x20, "battalions": 0x68, "support": 0x88, "regimental": 0xA8, "icon": 0x1C0}
+# Template grid (2026-10-15, POL 1936 equal to the division designer and the save's regiments = { infantry = { x y } }):
+# battalion slot = column * 5 + row (x * 5 + y; the array ends at the last used slot, empty slots have an empty id),
+# support company slot = row, regimental support slot = column. + 0x1c0 = template_counter of the save: the icon the
+# player chose (GFX_div_templ_<n>_large), -1 = automatic (the battalion with the highest priority; army HQ 121).
+GRID_SIDE = 5
 SUBUNIT_ID = 0x18
 NAVY = {"fleets": 0x278, "task_forces": 0xB8, "ships": 0x348, "ship_type": 0x98, "ship_variants": 0x60}
 AIR = {"manager": 0x690, "by_country": 0x30, "pools": 0x58, "role": 0x20, "wings": 0x28, "wing_variants": 0x1F8}
@@ -1242,8 +1247,17 @@ def _id_list(memory, address: int) -> list[str]:
     return out
 
 
+def _grid(memory, address: int, size: int) -> list[str | None]:
+    """Slots of a template grid array: unit id or None for an empty slot, padded to `size`."""
+    out: list[str | None] = []
+    for item in read_array(memory, address, 200)[:size]:
+        out.append((_msvc_string(memory, item + SUBUNIT_ID) or None) if item else None)
+    return out + [None] * (size - len(out))
+
+
 def read_army(memory, country: int) -> dict:
-    """{"divisions", "manpower_field", "templates": [{"name", "count", "battalions", "support", "regimental"}]}."""
+    """{"divisions", "manpower_field", "templates": [{"name", "count", "battalions", "support", "regimental", "grid",
+    "icon"}]} - "grid": the designer's slots {"battalions": 25 (column * 5 + row), "support": 5, "regimental": 5}."""
     divisions = read_array(memory, country + ARMY["divisions"], 20_000)
     counts: dict[int, int] = {}
     for d in divisions:
@@ -1257,8 +1271,13 @@ def read_army(memory, country: int) -> dict:
         name = _msvc_string(memory, t + DIVISION_TEMPLATE["name"])
         if name is None:
             raise PointerError("implausible", "A division template has no readable name - layout does not match")
+        icon = memory.read(t + DIVISION_TEMPLATE["icon"], 4)
         templates.append({"name": name, "count": counts.get(t, 0),
-                          **{k: _id_list(memory, t + DIVISION_TEMPLATE[k]) for k in ("battalions", "support", "regimental")}})
+                          **{k: _id_list(memory, t + DIVISION_TEMPLATE[k]) for k in ("battalions", "support", "regimental")},
+                          "grid": {"battalions": _grid(memory, t + DIVISION_TEMPLATE["battalions"], GRID_SIDE * GRID_SIDE),
+                                   "support": _grid(memory, t + DIVISION_TEMPLATE["support"], GRID_SIDE),
+                                   "regimental": _grid(memory, t + DIVISION_TEMPLATE["regimental"], GRID_SIDE)},
+                          "icon": struct.unpack("<i", icon)[0] if icon else -1})
     men = {}
     for key in ("manpower_field", "manpower_training"):
         raw = memory.read(country + ARMY[key], 4)
@@ -1355,6 +1374,99 @@ def read_designs(memory, country: int) -> list[dict]:
         if not 0 <= stats["reliability"] <= 2:
             raise PointerError("implausible", "Design reliability out of range - layout does not match")
         out.append({"type": type_id, "name": _msvc_string(memory, variant + VARIANT["name"], 120) or "", "stats": stats})
+    return out
+
+
+# Plane designs (2026-10-15, POL 1936 equal to the production screen with "Show outdated equipment": 8 designs; two
+# PZL P.23 - the old one outdated, 19 IC, the new one 23.5 IC as air_temp_old.jpg / air_temp_new.jpg): variant + 0xc =
+# equipment id (save: id={ id=4505 type=70 }), + 0x424 = outdated (byte; 1 for P.23 old, P.11, He 51, Do 23 - the
+# designs not in the newest list + 0xb8), + 0x3f8 = the design it was made from (new P.23 -> old P.23, P.11 / P.24 ->
+# the base airframe; 0 for a base airframe). The game keeps no creation date (not in the variant, not in the save):
+# the IC recorder notes the day it first sees a design (hoi4dbg/ic_history.py).
+DESIGN = {"id": 0xC, "version_name": 0x48, "parent": 0x3F8, "outdated": 0x424}   # version name: "Mk1" of "PZL P.24 Mk1"
+# Modules (2026-10-15, POL equal to the save's modules = { slot = module } and the plane designer): variant + 0xb8 =
+# array of 16-byte entries {int32 slot token, CEquipmentModule*} (old P.23: bomb_locks / engine_1_1x / lmg_defense_turret,
+# new P.23: + aircraft_cannon_1_1x, engine_2_1x); module + 0x18 = its id. The equipment type + 0x70 = inline array of
+# its slots (0x50 bytes each: + 0x8 the token, 0x7017 = fixed_main_weapon_slot, + 0x30 the slot name) - the order of the
+# designer, empty slots included (5 for a CAS airframe).
+MODULES = {"array": 0xB8, "entry": 16, "module_id": 0x18}
+TYPE_SLOTS = {"array": 0x70, "size": 0x50, "token": 0x8, "name": 0x30}
+def _type_id(memory, variant: int) -> str | None:
+    etype = _ptr(memory, variant + DESIGNS["type"])
+    return _msvc_string(memory, etype + DESIGNS["type_id"], 120) if etype else None
+
+
+def is_plane_type(type_id: str) -> bool:
+    return "airframe" in type_id or "plane" in type_id
+
+
+def read_plane_designs(memory, country: int) -> list[dict]:
+    """[{"id", "type", "name", "family" (the name without the version), "outdated", "parent" (equipment id or None),
+    "stats" (PLANE_STATS)}] - every plane
+    design of the country, the outdated ones too."""
+    production = _ptr(memory, country + STOCKPILE["production"])
+    if production is None:
+        raise PointerError("unreadable", "Production object of the country is not readable")
+    out, ids = [], {}
+    for variant in read_array(memory, production + DESIGNS["all"], 5000):
+        tid = _type_id(memory, variant) if variant else None
+        raw = memory.read(variant, DESIGN["outdated"] + 1) if tid and is_plane_type(tid) else None
+        if not raw:
+            continue
+        vid = struct.unpack_from("<i", raw, DESIGN["id"])[0]
+        ids[variant] = vid
+        stats = {k: round(struct.unpack_from("<q", raw, off)[0] / 100000, 4) for k, off in PLANE_STATS.items()}
+        slots = _plane_slots(memory, variant)
+        if raw[DESIGN["outdated"]] > 1 or not 0 <= stats["reliability"] <= 2:
+            raise PointerError("implausible", "Plane design out of range - layout does not match")
+        name = _msvc_string(memory, variant + VARIANT["name"], 120) or ""
+        version = _msvc_string(memory, variant + DESIGN["version_name"], 60) if name else None
+        out.append({"id": vid, "type": tid, "name": f"{name} {version}" if version else name, "family": name,
+                    "outdated": bool(raw[DESIGN["outdated"]]), "parent": struct.unpack_from("<Q", raw, DESIGN["parent"])[0],
+                    "stats": stats, "slots": slots})
+    for d in out:   # the parent as an equipment id (a design of another country, e.g. licensed: its address only)
+        d["parent"] = ids.get(d["parent"]) if d["parent"] else None
+    return out
+
+
+def _plane_slots(memory, variant: int) -> list[dict]:
+    """[{"slot": slot name, "module": module id or None}] in the designer's order (the equipment type's slots)."""
+    etype = _ptr(memory, variant + DESIGNS["type"])
+    head = memory.read(etype + TYPE_SLOTS["array"], 16) if etype else None
+    names: dict[int, str] = {}
+    order: list[int] = []
+    if head:
+        data, _cap, size = struct.unpack("<Qii", head)
+        raw = memory.read(data, TYPE_SLOTS["size"] * size) if data and 0 < size <= 20 else None
+        for i in range(len(raw or b"") // TYPE_SLOTS["size"]):
+            token = struct.unpack_from("<i", raw, i * TYPE_SLOTS["size"] + TYPE_SLOTS["token"])[0]
+            name = _msvc_string(memory, data + i * TYPE_SLOTS["size"] + TYPE_SLOTS["name"], 80)
+            if name:
+                names[token] = name
+                order.append(token)
+    fitted: dict[int, str] = {}
+    head = memory.read(variant + MODULES["array"], 16)
+    data, _cap, size = struct.unpack("<Qii", head) if head else (0, 0, 0)
+    raw = memory.read(data, MODULES["entry"] * size) if data and 0 < size <= 20 else None
+    for i in range(len(raw or b"") // MODULES["entry"]):
+        token, module = struct.unpack_from("<i4xQ", raw, i * MODULES["entry"])
+        mid = _msvc_string(memory, module + MODULES["module_id"], 80) if module else None
+        if mid:
+            fitted[token] = mid
+            if token not in names:   # a slot the type list does not name: keep the module anyway
+                order.append(token)
+    return [{"slot": names.get(t, f"slot_{t:x}"), "module": fitted.get(t)} for t in order]
+
+
+def plane_design_ids(memory, country: int) -> list[int]:
+    """Equipment ids of the country's plane designs - cheap, for the daily first-seen record."""
+    production = _ptr(memory, country + STOCKPILE["production"])
+    out = []
+    for variant in read_array(memory, production + DESIGNS["all"], 5000) if production else []:
+        tid = _type_id(memory, variant) if variant else None
+        raw = memory.read(variant + DESIGN["id"], 4) if tid and is_plane_type(tid) else None
+        if raw:
+            out.append(struct.unpack("<i", raw)[0])
     return out
 
 

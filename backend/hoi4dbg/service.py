@@ -1241,6 +1241,8 @@ class DebuggerService:
         self._division_stats(install, army["templates"], found)
         ids = {u for t in army["templates"] for k in ("battalions", "support", "regimental") for u in t[k]}
         ids |= {sh["type"] for sh in navy["ships"]} | {g["role"] for g in air}
+        planes = found.get("plane_designs") or []
+        ids |= {d["type"] for d in planes} | {s["module"] for d in planes for s in d.get("slots", []) if s["module"]}
         stat_keys = {k for g in air + reserve for k in (g["stats"] or {})}
         names = focus_mod.loc_names(install, ids | {f"{i}_short" for i in ids} | {f"STAT_{k.upper()}" for k in stat_keys}
                                     | {f"EQUIPMENT_STAT_{k.upper()}" for k in stat_keys} | set(stat_keys))
@@ -1252,9 +1254,19 @@ class DebuggerService:
             for u in units:
                 out[u] = out.get(u, 0) + 1
             return [{"id": u, "name": label(u), "count": n} for u, n in out.items()]
+        try:
+            units = divisions_mod.tables(self._game_roots(install))["units"]
+        except Exception:  # broken game files: no automatic icon
+            units = {}
+        priority = lambda u: (units.get(u) or {}).get("stats", {}).get("priority", 0)  # noqa: E731
         for t in army["templates"]:
+            # the template's icon: the player's choice, else the battalion type the game puts first (highest priority)
+            first = max(t["battalions"], key=lambda u: (priority(u), t["battalions"].count(u)), default=None)
+            t["icon"] = {"template": t["icon"]} if t["icon"] >= 0 else {"unit": first}
             for k in ("battalions", "support", "regimental"):
                 t[k] = grouped(t[k])
+        army["unit_names"] = {u: label(u) for t in army["templates"] for k in ("battalions", "support", "regimental")
+                              for u in t["grid"][k] if u}
         army["templates"].sort(key=lambda t: -t["count"])
         stat_label = {k: PLANE_STAT_LABELS.get(k) or (loc(f"STAT_{k.upper()}") or loc(k) or k.replace("_", " ")).rstrip(":")
                       for k in stat_keys}
@@ -1268,11 +1280,40 @@ class DebuggerService:
         navy_out = {"fleets": navy["fleets"], "task_forces": navy["task_forces"],
                     "ships": sum(t["count"] for t in types.values()),
                     "types": sorted(types.values(), key=lambda t: -t["count"])}
+        stat_label.update({k: PLANE_STAT_LABELS.get(k) or k.replace("_", " ") for d in planes for k in d["stats"]
+                           if k not in stat_label})
         return envelope(LIVE, {
             "tag": tag, "military_source": "live",
             "army": army, "navy": navy_out,
-            "air": {"planes": sum(g["planes"] for g in air), "wings": air, "reserve": reserve, "stat_labels": stat_label},
+            "air": {"planes": sum(g["planes"] for g in air), "wings": air, "reserve": reserve, "stat_labels": stat_label,
+                    "designs": self._plane_designs(tag, planes, label)},
         }, "Army, air force and navy from game memory.")
+
+    def _plane_designs(self, tag: str, planes: list[dict], label) -> list[dict]:
+        """Plane designs of `tag` like the production screen: name (a base airframe: its type), type, outdated, stats,
+        the design it was made from, and the game day the IC recorder first saw it ("seen", "seen_before": it existed
+        already when the recording began - the game keeps no creation date)."""
+        seen = self.ic_history.designs(self.ic_history.active).get(tag, {})
+        out = []
+        for d in planes:
+            day = seen.get(str(d["id"]))
+            slots = [{**s, "module_name": label(s["module"]) if s["module"] else None} for s in d.get("slots", [])]
+            out.append({**d, "slots": slots, "type_name": label(d["type"]), "name": d["name"] or label(d["type"]),
+                        "seen": ic_history_mod.date_text(day[0]) if day else None, "seen_before": bool(day and day[1])})
+        return out
+
+    def military_icons(self, units: list[str], templates: list[int], modules: list[str] | None = None) -> dict:
+        """Icons of the designers: {"units": {sub-unit id: data URI}, "templates": {icon number: data URI}, "modules":
+        {plane module id: data URI}} (GFX_unit_<id>_icon_medium, GFX_div_templ_<n>_large, GFX_EMI_<id>); fetched once by
+        the Army and Air Force tiles, not on every refresh."""
+        install = self._install_path()
+        if install is None:
+            return {"data": {"units": {}, "templates": {}}}
+        roots = self._game_roots(install)
+        return {"data": {
+            "units": {u: gfx.sprite_uri(roots, f"GFX_unit_{u}_icon_medium") for u in units[:200] if re.fullmatch(r"\w{1,80}", u)},
+            "templates": {str(n): gfx.sprite_uri(roots, f"GFX_div_templ_{n}_large") for n in templates[:200]},
+            "modules": {m: gfx.sprite_uri(roots, f"GFX_EMI_{m}") for m in (modules or [])[:200] if re.fullmatch(r"\w{1,80}", m)}}}
 
     def _division_stats(self, install: Path, templates: list[dict], found: dict) -> None:
         """Adds "designer" (stats like the game's division designer, divisions.py) to each template; an estimate when
@@ -1327,6 +1368,17 @@ class DebuggerService:
         for c in out["countries"]:
             c["name"] = names.get(c["tag"], c["tag"])
         return {"data": {"id": gid, "player": game["player"], "metric": metric, "by_faction": by_faction, **out}}
+
+    def summary_delete(self, gid: str) -> dict:
+        """Deletes a recorded campaign (not the one being recorded)."""
+        try:
+            self.ic_history.delete(gid)
+        except FileNotFoundError:
+            raise NotFound(f"No recorded campaign {gid}") from None
+        except ValueError as exc:
+            raise ReportError(str(exc)) from None
+        self.log.info("Game summary: campaign %s deleted", gid)
+        return {"data": {"deleted": gid}}
 
     def summary_groups(self, gid: str, data=None) -> dict:
         """The user's grouping of a campaign: {"custom": [names], "assign": {tag: group}}; saved when `data` is given."""

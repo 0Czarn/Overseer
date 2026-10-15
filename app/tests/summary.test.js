@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assignColors, cumulative, isFactoryMetric, MAX_SERIES } from '../renderer/views/summary.js';
+import { assignColors, cumulative, gameLabel, isFactoryMetric, MAX_SERIES, startedText } from '../renderer/views/summary.js';
 import { dayText, dayTicks, niceTicks } from '../renderer/lib/linechart.js';
 
 test('cumulative IC counts skipped days at the last value (high game speed)', () => {
@@ -53,4 +53,12 @@ test('search by tag or name, case-insensitive', async () => {
 
 test('cumulative losses start at the first known day and skip unknown ones', () => {
   assert.deepEqual(cumulative([1, 2, 3, 6], [null, 3, null, 2]), [null, 3, 3, 9]);
+});
+
+test('campaign labels: game dates and the real date the recording began', () => {
+  const g = { player: 'POL', first: '1936.01.02', last: '1936.05.15', days: 114, created: '2026-10-15 09:53:17' };
+  assert.equal(gameLabel(g), 'POL · 1936.01.02 → 1936.05.15 (114 days)');
+  assert.equal(gameLabel({ ...g, days: 1 }), 'POL · 1936.01.02 → 1936.05.15 (1 day)');
+  assert.equal(startedText(g.created), '2026-10-15 09:53');
+  assert.equal(startedText(undefined), 'unknown');
 });

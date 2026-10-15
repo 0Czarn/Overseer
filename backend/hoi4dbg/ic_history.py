@@ -245,6 +245,18 @@ class IcHistory:
         (self.folder / f"{gid}.groups.json").write_text(json.dumps(groups, indent=1), encoding="utf-8")
         return groups
 
+    def delete(self, gid: str) -> None:
+        """Removes a campaign and its grouping; the one being recorded stays (the recorder appends to it)."""
+        with self._lock:
+            path = self._path(gid)
+            if not path.exists():
+                raise FileNotFoundError(gid)
+            if gid == self.active:
+                raise ValueError("This campaign is being recorded now - it can be deleted once another game runs")
+            path.unlink()
+            (self.folder / f"{gid}.groups.json").unlink(missing_ok=True)
+            (self.folder / f"{gid}.designs.json").unlink(missing_ok=True)
+
     def _choose(self, player: str, t: int) -> str:
         """The campaign file a sample of `player` at day `t` belongs to (cutting replayed days)."""
         candidates = [g for g in self.games() if g["player"] == player and g["last_t"] is not None]
@@ -266,6 +278,37 @@ class IcHistory:
     def _cut(self, gid: str, t: int) -> None:
         rows = [r for r in self._lines(gid) if "t" not in r or r["t"] < t]
         self._path(gid).write_text("".join(json.dumps(r, separators=(",", ":")) + "\n" for r in rows), encoding="utf-8")
+        seen = self.designs(gid)   # designs first seen on a replayed day: the game may give their ids to new ones
+        kept = {tag: {i: v for i, v in ids.items() if v[1] or v[0] < t} for tag, ids in seen.items()}
+        if kept != seen:
+            self._designs_path(gid).write_text(json.dumps(kept, separators=(",", ":")), encoding="utf-8")
+
+    # -- the day a plane design was first seen (the game keeps no creation date, live/pointers.read_plane_designs) --
+    def _designs_path(self, gid: str) -> Path:
+        self._path(gid)   # checks the id
+        return self.folder / f"{gid}.designs.json"
+
+    def designs(self, gid: str | None) -> dict[str, dict[str, list]]:
+        """{tag: {equipment id: [day number, before]}} - before = it already existed when the recording began."""
+        try:
+            return json.loads(self._designs_path(gid).read_text(encoding="utf-8")) if gid else {}
+        except (OSError, ValueError):
+            return {}
+
+    def note_designs(self, gid: str, t: int, ids: dict[str, list[int]]) -> None:
+        """Notes the designs not seen before in the campaign; on its first reading all of them as existing before."""
+        path = self._designs_path(gid)
+        first = not path.exists()
+        seen = self.designs(gid)
+        changed = first
+        for tag, vids in ids.items():
+            known = seen.setdefault(tag, {})
+            for vid in vids:
+                if str(vid) not in known:
+                    known[str(vid)] = [t, first]
+                    changed = True
+        if changed:
+            path.write_text(json.dumps(seen, separators=(",", ":")), encoding="utf-8")
 
     def add(self, sample: dict) -> str:
         """Appends {"t", "player", "countries", "factions"?} and returns the campaign id."""
@@ -335,7 +378,10 @@ class IcRecorder:
                 else:
                     values.extend([None, None, None])
             self._losses = losses
-        self.history.add(sample)
+        designs = sample.pop("designs", None)
+        gid = self.history.add(sample)
+        if designs is not None:
+            self.history.note_designs(gid, t, designs)
         if with_factions:
             self._last_faction_t = t
         self.last_t = t
