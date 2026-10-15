@@ -10,7 +10,17 @@ export const DEFAULTS = {
   image: null,            // id of a background image (backend /api/backgrounds) or null
   imageOpacity: 35, imageFit: 'cover', imageBlur: 0,
   startTab: '',           // '' = the dashboard
+  notifyFocus: true, notifyRecording: true, notifyGame: false,   // Windows notifications
+  refresh: 'normal',      // live reading pace: 'fast' | 'normal' | 'light'
+  lang: 'en', numbers: 'en',   // interface language, number format ('en' 1,234.5 | 'pl' 1 234,5 | 'system')
+  textSize: 100,          // % zoom of the whole window
+  shortcuts: true,
 };
+export const REFRESH = { fast: ['Fast', 0.5], normal: ['Normal', 1], light: ['Light on the CPU', 2.5] };
+export const LANGS = { en: 'English', pl: 'Polski' };
+export const NUMBERS = { en: '1,234.5', pl: '1 234,5', system: 'As in Windows' };
+export const TEXT_MIN = 70;
+export const TEXT_MAX = 160;
 export const THEMES = { 1984: 'Overseer (1984)', classic: 'Classic (before)' };
 export const FITS = { cover: 'Fill', contain: 'Fit', tile: 'Tile', center: 'Centre' };
 
@@ -28,15 +38,36 @@ export function normalizeOptions(raw) {
     imageFit: o.imageFit in FITS ? o.imageFit : DEFAULTS.imageFit,
     imageBlur: clamp(o.imageBlur, 0, 20, DEFAULTS.imageBlur),
     startTab: typeof o.startTab === 'string' ? o.startTab : '',
+    notifyFocus: Boolean(o.notifyFocus), notifyRecording: Boolean(o.notifyRecording), notifyGame: Boolean(o.notifyGame),
+    refresh: o.refresh in REFRESH ? o.refresh : DEFAULTS.refresh,
+    lang: o.lang in LANGS ? o.lang : DEFAULTS.lang,
+    numbers: o.numbers in NUMBERS ? o.numbers : DEFAULTS.numbers,
+    textSize: clamp(o.textSize, TEXT_MIN, TEXT_MAX, DEFAULTS.textSize),
+    shortcuts: Boolean(o.shortcuts),
   };
 }
 
+let current = null;   // the options in use (read once, then kept up to date by saveOptions)
+
 export function loadOptions() {
-  try { return normalizeOptions(JSON.parse(localStorage.getItem(OPTIONS_KEY))); } catch { return normalizeOptions(null); }
+  if (current) return current;
+  try { current = normalizeOptions(JSON.parse(localStorage.getItem(OPTIONS_KEY))); } catch { current = normalizeOptions(null); }
+  return current;
 }
 
 export function saveOptions(options) {
-  try { localStorage.setItem(OPTIONS_KEY, JSON.stringify(normalizeOptions(options))); } catch { /* convenience only */ }
+  current = normalizeOptions(options);
+  try { localStorage.setItem(OPTIONS_KEY, JSON.stringify(current)); } catch { /* convenience only */ }
+}
+
+/** A polling interval of live reading at the chosen pace (Options > Refresh rate). */
+export function refreshMs(ms) {
+  return Math.round(ms * (REFRESH[loadOptions().refresh]?.[1] ?? 1));
+}
+
+/** Locale of numbers (Options > Number format); undefined = Windows' own. */
+export function numberLocale() {
+  return { en: 'en-US', pl: 'pl-PL', system: undefined }[loadOptions().numbers];
 }
 
 /** CSS of the image layer for a fit mode. */
@@ -71,6 +102,8 @@ export async function applyOptions(options, api, tries = 5) {
     eye.style.opacity = String(o.eyeOpacity / 100);
   }
   setEyeOptions({ track: o.eyeTrack, blink: o.eyeBlink });
+  try { globalThis.hoi4dbg?.setZoom?.(o.textSize / 100); } catch { /* no bridge (tests) */ }
+  document.documentElement.lang = o.lang;
   if (!main) return;
   if (!imageLayer) {
     imageLayer = document.createElement('div');

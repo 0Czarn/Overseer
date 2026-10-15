@@ -4,6 +4,8 @@
 // The choice is remembered per tile (browser storage of this app). A tile is redrawn only when its data changed,
 // so an open tooltip or an expanded list stays as it is between identical reads.
 import { h, notice } from './dom.js';
+import { refreshMs } from './options.js';
+import { tr } from './i18n.js';
 
 export const LIVE_MS = 2000;
 export const MODES = { live: 'Live', manual: 'On refresh' };
@@ -62,7 +64,7 @@ export function refreshControl(id, title, run) {
     });
     button.hidden = mode === 'live';
     clearInterval(timer);
-    timer = mode === 'live' ? setInterval(() => { if (!document.hidden) run(false); }, LIVE_MS) : null;
+    timer = mode === 'live' ? setInterval(() => { if (!document.hidden) run(false); }, refreshMs(LIVE_MS)) : null;
   }
 
   function set(value) {
@@ -119,7 +121,7 @@ export function livePanel(ctx, { title, url, render, liveParts, cls = '', unavai
   const control = refreshControl(id, title, refresh);
   refresh(true);
   const el = h('section', { class: `hoi-panel ${cls}`.trim() },
-    h('div', { class: 'hoi-head' }, h('span', { class: 'hoi-head-title' }, title),
+    h('div', { class: 'hoi-head' }, h('span', { class: 'hoi-head-title' }, tr(title)),
       h('span', { class: 'hoi-head-right' }, source, control.el)),
     body);
   return { el, refresh, stop: () => { stopped = true; control.stop(); } };

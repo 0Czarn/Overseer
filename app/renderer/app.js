@@ -18,8 +18,10 @@ import logs from './views/logs.js';
 import summary from './views/summary.js';
 import actions from './views/actions.js';
 import { loadNavOrder, moveTab, orderTabs, saveNavOrder } from './lib/nav-order.js';
-import { mountEye } from './lib/eye.js';
-import { applyOptions, loadOptions } from './lib/options.js';
+import { mountEye, mountLogoEye } from './lib/eye.js';
+import { TEXT_MAX, TEXT_MIN, applyOptions, loadOptions, refreshMs, saveOptions } from './lib/options.js';
+import { shortcutAction } from './lib/shortcuts.js';
+import { tr } from './lib/i18n.js';
 import options from './views/options.js';
 
 const VIEWS = [dashboard, summary, actions, countries, countryEditor, research, construction, doctrines, stateEditor, focus, equipment, tools, logs, options];
@@ -76,6 +78,7 @@ const ctx = {
     location.hash = `#/${id}`;
   },
   rerender: () => renderView(),
+  relabel: () => { translateShell(); ctx.renderNav?.(); renderView(); },   // after a language change
   views: null,           // the tabs (set below; Options lists them)
   resetNavOrder: () => {},   // set by buildNav
   onStatus(fn) {
@@ -104,7 +107,7 @@ async function renderView() {
   document.body.dataset.loading = '1';
   delete document.body.dataset.rendered; // set only when THIS view's content is on screen (smoke test waits on it)
   for (const link of document.querySelectorAll('.nav a')) link.classList.toggle('active', link.dataset.view === view.id);
-  document.title = `${view.title} - Project OVERSEER`;
+  document.title = `${tr(view.title)} - The OVERSEER`;
 
   const root = h('div', { class: 'view-inner' });
   let viewCleanup = null;
@@ -150,7 +153,7 @@ function buildNav() {
     const custom = order.join() !== ids.join();
     nav.replaceChildren(...order.map((id) => {
       const v = VIEWS.find((x) => x.id === id);
-      return h('a', { href: `#/${v.id}`, 'data-view': v.id, title: `${v.title} - drag to move (or Alt+Up / Alt+Down)`,
+      return h('a', { href: `#/${v.id}`, 'data-view': v.id, title: `${tr(v.title)} - drag to move (or Alt+Up / Alt+Down)`,
         draggable: 'true', class: v.id === currentViewId() ? 'active' : '',
         ondragstart: (e) => { dragged = v.id; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.classList.add('nav-dragging'); },
         ondragend: (e) => { dragged = null; e.currentTarget.classList.remove('nav-dragging'); },
@@ -167,11 +170,12 @@ function buildNav() {
         } },
       NAV_ICONS[v.id] ? h('img', { class: 'nav-icon nav-img', src: `assets/texticons/${NAV_ICONS[v.id]}`, alt: '' })
         : h('span', { class: 'nav-icon' }, v.short),
-      h('span', { class: 'nav-label' }, v.title));
+      h('span', { class: 'nav-label' }, tr(v.title)));
     }), ...(custom ? [h('button', { class: 'nav-reset', title: 'Back to the default order of the tabs',
-      onclick: () => apply(ids) }, 'Reset tab order')] : []));
+      onclick: () => apply(ids) }, tr('Reset tab order'))] : []));
   }
   ctx.resetNavOrder = () => apply(ids);
+  ctx.renderNav = render;
   render();
 }
 
@@ -195,6 +199,69 @@ function renderStatus(status, error) {
   const version = game.install?.version?.display;
   const date = game.session?.last_game_date;
   meta.textContent = [version, date ? `game.log date (may lag): ${date}` : null].filter(Boolean).join(' · ');
+}
+
+/** A Windows notification of the kind `kind` (Options > Notifications: focus / recording / game), if turned on. */
+function notify(kind, title, body) {
+  const on = { focus: 'notifyFocus', recording: 'notifyRecording', game: 'notifyGame' }[kind];
+  if (!loadOptions()[on]) return;
+  try { new Notification(`The OVERSEER - ${title}`, { body }); } catch { /* notifications unavailable */ }
+}
+
+// Game started / closed (Options > Notifications)
+let lastDetected = null;
+statusListeners.add((status) => {
+  const detected = Boolean(status?.game?.detected);
+  if (lastDetected !== null && detected !== lastDetected) {
+    notify('game', 'game', detected ? 'Hearts of Iron IV is running - the Overseer is watching.' : 'Hearts of Iron IV was closed.');
+  }
+  lastDetected = detected;
+});
+
+// Recording of a campaign started or switched (Game summary recorder; Options > Notifications)
+async function watchRecording() {
+  let last;
+  const tick = async () => {
+    try {
+      const { data } = await api.get('/api/summary/games');
+      const rec = data.recorder?.recording ?? null;
+      if (last !== undefined && rec && rec !== last) {
+        const g = data.games.find((x) => x.id === rec);
+        notify('recording', 'recording', `Recording ${g?.player ?? ''} campaign${data.recorder.how ? ` - ${data.recorder.how}` : ''}.`);
+      }
+      last = rec;
+    } catch { /* backend busy: next time */ }
+    setTimeout(tick, refreshMs(15000));
+  };
+  tick();
+}
+
+/** Static texts of the page shell in the chosen language (Options > Language). */
+function translateShell() {
+  document.querySelector('#toggle-ontop + span').textContent = tr('On top');
+  document.querySelector('#toggle-compact + span').textContent = tr('Compact');
+}
+
+/** Keyboard shortcuts (lib/shortcuts.js; Options can turn them off). */
+function onShortcut(e) {
+  const options = loadOptions();
+  const action = options.shortcuts ? shortcutAction(e) : null;
+  if (!action) return;
+  e.preventDefault();
+  const tabs = [...document.querySelectorAll('#nav a[data-view]')].map((a) => a.dataset.view);
+  if (action.type === 'tab' && tabs[action.index]) ctx.navigate(tabs[action.index]);
+  if (action.type === 'step') {
+    const i = tabs.indexOf(document.body.dataset.view);
+    ctx.navigate(tabs[(i + action.by + tabs.length) % tabs.length]);
+  }
+  if (action.type === 'reload') renderView();
+  if (action.type === 'options') ctx.navigate('options');
+  if (action.type === 'text') {
+    const textSize = action.reset ? 100 : Math.min(TEXT_MAX, Math.max(TEXT_MIN, options.textSize + action.by));
+    saveOptions({ ...options, textSize });
+    applyOptions(loadOptions(), api);
+    toast(`Text size ${textSize}%`, 'info');
+  }
 }
 
 async function pollStatus() {
@@ -222,7 +289,9 @@ function syncToggles() {
 async function init() {
   buildNav();
   mountEye(document.querySelector('.main'));
+  mountLogoEye(document.getElementById('brand-logo'));
   ctx.views = VIEWS;
+  translateShell();
   applyOptions(loadOptions(), api);
   applyCompact();
   document.getElementById('toggle-compact').addEventListener('change', (e) => ctx.setState({ compact: e.target.checked }));
@@ -234,19 +303,21 @@ async function init() {
   }
   syncToggles();
   window.addEventListener('hashchange', renderView);
+  window.addEventListener('keydown', onShortcut);
   window.addEventListener('error', (e) => api.log('error', `Renderer error: ${e.message}`));
   window.addEventListener('unhandledrejection', (e) => api.log('error', `Unhandled rejection: ${e.reason?.message ?? e.reason}`));
 
   await pollStatus();
-  setInterval(pollStatus, STATUS_INTERVAL_MS);
+  setInterval(pollStatus, refreshMs(STATUS_INTERVAL_MS));
   // Focus alerts: in-app toast + system notification (shown even when the game has focus). Not in the UI smoke
   // test (its logic has unit tests) - the first reading of a large save would slow the views under test.
   const smoke = bridge ? (await bridge.backendInfo()).smoke : false;
   if (!smoke) setTimeout(() => startFocusWatch(api, (message) => {
     toast(message, 'info');
     api.log('info', `Focus alert: ${message}`);
-    try { new Notification('Project OVERSEER - national focus', { body: message }); } catch { /* notifications unavailable */ }
+    notify('focus', 'national focus', message);
   }), 5000);
+  if (!smoke) watchRecording();
   // Optional construction queue auto-sort (switch on the Construction tab): a refusal (multiplayer, player not
   // known) is shown once per reason, not every few seconds
   let lastSortError = null;
@@ -267,7 +338,7 @@ async function init() {
     if (msg) {
       toast(msg.text, msg.kind);
       api.log(msg.kind === 'ok' ? 'warning' : 'info', `Focus auto-start: ${msg.text}`);
-      try { new Notification('Project OVERSEER - national focus', { body: msg.text }); } catch { /* unavailable */ }
+      notify('focus', 'national focus', msg.text);
     }
     if (err && err.message !== lastFocusError) toast(`Focus auto-start: ${err.message}`, 'warn');
     lastFocusError = err ? err.message : null;

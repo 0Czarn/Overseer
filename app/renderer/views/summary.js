@@ -4,6 +4,8 @@
 // records every country once per game day while the app runs (ic_history.py).
 import { h, notice, viewHeader } from '../lib/dom.js';
 import { compact, dayText, hoverSync, lineChart } from '../lib/linechart.js';
+import { refreshMs } from '../lib/options.js';
+import { numberLocale } from '../lib/options.js';
 
 // categorical slots in fixed order (dark steps of the validated reference palette); a colour follows its series
 export const SERIES_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'];
@@ -460,9 +462,9 @@ export default {
             h('th', null, `${isFactoryMetric(prefs.metric) ? metric : 'IC a day'} (${dayText(main.t[last])})`),
             isFactoryMetric(prefs.metric) ? null : h('th', null, 'Cumulative IC'))),
           h('tbody', null, main.series.filter((s) => keys.includes(s.key)).map((s) => h('tr', null, h('td', null, s.key),
-            h('td', { class: 'num' }, s.values[last] == null ? '—' : s.values[last].toLocaleString(undefined, { maximumFractionDigits: 1 })),
+            h('td', { class: 'num' }, s.values[last] == null ? '—' : s.values[last].toLocaleString(numberLocale(), { maximumFractionDigits: 1 })),
             isFactoryMetric(prefs.metric) ? null
-              : h('td', { class: 'num' }, cumulative(main.t, s.values)[last]?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? '—'))))));
+              : h('td', { class: 'num' }, cumulative(main.t, s.values)[last]?.toLocaleString(numberLocale(), { maximumFractionDigits: 0 }) ?? '—'))))));
       const factories = isFactoryMetric(prefs.metric);
       const sync = hoverSync();   // the hovered day shows in both charts
       charts.replaceChildren(...[   // replaceChildren would print a null
@@ -507,7 +509,7 @@ export default {
         if (!stopped) charts.replaceChildren(notice('warn', `Game summary unavailable: ${err.message}`));
       }
       clearTimeout(timer);
-      if (!stopped && games.find((g) => g.id === prefs.game)?.active) timer = setTimeout(load, REFRESH_MS);
+      if (!stopped && games.find((g) => g.id === prefs.game)?.active) timer = setTimeout(load, refreshMs(REFRESH_MS));
     }
 
     await load();

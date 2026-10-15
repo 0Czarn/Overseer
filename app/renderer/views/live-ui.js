@@ -3,6 +3,7 @@
 import { h, card, keyValues, notice, scopeBadge, toast } from '../lib/dom.js';
 import { PERCENT_FIELDS, classifyLive, formatLiveValue, toValueUnits } from '../lib/live.js';
 import { statIcon } from '../lib/icons.js';
+import { refreshMs } from '../lib/options.js';
 
 const FIELD = 'political_power';
 export const FIELD_LABELS = {
@@ -240,7 +241,7 @@ export function liveCard(ctx, { withCalibration = true, withChange = false, with
     } catch (err) {
       if (!stopped) render({ code: err.code, message: err.message });
     }
-    if (!stopped) timer = setTimeout(tick, POLL_MS);
+    if (!stopped) timer = setTimeout(tick, refreshMs(POLL_MS));
   }
   tick();
   return {

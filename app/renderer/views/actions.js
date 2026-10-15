@@ -3,6 +3,7 @@
 // backend's IC recorder compares a daily snapshot from game memory with the day before (backend hoi4dbg/actions.py);
 // the game itself keeps no such log, so only days played while the app runs are known.
 import { h, notice, viewHeader } from '../lib/dom.js';
+import { refreshMs } from '../lib/options.js';
 
 const REFRESH_MS = 5000;
 const PREFS_KEY = 'hoi4dbg.actions';
@@ -136,7 +137,7 @@ export default {
       } catch (err) {
         if (!stopped) list.replaceChildren(notice('warn', `Players actions unavailable: ${err.message}`));
       }
-      if (!stopped && data?.games?.find((g) => g.id === data.game)?.active) timer = setTimeout(load, REFRESH_MS);
+      if (!stopped && data?.games?.find((g) => g.id === data.game)?.active) timer = setTimeout(load, refreshMs(REFRESH_MS));
     }
 
     await load();

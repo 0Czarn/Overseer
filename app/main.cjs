@@ -5,7 +5,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const { pathToFileURL } = require('node:url');
-const { app, BrowserWindow, ipcMain, protocol, net, shell, dialog } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, protocol, net, shell, dialog } = require('electron');
 const { startBackend } = require('./backend-process.cjs');
 const { forwardApiRequest } = require('./api-bridge.cjs');
 
@@ -59,6 +59,14 @@ function registerIpc() {
     const error = await shell.openPath(dir);
     return error ? { ok: false, error } : { ok: true, path: dir };
   });
+  ipcMain.handle('shell:openDataFolder', async () => {
+    // The app's data folder (recordings, backgrounds, logs) as the backend reports it, never from the renderer.
+    const res = await api({ method: 'GET', path: '/api/status' });
+    const dir = res.body?.app?.data_dir;
+    if (!dir || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return { ok: false, error: 'Data folder not found' };
+    const error = await shell.openPath(dir);
+    return error ? { ok: false, error } : { ok: true, path: dir };
+  });
 }
 
 function createWindow() {
@@ -68,7 +76,7 @@ function createWindow() {
     minWidth: 420,
     minHeight: 480,
     backgroundColor: '#0f1318',
-    title: 'Project OVERSEER',
+    title: 'The OVERSEER',
     icon: path.join(__dirname, 'assets', 'icon.png'),
     autoHideMenuBar: true,
     show: !SMOKE_DIR || process.env.HOI4DBG_SMOKE_SHOW === '1',   // visible smoke run: screenshots of large views
@@ -93,9 +101,13 @@ function createWindow() {
 }
 
 // Windows shows system notifications (focus alerts) only for an app with a user model id.
-if (process.platform === 'win32') app.setAppUserModelId('ProjectOverseer');
+if (process.platform === 'win32') app.setAppUserModelId('TheOverseer');
 
 app.whenReady().then(async () => {
+  // The default menu's zoom keys would fight the app's own text size (Options, Ctrl+= / Ctrl+- / Ctrl+0): a menu
+  // without them, hidden like before (Alt shows it)
+  Menu.setApplicationMenu(Menu.buildFromTemplate([{ label: 'View', submenu: [{ role: 'reload' }, { role: 'forceReload' },
+    { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'togglefullscreen' }] }]));
   serveRenderer();
   registerIpc();
   try {
@@ -111,7 +123,7 @@ app.whenReady().then(async () => {
     });
   } catch (err) {
     console.error(err.message);
-    if (!SMOKE_DIR) dialog.showErrorBox('Project OVERSEER - backend error', err.message);
+    if (!SMOKE_DIR) dialog.showErrorBox('The OVERSEER - backend error', err.message);
   }
   createWindow();
 });

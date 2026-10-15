@@ -1,5 +1,6 @@
 // Watches the player's national focus in game memory and notifies when the next one has to be started.
 // The game has no command that starts a focus, so the app only tells the player what to click next.
+import { refreshMs } from './options.js';
 
 export const FOCUS_POLL_MS = 4000;
 
@@ -36,6 +37,6 @@ export function startFocusWatch(api, notify) {
     }
   };
   tick();
-  const timer = setInterval(tick, FOCUS_POLL_MS);
+  const timer = setInterval(tick, refreshMs(FOCUS_POLL_MS));
   return () => clearInterval(timer);
 }

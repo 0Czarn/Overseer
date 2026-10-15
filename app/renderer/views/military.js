@@ -5,6 +5,7 @@
 import { designerIcon } from '../lib/icons.js';
 import { h, notice } from '../lib/dom.js';
 import { livePanel } from '../lib/refresh.js';
+import { numberLocale } from '../lib/options.js';
 
 const url = (tag) => `/api/countries/${encodeURIComponent(tag)}/military`;
 const liveParts = (res) => (res.data?.military_source === 'live' ? ['army, air force, navy'] : []);
@@ -265,9 +266,9 @@ export function armyPanel(ctx, tag) {
     body.replaceChildren(
       h('div', { class: 'mil-bigs' },
         bigNumber('Divisions', a.divisions, 'Divisions in the field'),
-        bigNumber('Free manpower', manpowerText(a.manpower_free), `${a.manpower_free?.toLocaleString() ?? '—'} men available in the states the country controls`),
-        bigNumber('Manpower in the field', shortCount(a.manpower_field), `${a.manpower_field?.toLocaleString() ?? '—'} men in the divisions`),
-        bigNumber('In training', shortCount(a.manpower_training), `${a.manpower_training?.toLocaleString() ?? '—'} men in divisions being trained`),
+        bigNumber('Free manpower', manpowerText(a.manpower_free), `${a.manpower_free?.toLocaleString(numberLocale()) ?? '—'} men available in the states the country controls`),
+        bigNumber('Manpower in the field', shortCount(a.manpower_field), `${a.manpower_field?.toLocaleString(numberLocale()) ?? '—'} men in the divisions`),
+        bigNumber('In training', shortCount(a.manpower_training), `${a.manpower_training?.toLocaleString(numberLocale()) ?? '—'} men in divisions being trained`),
         bigNumber('Templates in use', used.length, `${a.templates.length} templates in all`)),
       h('div', { class: 'mil-tpls' }, used.map((t) => templateRow(t, names))),
       unused.length ? h('details', { class: 'mil-more', open: open.has(' unused') || null,

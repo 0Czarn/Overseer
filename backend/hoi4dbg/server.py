@@ -145,6 +145,7 @@ def build_routes(svc: DebuggerService) -> list[Route]:
             tag, str(b.get("archetype", "")), b.get("amount"), str(b.get("variant", "")))),
         r("GET", r"/api/equipment/changes/(?P<op>eq-[0-9]{1,9})", lambda q, b, op: changes.poll(op)),
         r("GET", "/api/tools", lambda q, b: svc.tools()),
+        r("GET", "/api/data/usage", lambda q, b: svc.data_usage()),
         r("GET", "/api/backgrounds", lambda q, b: svc.backgrounds_list()),
         r("POST", "/api/backgrounds", lambda q, b: svc.background_add(b)),
         r("GET", r"/api/backgrounds/(?P<bid>[0-9a-f]{16})", lambda q, b, bid: svc.background(bid)),

@@ -1,5 +1,6 @@
 // Tiny DOM builder. Never uses innerHTML, so game/mod-provided text can't inject markup.
 import { sourceInfo, scopeInfo } from './format.js';
+import { tr } from './i18n.js';
 
 export function h(tag, props, ...children) {
   const el = document.createElement(tag);
@@ -41,13 +42,13 @@ export function scopeBadge(scope) {
 
 export function viewHeader(title, subtitle, ...extras) {
   return h('div', { class: 'view-header' },
-    h('div', { class: 'view-title' }, h('h1', null, title), subtitle ? h('p', null, subtitle) : null),
+    h('div', { class: 'view-title' }, h('h1', null, tr(title)), subtitle ? h('p', null, tr(subtitle)) : null),
     h('div', { class: 'view-extras' }, extras));
 }
 
 export function card(title, body, { extra, cls } = {}) {
   return h('section', { class: `card ${cls ?? ''}` },
-    title ? h('div', { class: 'card-head' }, h('h2', null, title), extra ?? null) : null,
+    title ? h('div', { class: 'card-head' }, h('h2', null, tr(title)), extra ?? null) : null,
     h('div', { class: 'card-body' }, body));
 }
 

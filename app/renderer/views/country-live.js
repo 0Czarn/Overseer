@@ -5,6 +5,7 @@ import { h, notice, scopeBadge, toast } from '../lib/dom.js';
 import { dataKey, refreshControl } from '../lib/refresh.js';
 import { statIcon } from '../lib/icons.js';
 import { FIELD_LABELS, changeSection, directEnabled } from './live-ui.js';
+import { numberLocale } from '../lib/options.js';
 
 const STRIP = ['political_power', 'command_power', 'fuel', 'army_experience', 'navy_experience', 'air_experience'];
 const GAUGES = { stability: 'Stability', war_support: 'War Support' };
@@ -18,7 +19,7 @@ const clamp01 = (v) => Math.min(1, Math.max(0, v));
 function stripValue(field, entry) {
   if (entry?.status !== 'live') return '—';
   const v = entry.value;
-  if (field === 'fuel') return Math.round(v).toLocaleString();
+  if (field === 'fuel') return Math.round(v).toLocaleString(numberLocale());
   return Math.abs(v) >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(field === 'political_power' ? 2 : 1);
 }
 

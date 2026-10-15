@@ -3,7 +3,8 @@ import { filterByText } from '../lib/format.js';
 import { headerDetails, modsList, playersTable, pollAnalysis, saveBanner, saveError, saveSelect } from './save-ui.js';
 
 const LIVE_POLL_MS = 3000;
-import { loadCountries, tagChip } from './shared.js';
+import { loadCountries, tagChip } from './shared.js';
+import { refreshMs } from '../lib/options.js';
 
 function savePlayersCard(ctx) {
   const body = h('div', { class: 'card-body-inner' });
@@ -155,7 +156,7 @@ function liveTab(ctx) {
     } catch (err) {
       if (running) render(null, `Live data unavailable: ${err.message}`);
     }
-    if (running) timer = setTimeout(tick, LIVE_POLL_MS);
+    if (running) timer = setTimeout(tick, refreshMs(LIVE_POLL_MS));
   };
   const start = () => {
     if (running) return;

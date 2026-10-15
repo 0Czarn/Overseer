@@ -1,7 +1,16 @@
 // Pure formatting helpers (no DOM) - unit tested with node --test.
 
-const grouped = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
-const oneDecimal = new Intl.NumberFormat('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+import { numberLocale } from './options.js';
+
+// number formats of the locale chosen in Options (en-US by default)
+const formats = new Map();
+const nf = (opts) => {
+  const key = `${numberLocale() ?? ''}|${JSON.stringify(opts)}`;
+  if (!formats.has(key)) formats.set(key, new Intl.NumberFormat(numberLocale(), opts));
+  return formats.get(key);
+};
+const grouped = { format: (v) => nf({ maximumFractionDigits: 0 }).format(v) };
+const oneDecimal = { format: (v) => nf({ minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(v) };
 
 export function formatValue(value, unit = 'number') {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';

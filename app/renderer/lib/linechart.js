@@ -2,6 +2,7 @@
 // series' value on the hovered day (in every chart of the same hoverSync).
 // Series: { label, color, dash, points: [[day, value], ...] } (days ascending).
 import { h } from './dom.js';
+import { numberLocale } from './options.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
 const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];   // the game has no leap years
@@ -129,7 +130,7 @@ export function lineChart({ title, series, format = compact, sync = null }) {
       ...rows.map(({ s, v }) => h('div', { class: 'lc-tip-row' },
         h('span', { class: `lc-swatch ${s.dash ? 'lc-swatch-dash' : ''}`, style: { borderColor: s.color } }),
         h('span', { class: 'lc-tip-label' }, s.label), h('span', { class: 'lc-tip-value' }, format === compact
-          ? v.toLocaleString(undefined, { maximumFractionDigits: 1 }) : format(v)))));
+          ? v.toLocaleString(numberLocale(), { maximumFractionDigits: 1 }) : format(v)))));
     tip.hidden = false;
     const left = (x(t) / W) * r.width;
     tip.style.left = left + 12 + tip.offsetWidth > r.width ? `${Math.max(0, left - tip.offsetWidth - 12)}px` : `${left + 12}px`;

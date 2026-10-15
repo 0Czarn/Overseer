@@ -1,6 +1,7 @@
 import { h, card, demoBanner, keyValues, notice, select, sourceBadge, table, viewHeader } from '../lib/dom.js';
 import { filterByText, humanize } from '../lib/format.js';
 import { loadCountries, tagChip } from './shared.js';
+import { numberLocale } from '../lib/options.js';
 
 function chips(tags) {
   return tags?.length ? h('span', { class: 'chip-row' }, tags.map((t) => tagChip(t))) : h('span', { class: 'muted' }, '—');
@@ -12,7 +13,7 @@ function amounts(obj) {
   return h('ul', { class: 'amounts' }, entries.map(([k, v]) => h('li', null, h('span', null, humanize(k)), h('b', null, v))));
 }
 
-const fmtInt = (v) => (v === null || v === undefined ? '—' : Math.round(v).toLocaleString());
+const fmtInt = (v) => (v === null || v === undefined ? '—' : Math.round(v).toLocaleString(numberLocale()));
 
 function detail(state) {
   if (!state) return notice('muted', 'Select a state to see details.');

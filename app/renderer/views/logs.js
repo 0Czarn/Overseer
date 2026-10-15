@@ -1,4 +1,5 @@
-import { h, card, clear, errorBox, keyValues, notice, select, sourceBadge, toast, viewHeader } from '../lib/dom.js';
+import { h, card, clear, errorBox, keyValues, notice, select, sourceBadge, toast, viewHeader } from '../lib/dom.js';
+import { refreshMs } from '../lib/options.js';
 
 const SEVERITIES = ['info', 'minor', 'major', 'critical'];
 const AREAS = ['Dashboard', 'Countries & Players', 'Country Editor', 'State Editor', 'National Focus Manager',
@@ -24,7 +25,7 @@ function appLogPanel(ctx) {
     while (list.childElementCount > 1000) list.firstChild.remove();
     if (atBottom) list.scrollTop = list.scrollHeight;
   };
-  const timer = setInterval(() => poll().catch(() => {}), 2000);
+  const timer = setInterval(() => poll().catch(() => {}), refreshMs(2000));
   const el = card('Application log', [
     h('div', { class: 'toolbar' }, select(['debug', 'info', 'warning', 'error'].map((v) => ({ value: v, label: `≥ ${v}` })),
       level, (v) => { level = v; reload(); }, { class: 'input', 'aria-label': 'Minimum level' })),

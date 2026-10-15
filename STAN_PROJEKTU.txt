@@ -565,6 +565,18 @@ DO ZROBIENIA (w tej kolejności)
             zakładka startowa, compact, always on top, reset kolejności. Lista propozycji na później (powiadomienia,
             częstotliwość odczytu, język, dane/eksport ustawień, rozmiar tekstu i skróty).
             [ ] sprawdzić u użytkownika: dodanie własnego obrazka, styl Classic
+[x] NAZWA "The OVERSEER" (2026-10-15): okno, pasek boczny, backend, README, package.json; skrót "The OVERSEER.lnk" ->
+            "Uruchom The OVERSEER.vbs". Oko w logo śledzi kursor i mruga (lib/eye.js mountLogoEye, wspólny mechanizm).
+[x] OPTIONS 1-5 (2026-10-15): (1) powiadomienia Windows: cel narodowy / nagrywanie kampanii / start-zamknięcie gry
+            + próbne; (2) częstotliwość odczytu Szybko/Normalnie/Oszczędnie (lib/options.refreshMs we wszystkich
+            odpytywaniach); (3) język EN/PL (lib/i18n.js: pasek boczny, nagłówki widoków, tytuły kart i paneli, górny
+            pasek, cała zakładka Options) i format liczb 1,234.5 / 1 234,5 / Windows; (4) dane: otwórz folder
+            (IPC shell:openDataFolder), zajęte miejsce wg części, nagrane kampanie z rozmiarem i usuwaniem
+            (/api/data/usage), eksport/import ustawień (wszystkie klucze hoi4dbg.* w pliku JSON); (5) rozmiar tekstu
+            70-160% (webFrame zoom, Ctrl+=/-/0; domyślne menu bez skrótów zoomu), skróty Ctrl+1..9, Ctrl+Tab, F5, Ctrl+,.
+            Propozycje w zakładce: dźwięki, ukrywanie zakładek, ulubione państwo, auto-sprzątanie, start z Windows /
+            zasobnik, tryb nakładki, kolory dla daltonistów.
+            [ ] język PL: treść widoków (poza nagłówkami) nadal po angielsku
 [ ] Krok G  Game Tools (narzędzia lokalne)
             (zakładka Intelligence Lab USUNIĘTA 2026-10-13 na prośbę użytkownika - była tylko na danych DEMO)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)

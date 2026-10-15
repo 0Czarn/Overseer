@@ -2083,6 +2083,31 @@ class DebuggerService:
     def tools(self) -> dict:
         return envelope(LIVE, TOOLS)
 
+    # -- Options: the app's data folder ------------------------------------------------------------------
+    DATA_PARTS = {"ic-history": "Recorded campaigns (Game summary, Players actions)", "backgrounds": "Background images",
+                  "logs": "Application log", "reports": "Test reports", "save-cache": "Copies of read saves",
+                  "live": "Live reading settings"}
+
+    def data_usage(self) -> dict:
+        """Size of each part of the data folder and of each recorded campaign (all its files)."""
+        root = Path(self.data_dir or ".")
+
+        def size(path: Path) -> tuple[int, int]:
+            files = [p for p in path.rglob("*") if p.is_file()] if path.is_dir() else []
+            return sum(p.stat().st_size for p in files), len(files)
+        parts = []
+        for name, label in self.DATA_PARTS.items():
+            total, count = size(root / name)
+            parts.append({"name": name, "label": label, "size": total, "files": count})
+        folder = root / "ic-history"
+        campaigns = []
+        for g in self.ic_history.games():
+            total = sum(p.stat().st_size for p in folder.glob(f"{g['id']}.*") if p.is_file())
+            campaigns.append({"id": g["id"], "player": g["player"], "first": g["first"], "last": g["last"],
+                              "days": g["days"], "created": g["created"], "active": g["active"], "size": total})
+        return {"data": {"path": str(root.resolve()), "parts": parts, "campaigns": campaigns,
+                         "total": sum(p["size"] for p in parts)}}
+
     # -- Options: the user's background images (backgrounds.py) ----------------------------------------
     def backgrounds_list(self) -> dict:
         return {"data": self.backgrounds.list()}

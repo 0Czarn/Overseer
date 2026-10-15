@@ -2,6 +2,7 @@
 import { h, notice } from '../lib/dom.js';
 import { livePanel } from '../lib/refresh.js';
 import { modifierIcon } from '../lib/icons.js';
+import { numberLocale } from '../lib/options.js';
 
 // Modifiers where a higher value is worse for the country (shown red when positive), as in the game's tooltips.
 const BAD_WHEN_HIGH = /cost|penalty|accident|consumption|losses|attrition|requirement|need|to_others|weekly_casualties|enemy_|weight/;
@@ -72,7 +73,7 @@ export function mioTile(m) {
     h('div', { class: 'spirit-tip', role: 'tooltip' },
       h('div', { class: 'spirit-tip-name' }, m.name),
       h('div', { class: 'spirit-tip-kind' }, `Level ${m.size ?? 0}`
-        + (Number.isFinite(m.funds) ? ` · funds ${Math.round(m.funds).toLocaleString()}` : '')
+        + (Number.isFinite(m.funds) ? ` · funds ${Math.round(m.funds).toLocaleString(numberLocale())}` : '')
         + (Number.isFinite(m.research_bonus) ? ` · research bonus ${pctText(m.research_bonus)}` : '')),
       m.policy ? h('div', { class: 'spirit-tip-traits' }, `Policy: ${m.policy}`) : null,
       m.bonuses.length

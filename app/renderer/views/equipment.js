@@ -1,6 +1,7 @@
 import { h, card, demoBanner, keyValues, meter, notice, scopeBadge, select, sourceBadge, table, toast, viewHeader } from '../lib/dom.js';
 import { filterByText, formatAge, formatValue, freshnessInfo, humanize, stockBalance } from '../lib/format.js';
 import { countryPicker } from './shared.js';
+import { refreshMs } from '../lib/options.js';
 
 function saveLine(data) {
   const fresh = freshnessInfo(data.freshness?.category);
@@ -185,7 +186,7 @@ function addCard(ctx, tag, items, designs) {
     if (!FINAL.includes(op.state)) {
       timer = setTimeout(async () => {
         try { show(await ctx.api.get(`/api/equipment/changes/${op.id}`)); } catch (err) { toast(err.message, 'error'); }
-      }, POLL_MS);
+      }, refreshMs(POLL_MS));
     }
   };
   const create = async () => {
