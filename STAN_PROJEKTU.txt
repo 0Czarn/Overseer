@@ -551,6 +551,8 @@ DO ZROBIENIA (w tej kolejności)
 [x] IKONA PROGRAMU (2026-10-15): wszystkowidzące oko (app/renderer/assets/overseer.svg - stalowe oko, karmazynowa
             tęczówka-radar, promienie wieży strażniczej, czerń; styl propagandy "1984"). app/tools/render-icon.cjs
             (npx electron ...) -> app/assets/icon.png + icon.ico (16-256 px): okno, pasek zadań, skrót, logo w pasku bocznym.
+[x] IKONY ZAKŁADEK (2026-10-15): pasek boczny bez dwuznakowych skrótów - ikony z modów (app.js NAV_ICONS); skrót
+            zostaje tylko dla widoku bez ikony.
 [ ] Krok G  Game Tools (narzędzia lokalne)
             (zakładka Intelligence Lab USUNIĘTA 2026-10-13 na prośbę użytkownika - była tylko na danych DEMO)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)

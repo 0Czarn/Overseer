@@ -120,6 +120,16 @@ async function renderView() {
   document.body.dataset.rendered = view.id;
 }
 
+// Sidebar icons (assets/texticons, from the mods Modifier Icons / Descriptive Icons) - the two-letter short name is
+// shown only for a view without one.
+const NAV_ICONS = {
+  dashboard: 'civilian_intel_texticon.png', summary: 'factory_output_modifier_texticon.png', actions: 'decision_icon_small.png',
+  countries: 'ai_faction_texticon.png', 'country-editor': 'political_power_texticon.png', research: 'research_speed_texticon.png',
+  construction: 'construction_speed_texticon.png', doctrines: 'divisions_texticon.png', 'state-editor': 'infrastructure_building_texticon.png',
+  focus: 'decision_modifier_texticon.png', equipment: 'ai_military_equipment_texticon.png', tools: 'repairing.png',
+  logs: 'decryption_texticon.png',
+};
+
 // The sidebar in the user's order (lib/nav-order.js): drag a tab, or Alt+Up / Alt+Down on a focused one.
 function buildNav() {
   const nav = document.getElementById('nav');
@@ -150,7 +160,9 @@ function buildNav() {
           apply(moveTab(order, v.id, order[i]));
           nav.querySelector(`a[data-view="${v.id}"]`)?.focus();
         } },
-      h('span', { class: 'nav-icon' }, v.short), h('span', { class: 'nav-label' }, v.title));
+      NAV_ICONS[v.id] ? h('img', { class: 'nav-icon nav-img', src: `assets/texticons/${NAV_ICONS[v.id]}`, alt: '' })
+        : h('span', { class: 'nav-icon' }, v.short),
+      h('span', { class: 'nav-label' }, v.title));
     }), ...(custom ? [h('button', { class: 'nav-reset', title: 'Back to the default order of the tabs',
       onclick: () => apply(ids) }, 'Reset tab order')] : []));
   }

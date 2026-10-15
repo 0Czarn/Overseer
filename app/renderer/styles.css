@@ -1056,3 +1056,8 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
 
 /* App logo (assets/overseer.svg - the all-seeing eye) */
 .brand-logo { width: 34px; height: 34px; flex: none; border-radius: 8px; }
+
+/* Sidebar icons instead of the two-letter names */
+.nav-img { width: 22px; height: 22px; object-fit: contain; background: none; border: 0; padding: 0; image-rendering: auto; }
+.nav a:not(.active) .nav-img { opacity: 0.75; filter: saturate(0.7); }
+.nav a:hover .nav-img, .nav a.active .nav-img { opacity: 1; filter: none; }
