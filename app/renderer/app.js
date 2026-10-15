@@ -17,6 +17,7 @@ import tools from './views/tools.js';
 import logs from './views/logs.js';
 import summary from './views/summary.js';
 import actions from './views/actions.js';
+import { loadNavOrder, moveTab, orderTabs, saveNavOrder } from './lib/nav-order.js';
 
 const VIEWS = [dashboard, summary, actions, countries, countryEditor, research, construction, doctrines, stateEditor, focus, equipment, tools, logs];
 const STATUS_INTERVAL_MS = 3000;
@@ -119,10 +120,41 @@ async function renderView() {
   document.body.dataset.rendered = view.id;
 }
 
+// The sidebar in the user's order (lib/nav-order.js): drag a tab, or Alt+Up / Alt+Down on a focused one.
 function buildNav() {
   const nav = document.getElementById('nav');
-  nav.append(...VIEWS.map((v) => h('a', { href: `#/${v.id}`, 'data-view': v.id, title: v.title },
-    h('span', { class: 'nav-icon' }, v.short), h('span', { class: 'nav-label' }, v.title))));
+  const ids = VIEWS.map((v) => v.id);
+  let order = orderTabs(ids, loadNavOrder());
+  let dragged = null;
+  const apply = (next) => {
+    order = next;
+    saveNavOrder(order.join() === ids.join() ? null : order);
+    render();
+  };
+  function render() {
+    const custom = order.join() !== ids.join();
+    nav.replaceChildren(...order.map((id) => {
+      const v = VIEWS.find((x) => x.id === id);
+      return h('a', { href: `#/${v.id}`, 'data-view': v.id, title: `${v.title} - drag to move (or Alt+Up / Alt+Down)`,
+        draggable: 'true', class: v.id === currentViewId() ? 'active' : '',
+        ondragstart: (e) => { dragged = v.id; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.classList.add('nav-dragging'); },
+        ondragend: (e) => { dragged = null; e.currentTarget.classList.remove('nav-dragging'); },
+        ondragover: (e) => { if (dragged && dragged !== v.id) { e.preventDefault(); e.currentTarget.classList.add('nav-drop'); } },
+        ondragleave: (e) => e.currentTarget.classList.remove('nav-drop'),
+        ondrop: (e) => { e.preventDefault(); if (dragged) apply(moveTab(order, dragged, v.id)); },
+        onkeydown: (e) => {
+          if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+          e.preventDefault();
+          const i = order.indexOf(v.id) + (e.key === 'ArrowUp' ? -1 : 1);
+          if (i < 0 || i >= order.length) return;
+          apply(moveTab(order, v.id, order[i]));
+          nav.querySelector(`a[data-view="${v.id}"]`)?.focus();
+        } },
+      h('span', { class: 'nav-icon' }, v.short), h('span', { class: 'nav-label' }, v.title));
+    }), ...(custom ? [h('button', { class: 'nav-reset', title: 'Back to the default order of the tabs',
+      onclick: () => apply(ids) }, 'Reset tab order')] : []));
+  }
+  render();
 }
 
 function renderStatus(status, error) {

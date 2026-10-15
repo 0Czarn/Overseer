@@ -69,6 +69,7 @@ function createWindow() {
     minHeight: 480,
     backgroundColor: '#0f1318',
     title: 'Project OVERSEER',
+    icon: path.join(__dirname, 'assets', 'icon.png'),
     autoHideMenuBar: true,
     show: !SMOKE_DIR || process.env.HOI4DBG_SMOKE_SHOW === '1',   // visible smoke run: screenshots of large views
     webPreferences: {

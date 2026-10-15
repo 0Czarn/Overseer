@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Project OVERSEER: the all-seeing eye - a surveillance lens in a steel frame, crimson and black (1984 propaganda) -->
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="45%" r="70%">
+      <stop offset="0" stop-color="#2a0a0c"/>
+      <stop offset="0.55" stop-color="#120607"/>
+      <stop offset="1" stop-color="#050505"/>
+    </radialGradient>
+    <linearGradient id="steel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e9ecef"/>
+      <stop offset="0.5" stop-color="#9aa3ad"/>
+      <stop offset="1" stop-color="#4a525b"/>
+    </linearGradient>
+    <radialGradient id="iris" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ff3b30"/>
+      <stop offset="0.45" stop-color="#c3111b"/>
+      <stop offset="0.85" stop-color="#5a0308"/>
+      <stop offset="1" stop-color="#2a0104"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ff2a2a" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#ff2a2a" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="eye"><path d="M20 128 C60 62 196 62 236 128 C196 194 60 194 20 128 Z"/></clipPath>
+  </defs>
+
+  <!-- plate: a heavy rounded square with a crimson rim -->
+  <rect x="6" y="6" width="244" height="244" rx="40" fill="url(#bg)" stroke="#b3121a" stroke-width="6"/>
+  <rect x="16" y="16" width="224" height="224" rx="32" fill="none" stroke="#3a0d10" stroke-width="2"/>
+
+  <!-- watch-tower rays behind the eye -->
+  <g stroke="#b3121a" stroke-width="5" stroke-linecap="round" opacity="0.85">
+    <line x1="128" y1="30" x2="128" y2="52"/>
+    <line x1="74" y1="44" x2="84" y2="63"/>
+    <line x1="182" y1="44" x2="172" y2="63"/>
+    <line x1="34" y1="76" x2="50" y2="88"/>
+    <line x1="222" y1="76" x2="206" y2="88"/>
+    <line x1="128" y1="204" x2="128" y2="226"/>
+    <line x1="74" y1="212" x2="84" y2="193"/>
+    <line x1="182" y1="212" x2="172" y2="193"/>
+  </g>
+
+  <!-- the eye: steel almond, the lens inside -->
+  <circle cx="128" cy="128" r="92" fill="url(#glow)"/>
+  <path d="M20 128 C60 62 196 62 236 128 C196 194 60 194 20 128 Z" fill="#0b0b0d" stroke="url(#steel)" stroke-width="8"
+        stroke-linejoin="round"/>
+  <g clip-path="url(#eye)">
+    <circle cx="128" cy="128" r="50" fill="url(#iris)"/>
+    <!-- radar rings and ticks of the lens -->
+    <circle cx="128" cy="128" r="50" fill="none" stroke="#ff6b5e" stroke-width="2" opacity="0.7"/>
+    <circle cx="128" cy="128" r="38" fill="none" stroke="#ff8a7f" stroke-width="1.5" opacity="0.45"/>
+    <circle cx="128" cy="128" r="27" fill="none" stroke="#ff8a7f" stroke-width="1.5" opacity="0.35"/>
+    <g stroke="#ffb3ab" stroke-width="2" opacity="0.6">
+      <line x1="128" y1="78" x2="128" y2="88"/><line x1="128" y1="168" x2="128" y2="178"/>
+      <line x1="78" y1="128" x2="88" y2="128"/><line x1="168" y1="128" x2="178" y2="128"/>
+    </g>
+    <!-- sweeping scan -->
+    <path d="M128 128 L128 78 A50 50 0 0 1 171 103 Z" fill="#ffd1cc" opacity="0.18"/>
+    <!-- horizontal scanlines -->
+    <g stroke="#000" stroke-width="1.2" opacity="0.28">
+      <line x1="20" y1="104" x2="236" y2="104"/><line x1="20" y1="112" x2="236" y2="112"/>
+      <line x1="20" y1="120" x2="236" y2="120"/><line x1="20" y1="136" x2="236" y2="136"/>
+      <line x1="20" y1="144" x2="236" y2="144"/><line x1="20" y1="152" x2="236" y2="152"/>
+    </g>
+  </g>
+  <!-- pupil: a black lens with a cold highlight -->
+  <circle cx="128" cy="128" r="17" fill="#030303" stroke="#2b0003" stroke-width="2"/>
+  <circle cx="121" cy="121" r="5" fill="#f4f6f8" opacity="0.9"/>
+  <circle cx="135" cy="134" r="2" fill="#ff3b30"/>
+</svg>

@@ -1046,3 +1046,13 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
 .tech-tile > summary { cursor: pointer; padding: 8px 12px; font-weight: 600; }
 .tech-tile[open] > summary { border-bottom: 1px solid var(--border); }
 .tech-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+
+/* Sidebar tabs in the user's order (lib/nav-order.js) */
+.nav a.nav-dragging { opacity: 0.4; }
+.nav a.nav-drop { box-shadow: inset 0 2px 0 var(--accent); }
+.nav-reset { margin: 8px 4px 0; background: none; border: 1px dashed var(--border); color: var(--text-muted); border-radius: 6px;
+  padding: 4px 8px; font: inherit; font-size: 12px; cursor: pointer; }
+.nav-reset:hover { color: var(--text); border-color: var(--accent); }
+
+/* App logo (assets/overseer.svg - the all-seeing eye) */
+.brand-logo { width: 34px; height: 34px; flex: none; border-radius: 8px; }

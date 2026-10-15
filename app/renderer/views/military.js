@@ -2,6 +2,7 @@
 // divisions per template with their composition and stats like the division designer, free manpower, manpower in
 // the field and in training; planes per role and design with the
 // design stats and planes in the stockpile; fleets, task forces and ships per type and class (game memory).
+import { designerIcon } from '../lib/icons.js';
 import { h, notice } from '../lib/dom.js';
 import { livePanel } from '../lib/refresh.js';
 
@@ -96,8 +97,8 @@ function designerBlock(d) {
     h('summary', null, 'Division designer stats', d.estimate.length ? h('span', { class: 'muted' }, ' (estimate)') : null),
     h('div', { class: 'mil-designer-grid' }, designerLines(d.stats, d.cost).map(([title, rows]) => h('div', { class: 'mil-designer-group' },
       h('div', { class: 'mil-part-title' }, title),
-      rows.map(([label, text]) => h('div', { class: 'hoi-line' }, h('span', null, label), h('span', { class: 'hoi-num' }, text)))))),
-    d.cost ? h('div', { class: 'hoi-line mil-dd-prodcost' }, h('span', null, 'Estimated Production Cost'),
+      rows.map(([label, text]) => h('div', { class: 'hoi-line' }, h('span', { class: 'hoi-mod' }, designerIcon(label), label), h('span', { class: 'hoi-num' }, text)))))),
+    d.cost ? h('div', { class: 'hoi-line mil-dd-prodcost' }, h('span', { class: 'hoi-mod' }, designerIcon('Estimated Production Cost'), 'Estimated Production Cost'),
       h('span', { class: 'hoi-num' }, productionCostText(d.cost))) : null,
     designs.length ? h('p', { class: 'muted mil-designer-note' }, `Equipment: ${designs.join(', ')}`) : null,
     notes.map((n) => h('p', { class: 'muted mil-designer-note' }, n)),
@@ -193,9 +194,9 @@ function designerGraphic(t, names) {
     t.designer ? h('div', { class: 'mil-dd-side' },
       h('div', { class: 'mil-dd-stats' }, designerLines(t.designer.stats, t.designer.cost).map(([title, rows]) => h('div', { class: 'mil-dd-group' },
         h('div', { class: 'mil-dd-group-title' }, title),
-        rows.map(([label, text]) => h('div', { class: 'hoi-line' }, h('span', null, label), h('span', { class: 'hoi-num' }, text)))))),
+        rows.map(([label, text]) => h('div', { class: 'hoi-line' }, h('span', { class: 'hoi-mod' }, designerIcon(label), label), h('span', { class: 'hoi-num' }, text)))))),
       t.designer.cost ? h('div', { class: 'mil-pdg-cost', title: 'From the cheapest to the dearest design of each equipment the country has' },
-        h('span', null, 'Estimated Production Cost:'), h('span', { class: 'hoi-num' }, productionCostText(t.designer.cost))) : null) : null);
+        h('span', { class: 'hoi-mod' }, designerIcon('Estimated Production Cost'), 'Estimated Production Cost:'), h('span', { class: 'hoi-num' }, productionCostText(t.designer.cost))) : null) : null);
 }
 
 function designerText(t) {
@@ -357,7 +358,7 @@ export function airPanel(ctx, tag) {
       h('div', { class: 'mil-pdg-stats' },
         h('div', { class: 'mil-dd-stats' }, planeStatLines(d.stats).map(([title, rows]) => h('div', { class: 'mil-dd-group' },
           h('div', { class: 'mil-dd-group-title' }, title),
-          rows.map(([label, text]) => h('div', { class: 'hoi-line' }, h('span', null, label), h('span', { class: 'hoi-num' }, text)))))),
+          rows.map(([label, text]) => h('div', { class: 'hoi-line' }, h('span', { class: 'hoi-mod' }, designerIcon(label), label), h('span', { class: 'hoi-num' }, text)))))),
         h('div', { class: 'mil-pdg-cost' }, h('span', null, 'Production Cost:'), h('span', { class: 'hoi-num' }, cut(d.stats.build_cost_ic ?? 0, 2))),
         h('p', { class: 'muted mil-designer-note' }, `Not read from the game yet: ${PLANE_UNREAD.join(', ')}.`)));
   }

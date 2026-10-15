@@ -28,3 +28,20 @@ export const modifierIcon = (key) => img(modifierIconFile(key));
 
 /** <img> of a country value's icon (political_power, stability, ...), or null. */
 export const statIcon = (field) => img(STAT_ICONS[field]);
+
+// division designer stats (views/military.js DESIGNER_GROUPS labels) -> icon file
+const DESIGNER_ICONS = {
+  'Max Speed': 'max_speed_modifier_texticon.png', HP: 'hp_modifier_texticon.png', Organization: 'organization_texticon.png',
+  'Recovery Rate': 'recovery_rate_modifier_texticon.png', Reconnaissance: 'reconnaissance_modifier_texticon.png',
+  Suppression: 'suppression_modifier_texticon.png', Weight: 'weight_modifier_texticon.png', 'Supply Use': 'supply_use_modifier_texticon.png',
+  'Av. Reliability ≈': 'avg_reliability_modifier_texticon.png', Trickleback: 'trickleback_texticon.png',
+  'Exp. Loss': 'experience_loss_modifier_texticon.png', 'Soft Attack': 'soft_attack_texticon.png', 'Hard Attack': 'hard_attack_texticon.png',
+  'Air Attack': 'air_offence_texticon.png', Defense: 'defence_texticon.png', Breakthrough: 'breakthrough_texticon.png',
+  Armor: 'armor_texticon.png', Piercing: 'piercing_modifier_texticon.png', Initiative: 'initiative_modifier_texticon.png',
+  Entrenchment: 'entrenchment_modifier_texticon.png', 'Combat Width': 'combat_width_texticon.png', Manpower: 'manpower_texticon.png',
+  'Training Time': 'training_time_modifier_texticon.png', 'Fuel Capacity': 'fuel_capacity_modifier_texticon.png',
+  'Fuel Usage': 'fuel_usage_modifier_texticon.png', 'Estimated Production Cost': 'production_cost_modifier_texticon.png',
+};
+
+/** <img> of a division designer stat (by its label), or null - equipment rows have none. */
+export const designerIcon = (label) => img(DESIGNER_ICONS[label]);
