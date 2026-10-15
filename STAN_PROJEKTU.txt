@@ -517,6 +517,10 @@ DO ZROBIENIA (w tej kolejności)
             Waiting for the next game day / Not recording), gra (państwo, data), pełne ID kampanii (odczyt na żywo,
             live/service.running_game), do której kampanii idzie zapis, jak wybrana, przyciski. Log: "IC recorder:
             <plik> (game id ...) - <jak>". POPRAWKA: nagłówek "Groups (x/8 shown)" wypisywał "null".
+[x] URUCHAMIACZ (2026-10-15): "HOI4 Debugger.lnk" (skrót, ikona Electrona, poza gitem - ścieżka tej maszyny) ->
+            "Uruchom HOI4 Debugger.vbs" (npm start bez okna konsoli; komunikat, gdy brak node_modules).
+[ ] Combat log: od 15:57 w nowej grze SWI "Combat log amount out of range / of another country - layout does not
+            match" (71 razy) - do zbadania; IC nagrywane dalej.
 [ ] Krok G  Game Tools (narzędzia lokalne)
             (zakładka Intelligence Lab USUNIĘTA 2026-10-13 na prośbę użytkownika - była tylko na danych DEMO)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)
