@@ -30,6 +30,11 @@ PLAYER_FLAG = (0xFA0, 0x1C0)
 # 2026-10-13 by the console command `tag` (USA -> MEX -> USA): 68 -> 51 -> 68, the only value in the game state
 # following the player; works with fog of war off, where PLAYER_FLAG cannot tell the player apart.
 PLAYER_SLOT = 0x520
+# [hoi4.exe + COUNTRY_TABLE[0]] + 0x728 = std::string game_unique_id (size +0x738, capacity +0x740), int32
+# game_unique_seed at +0x720. Found 2026-10-15: saves IRQ_A, IRQ_B and the autosave of one campaign had the same
+# game_unique_id, two POL campaigns different ones; the only copy in memory near the game state.
+CAMPAIGN_ID = 0x728
+CAMPAIGN_ID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 # int32 at country + 0x484: number of states the country owns (0 = does not exist). 2026-10-10: equal to the
 # owner count of the save for 439/439 tags (99 existing, 340 not), next best location 437/439.
 OWNED_STATES = 0x484
@@ -100,6 +105,28 @@ def player_country(memory, module_base: int, tags: list[str]) -> str | None:
     raw = memory.read(table + PLAYER_SLOT, 4) if table else None
     slot = struct.unpack("<i", raw)[0] if raw else 0
     return tags[slot - 1] if 0 < slot <= len(tags) else None
+
+
+def campaign_id(memory, module_base: int) -> str | None:
+    """The campaign's id: game_unique_id of the saves (a UUID made when a new game starts, the same in every save of
+    the campaign, "playthrough_id" in the game's telemetry). None when not readable."""
+    table = _ptr(memory, module_base + COUNTRY_TABLE[0])
+    raw = memory.read(table + CAMPAIGN_ID, 0x20) if table else None
+    if not raw:
+        return None
+    size, cap = struct.unpack_from("<QQ", raw, 0x10)
+    if not 0 < size <= cap or size > 64:
+        return None
+    if cap < 16:   # MSVC std::string: short text in place, else a pointer to it
+        text = raw[:size]
+    else:
+        ptr = struct.unpack_from("<Q", raw)[0]
+        text = memory.read(ptr, size) if 0x10000 <= ptr < 0x7FFF_FFFF_FFFF else None
+    try:
+        text = text.decode("ascii") if text else None
+    except UnicodeDecodeError:
+        return None
+    return text if text and CAMPAIGN_ID_RE.fullmatch(text) else None
 
 
 def player_tags(memory, module_base: int, tags: list[str]) -> list[str]:

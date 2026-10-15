@@ -109,7 +109,7 @@ export default {
     const persist = () => savePrefs({ metric: prefs.metric, factions: prefs.factions, tags: prefs.tags, colors: prefs.colors,
       game: prefs.game, compare: prefs.compare, groupColors: prefs.groupColors, hiddenGroups: prefs.hiddenGroups,
       customColors: prefs.customColors, openGroups: prefs.openGroups });
-    const status = h('div', { class: 'gs-status muted' });
+    const status = h('div', { class: 'gs-rec' });
     const controls = h('div', { class: 'gs-controls' });
     let search = '';
     const searchInput = h('input', { type: 'search', class: 'gs-search', placeholder: 'Search tag or name',
@@ -123,6 +123,7 @@ export default {
 
     let games = [];
     let recorder = {};
+    let running = null;   // the running game: {campaign, player, date, known}
     let main = null;
     let other = null;
     let stopped = false;
@@ -207,9 +208,9 @@ export default {
         prefs.hiddenGroups = shown ? [...prefs.hiddenGroups, g] : prefs.hiddenGroups.filter((x) => x !== g);
         load();
       };
-      pickerHead.replaceChildren(`Groups (${visible.length}/${MAX_SERIES} shown)`,
+      pickerHead.replaceChildren(...[`Groups (${visible.length}/${MAX_SERIES} shown)`,
         changed ? h('button', { class: 'btn btn-small btn-ghost', title: 'Back to the factions of the game',
-          onclick: () => saveGroups({ custom: [], assign: {} }) }, 'Reset') : null);
+          onclick: () => saveGroups({ custom: [], assign: {} }) }, 'Reset') : null].filter(Boolean));   // no "null" text
       const searching = search.trim() !== '';
       pickerList.replaceChildren(
         h('div', { class: 'gs-new' }, input, h('button', { class: 'btn btn-small', onclick: add }, 'Add')),
@@ -236,11 +237,63 @@ export default {
         }));
     }
 
+    async function requestRecording(body) {
+      try {
+        const res = await ctx.api.post('/api/summary/recording', body);
+        recorder = res.data.recorder;
+        running = res.data.running ?? null;
+        renderStatus();
+      } catch (err) {
+        charts.prepend(notice('warn', `Recording not changed: ${err.message}`));
+      }
+    }
+
+    // What is recorded and why (the game's campaign id, the date, the user's choice), and the user's override:
+    // a new campaign file or another recorded campaign from the next game day on.
+    // The recording panel: the running game and its campaign id (read live), the recorded campaign it goes to and how
+    // that was decided (the id, the date, the user's choice), and the user's override - a new campaign file or another
+    // recorded campaign from the next game day on.
     function renderStatus() {
-      const rec = games.find((g) => g.active);
-      status.textContent = recorder.recording
-        ? `Recording ${rec?.player ?? ''} campaign - last day ${recorder.last ?? '…'}`
-        : `Not recording${recorder.error ? `: ${recorder.error}` : ''} - start or load a game (the recorder reads it once a day).`;
+      const byId = (id) => games.find((g) => g.id === id);
+      const rec = byId(recorder.recording);
+      const known = (running?.known ?? []).map(byId).filter(Boolean);
+      const live = running && running.date;
+      const on = live && rec && (!running.campaign || running.campaign === recorder.campaign);
+      const state = on ? ['gs-rec-on', 'Recording'] : live ? ['gs-rec-wait', 'Waiting for the next game day']
+        : ['gs-rec-off', 'Not recording'];
+      const target = on ? `${gameLabel(rec)} · started ${startedText(rec.created)}`
+        : known.length ? `${gameLabel(known[0])} (continues - recognised by the campaign id)`
+          : live ? 'a new campaign (this campaign id was not recorded before)' : '-';
+      const pending = recorder.pending === 'new' ? 'a new recording'
+        : recorder.pending ? `continuing ${byId(recorder.pending) ? gameLabel(byId(recorder.pending)) : recorder.pending}` : null;
+      const others = games.filter((g) => !g.active);
+      const cont = (e) => {
+        const g = byId(e.target.value);
+        e.target.value = '';
+        if (g && window.confirm(`Record the running game into ${gameLabel(g)} from the next game day on?\n\n`
+          + 'Days of that campaign from that game day on are replaced.')) requestRecording({ action: 'continue', game: g.id });
+      };
+      const row = (label, ...value) => [h('dt', null, label), h('dd', null, ...value)];
+      status.className = `gs-rec ${state[0]}`;
+      status.replaceChildren(...[
+        h('div', { class: 'gs-rec-head' }, h('span', { class: 'gs-rec-dot' }), h('strong', null, state[1]),
+          !live && recorder.error ? h('span', { class: 'muted' }, ` - ${recorder.error}`) : null,
+          !live ? h('span', { class: 'muted' }, ' - start or load a game; the recorder reads it once a game day.') : null),
+        h('dl', { class: 'gs-rec-grid' },
+          ...row('Game running', live ? `${running.player ?? '?'} · ${running.date}` : 'none'),
+          ...row('Campaign ID', live && running.campaign ? h('code', { class: 'gs-rec-id' }, running.campaign)
+            : live ? 'not readable - the campaign is matched by the date' : '-'),
+          ...row('Recorded into', target),
+          ...row('Chosen', on && recorder.how ? recorder.how : '-')),
+        pending ? h('div', { class: 'gs-pending' }, `Next game day: ${pending}`,
+          h('button', { class: 'btn btn-small btn-ghost', onclick: () => requestRecording({ action: 'cancel' }) }, 'Cancel')) : null,
+        h('div', { class: 'gs-rec-actions' },
+          h('button', { class: 'btn btn-small', title: 'Record the running game as a new campaign from the next game day on',
+            onclick: () => requestRecording({ action: 'new' }) }, 'Start new recording'),
+          others.length ? h('select', { class: 'gs-rec-continue', title: 'Record the running game into a recorded campaign', onchange: cont },
+            h('option', { value: '' }, 'Continue in…'),
+            others.map((g) => h('option', { value: g.id }, `${gameLabel(g)} · started ${startedText(g.created)}`))) : null),
+      ].filter(Boolean));   // replaceChildren would print a null
     }
 
     function select(options, value, onChange, empty) {
@@ -430,9 +483,10 @@ export default {
         if (stopped) return;
         games = res.data.games;
         recorder = res.data.recorder;
+        running = res.data.running ?? null;
         if (!games.some((g) => g.id === prefs.game)) prefs.game = (games.find((g) => g.active) ?? games[0])?.id;
         if (prefs.compare && (!games.some((g) => g.id === prefs.compare) || prefs.compare === prefs.game)) prefs.compare = null;
-        renderStatus();
+        if (!status.contains(document.activeElement)) renderStatus();   // do not close the open campaign list
         const focused = document.activeElement;   // do not close an open <select> (a focused button is fine)
         if (!(controls.contains(focused) && focused.tagName === 'SELECT')) renderControls();
         main = prefs.game ? await fetchGame(prefs.game) : null;

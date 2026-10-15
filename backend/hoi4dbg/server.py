@@ -112,6 +112,7 @@ def build_routes(svc: DebuggerService) -> list[Route]:
             [m for m in (q.get("modules") or [""])[0].split(",") if m],
             [b for b in (q.get("blueprints") or [""])[0].split(",") if b])),
         r("GET", "/api/summary/games", lambda q, b: svc.summary_games()),
+        r("POST", "/api/summary/recording", lambda q, b: svc.summary_recording(b)),
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})", lambda q, b, gid: svc.summary_game(
             gid, (q.get("metric") or ["mil"])[0], [t for t in (q.get("tags") or [""])[0].upper().split(",") if t],
             (q.get("factions") or [""])[0] == "1", (q.get("groups_from") or [""])[0] or None)),

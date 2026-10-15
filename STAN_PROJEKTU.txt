@@ -503,6 +503,20 @@ DO ZROBIENIA (w tej kolejności)
             POPRAWKA przy okazji: lista kampanii brała plik <id>.actions.jsonl za kampanię (glob *.jsonl).
             [ ] linie produkcji fabryk (co produkują) - nie odczytywane
             [ ] potwierdzić na żywo: kilka dni gry z otwartą aplikacją -> wpisy w zakładce
+[x] ROZPOZNAWANIE KAMPANII PO ID (2026-10-15, prośba użytkownika): gra ma game_unique_id (UUID nowej gry, ten sam
+            we wszystkich zapisach kampanii - sprawdzone IRQ_A/IRQ_B/autosave; dwie kampanie POL = różne ID). W pamięci:
+            [hoi4.exe+0x332F260]+0x728 = std::string (rozmiar +0x738, pojemność +0x740), ziarno int32 +0x720
+            (pointers.campaign_id). Rejestrator zapisuje ID w meta pliku kampanii ("campaign") i wybiera plik po ID
+            bez limitu daty (wczytany wcześniejszy zapis tej kampanii = wycięcie dni od tej daty); bez ID - po dacie
+            jak dotąd (do 31 dni). Pliki sprzed tej zmiany: tylko bieżący plik sesji dostaje ID.
+            RĘCZNIE w Game summary: "Start new recording" (nowy plik od następnego dnia gry), "Continue in..." (dopisz
+            do wybranej kampanii, dni od tej daty zastąpione, ID zapamiętane), "Cancel"; status pokazuje, jak
+            wybrano plik (po ID / po dacie / ręcznie). POST /api/summary/recording.
+            POTWIERDZONE NA ŻYWO: plik IRQ dostał "campaign" = 64f408de-...; po wczytaniu IRQ_A ten sam plik (dni wycięte).
+            PANEL "Recording" na górze Game summary (prośba użytkownika - mały napis był niewidoczny): stan (Recording /
+            Waiting for the next game day / Not recording), gra (państwo, data), pełne ID kampanii (odczyt na żywo,
+            live/service.running_game), do której kampanii idzie zapis, jak wybrana, przyciski. Log: "IC recorder:
+            <plik> (game id ...) - <jak>". POPRAWKA: nagłówek "Groups (x/8 shown)" wypisywał "null".
 [ ] Krok G  Game Tools (narzędzia lokalne)
             (zakładka Intelligence Lab USUNIĘTA 2026-10-13 na prośbę użytkownika - była tylko na danych DEMO)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)

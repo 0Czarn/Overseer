@@ -918,6 +918,17 @@ class LiveService:
         except LiveError:
             return None
 
+    def running_game(self) -> dict | None:
+        """{"campaign", "player", "date"} of the running game (pointers.campaign_id), None when not readable."""
+        def read(mem, base, tags, _p):
+            t = ic_history.day_number(pointers.read_date(mem, base))
+            return {"campaign": pointers.campaign_id(mem, base), "player": pointers.player_country(mem, base, tags),
+                    "date": ic_history.date_text(t) if t is not None else None}
+        try:
+            return self._game_memory(read)
+        except LiveError:
+            return None
+
     # -- combat log for every country (code_patch.py) ----------------------------------------------
     def _patch_enabled(self) -> bool:
         try:
@@ -1036,7 +1047,8 @@ class LiveService:
                     designs[tag] = pointers.plane_design_ids(mem, c)
                 except pointers.PointerError:
                     continue
-            return {"t": t, "player": player, "countries": out, "factions": factions, "losses": losses,
+            return {"t": t, "player": player, "campaign": pointers.campaign_id(mem, base), "countries": out,
+                    "factions": factions, "losses": losses,
                     "designs": {k: v for k, v in designs.items() if v}}
         return self._game_memory(read)
 

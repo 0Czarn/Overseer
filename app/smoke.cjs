@@ -141,6 +141,8 @@ function runSmoke(win, outDir, quit) {
               lines: document.querySelectorAll('.lc-line').length, countries: document.querySelectorAll('.gs-country').length,
               notice: document.querySelector('.gs-charts .notice')?.textContent ?? null })`);
             if (!info.summary.charts && !info.summary.notice) result.failures.push(`${size.name}/summary: shows nothing`);
+            info.summary.recording = await wc.executeJavaScript(`document.querySelector('.gs-rec-head')?.textContent ?? null`);
+            if (!info.summary.recording) result.failures.push(`${size.name}/summary: no recording panel`);
             if (info.summary.charts === 2) {   // hover one chart: the values of the day show in both
               info.summary.hover = await wc.executeJavaScript(`(() => {
                 const hit = document.querySelector('.lc-hit'); const r = hit.getBoundingClientRect();

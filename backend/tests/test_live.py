@@ -1193,6 +1193,14 @@ class IdeaPointerTests(unittest.TestCase):
         self.assertEqual(pointers.player_country(mem, module, ["GER", "ENG", "USA"]), "USA")
         mem.put(table + pointers.PLAYER_SLOT, "i", 9)
         self.assertIsNone(pointers.player_country(mem, module, ["GER", "ENG", "USA"]))
+        uid = b"64f408de-a59a-417e-9eb3-ac142f94b379"   # game_unique_id of the IRQ_A / IRQ_B saves
+        mem.put(BASE + 0x200, "36s", uid)
+        mem.put(table + pointers.CAMPAIGN_ID, "Q", BASE + 0x200)
+        mem.put(table + pointers.CAMPAIGN_ID + 0x10, "Q", 36)
+        mem.put(table + pointers.CAMPAIGN_ID + 0x18, "Q", 47)
+        self.assertEqual(pointers.campaign_id(mem, module), uid.decode())
+        mem.put(table + pointers.CAMPAIGN_ID + 0x10, "Q", 0)   # not set yet
+        self.assertIsNone(pointers.campaign_id(mem, module))
         country, state, tree, array, wpa = BASE + 0x100, BASE + 0x800, BASE + 0x900, BASE + 0xA00, BASE + 0xB00
         mem.put(country + pointers.FOCUS["state"], "Q", state)
         mem.put(country + pointers.FOCUS["tree"], "Q", tree)

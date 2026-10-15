@@ -906,7 +906,21 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
   background: #6b4a8a; border-radius: 2px; }
 
 /* Game summary: IC history charts */
-.gs-status { margin: 0 0 10px; font-size: 13px; }
+.gs-rec { margin: 0 0 12px; padding: 10px 14px; border: 1px solid var(--border); border-left: 4px solid var(--text-muted);
+  border-radius: 8px; background: var(--bg-elev); font-size: 13px; display: flex; flex-direction: column; gap: 8px; }
+.gs-rec-on { border-left-color: var(--ok); }
+.gs-rec-wait { border-left-color: var(--warn); }
+.gs-rec-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 14px; }
+.gs-rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--text-muted); flex: none; }
+.gs-rec-on .gs-rec-dot { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 30%, transparent); }
+.gs-rec-wait .gs-rec-dot { background: var(--warn); }
+.gs-rec-grid { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 14px; margin: 0; }
+.gs-rec-grid dt { color: var(--text-muted); }
+.gs-rec-grid dd { margin: 0; overflow-wrap: anywhere; }
+.gs-rec-id { font-family: var(--mono); font-size: 13px; user-select: all; }
+.gs-pending { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--accent); }
+.gs-rec-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.gs-rec-continue { max-width: min(420px, 100%); }
 .gs-controls { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; font-size: 13px; }
 .gs-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
 .gs-field { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }

@@ -1366,7 +1366,32 @@ class DebuggerService:
         """Recorded campaigns (IC history, ic_history.py) and what the recorder is doing."""
         recorder = self.ic_recorder.status() if self.ic_recorder else {"recording": None, "last": None,
                                                                         "error": "Live game access is disabled"}
-        return {"data": {"games": self.ic_history.games(), "recorder": recorder}}
+        games = self.ic_history.games()
+        running = self.live.running_game() if self.live is not None else None
+        if running:   # the recorded campaigns of the running game (by its campaign id)
+            running["known"] = [g["id"] for g in games if running["campaign"] and g["campaign"] == running["campaign"]]
+        return {"data": {"games": games, "recorder": recorder, "running": running}}
+
+    def summary_recording(self, data) -> dict:
+        """The user's override of the recorder for the next game day: {"action": "new"} starts a new campaign file,
+        {"action": "continue", "game": id} appends to a recorded one, {"action": "cancel"} drops the request."""
+        data = data if isinstance(data, dict) else {}
+        action, gid = data.get("action"), data.get("game")
+        try:
+            if action == "new":
+                self.ic_history.request(None)
+            elif action == "continue" and isinstance(gid, str):
+                self.ic_history.request(gid)
+            elif action == "cancel":
+                self.ic_history.cancel_request()
+            else:
+                raise ReportError("action must be new, continue (with game) or cancel")
+        except FileNotFoundError:
+            raise NotFound(f"No recorded campaign {gid}") from None
+        except ValueError as exc:
+            raise ReportError(str(exc)) from None
+        self.log.info("Game summary: recording request %s%s", action, f" {gid}" if action == "continue" else "")
+        return self.summary_games()
 
     def summary_game(self, gid: str, metric: str = "mil", tags: list[str] | None = None, by_faction: bool = False,
                      groups_from: str | None = None) -> dict:

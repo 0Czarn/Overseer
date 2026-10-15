@@ -59,6 +59,47 @@ class IcHistoryTest(unittest.TestCase):
         gid = self.history.add(self.sample(t))
         self.assertEqual(IcHistory(self.history.folder).add(self.sample(t + 3)), gid)
 
+    def test_the_campaign_id_decides_however_far_the_date(self):
+        t = day(1936, 1, 1)
+        a = self.history.add({**self.sample(t), "campaign": "A"})
+        b = self.history.add({**self.sample(t + 1), "campaign": "B"})   # another campaign of the same country
+        self.assertNotEqual(a, b)
+        later = IcHistory(self.history.folder)                       # app restarted, a save of A a year later
+        self.assertEqual(later.add({**self.sample(t + 400), "campaign": "A"}), a)
+        self.assertEqual(later.how, "recognised by the campaign id")
+        self.assertEqual(later.add({**self.sample(t + 200), "campaign": "A"}), a)   # an earlier save of A
+        self.assertEqual(later.game(a)["dates"], ["1936.01.01", ic_history.date_text(t + 200)])
+        self.assertEqual(later.add({**self.sample(t + 2), "campaign": "B"}), b)
+        self.assertEqual([g["campaign"] for g in later.games() if g["id"] == b], ["B"])
+
+    def test_a_file_recorded_without_the_id_is_continued_and_noted(self):
+        t = day(1936, 1, 1)
+        gid = self.history.add(self.sample(t))
+        self.assertEqual(self.history.add({**self.sample(t + 1), "campaign": "A"}), gid)
+        self.assertEqual(IcHistory(self.history.folder).add({**self.sample(t + 90), "campaign": "A"}), gid)
+        self.assertNotEqual(IcHistory(self.history.folder).add(self.sample(t + 90)), gid)   # no id: by the date, too far
+
+    def test_the_users_new_recording_and_continue(self):
+        t = day(1936, 1, 1)
+        a = self.history.add({**self.sample(t), "campaign": "A"})
+        self.history.add({**self.sample(t + 1), "campaign": "A"})
+        self.history.request(None)
+        new = self.history.add({**self.sample(t + 2), "campaign": "A"})
+        self.assertNotEqual(new, a)
+        self.assertEqual(self.history.how, "new recording started manually")
+        self.assertEqual(self.history.add({**self.sample(t + 3), "campaign": "A"}), new)
+        self.assertEqual(IcHistory(self.history.folder).add({**self.sample(t + 4), "campaign": "A"}), new)   # newest
+        self.history.request(a)
+        self.assertEqual(self.history.add({**self.sample(t + 1), "campaign": "A"}), a)
+        self.assertEqual(self.history.how, "chosen manually")
+        self.assertEqual(self.history.game(a)["dates"], ["1936.01.01", "1936.01.02"])   # day 2 recorded again
+        self.assertEqual(IcHistory(self.history.folder).add({**self.sample(t + 5), "campaign": "A"}), a)   # linked last
+        self.history.request(None)
+        self.history.cancel_request()
+        self.assertEqual(self.history.add({**self.sample(t + 2), "campaign": "A"}), a)
+        with self.assertRaises(FileNotFoundError):
+            self.history.request("NOPE_1")
+
     def test_bad_ids_are_refused(self):
         with self.assertRaises(ValueError):
             self.history.game("../secret")

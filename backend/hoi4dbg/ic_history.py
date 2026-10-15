@@ -22,6 +22,7 @@ import os
 import re
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 
 from . import actions as actions_mod
@@ -207,6 +208,7 @@ class IcHistory:
             meta = next((r["meta"] for r in rows if "meta" in r), {})
             days = [r for r in rows if "t" in r]
             out.append({"id": path.stem, "player": meta.get("player"), "created": meta.get("created"),
+                        "campaign": meta.get("campaign"), "linked": meta.get("linked"),
                         "first": days[0]["d"] if days else None, "last": days[-1]["d"] if days else None,
                         "last_t": days[-1]["t"] if days else None, "days": len(days), "active": path.stem == self.active})
         return sorted(out, key=lambda g: g["created"] or "", reverse=True)
@@ -263,23 +265,79 @@ class IcHistory:
             (self.folder / f"{gid}.designs.json").unlink(missing_ok=True)
             (self.folder / f"{gid}.actions.jsonl").unlink(missing_ok=True)
 
-    def _choose(self, player: str, t: int) -> str:
-        """The campaign file a sample of `player` at day `t` belongs to (cutting replayed days)."""
-        candidates = [g for g in self.games() if g["player"] == player and g["last_t"] is not None]
+    def _choose(self, player: str, t: int, campaign: str | None = None) -> str:
+        """The campaign file a sample of `player` at day `t` of the game's campaign id `campaign` belongs to (cutting
+        replayed days). With the id every save of a campaign is recognised, however far its date; without it (another
+        game version) a date at most NEW_CAMPAIGN_GAP days from the last recorded one of the same country is guessed
+        to continue it. The user's request (request()) goes first."""
+        pending, self.pending = self.pending, None
+        if pending:
+            gid = pending.get("continue")
+            if gid and self._path(gid).exists():
+                self._continue(gid, t, player=player, campaign=campaign, linked=datetime.now().isoformat(" ", "microseconds"))
+                self.how = "chosen manually"
+                return gid
+            return self._new(player, t, campaign, "new recording started manually")
+        games = [g for g in self.games() if g["player"] == player]
+        if campaign:
+            same = sorted((g for g in games if g["campaign"] == campaign),   # the current file, else the newest one
+                          key=lambda g: (g["id"] == self.active, max(g["created"] or "", g["linked"] or "")), reverse=True)
+            if same:
+                self._continue(same[0]["id"], t)
+                self.how = "recognised by the campaign id"
+                return same[0]["id"]
+            games = [g for g in games if g["id"] == self.active and not g["campaign"]]   # recorded before the id was read
+        candidates = [g for g in games if g["last_t"] is not None and not (campaign and g["campaign"])]
         if self.active:
             candidates.sort(key=lambda g: g["id"] != self.active)   # the current file first
         for g in candidates:
-            if g["last_t"] < t <= g["last_t"] + NEW_CAMPAIGN_GAP:
-                return g["id"]
             # only the file of this session is cut: an older campaign of the same country is never touched
-            if g["id"] == self.active and t <= g["last_t"] and g["last_t"] - t <= NEW_CAMPAIGN_GAP:
-                self._cut(g["id"], t)
+            if g["last_t"] < t <= g["last_t"] + NEW_CAMPAIGN_GAP or (
+                    g["id"] == self.active and t <= g["last_t"] and g["last_t"] - t <= NEW_CAMPAIGN_GAP):
+                self._continue(g["id"], t, campaign=campaign)
+                self.how = "continued by the date (no campaign id)"
                 return g["id"]
-        gid = f"{player}_{date_text(t).replace('.', '-')}_{time.strftime('%Y%m%d-%H%M%S')}"
+        return self._new(player, t, campaign, "new campaign" if campaign else "new campaign (no campaign id)")
+
+    def _new(self, player: str, t: int, campaign: str | None, how: str) -> str:
+        gid = base = f"{player}_{date_text(t).replace('.', '-')}_{time.strftime('%Y%m%d-%H%M%S')}"
+        n = 1
+        while self._path(gid).exists():   # two new files within a second
+            n += 1
+            gid = f"{base}-{n}"
         self.folder.mkdir(parents=True, exist_ok=True)
-        meta = {"meta": {"player": player, "created": time.strftime("%Y-%m-%d %H:%M:%S"), "start": date_text(t)}}
-        self._path(gid).write_text(json.dumps(meta) + "\n", encoding="utf-8")
+        meta = {"player": player, "created": time.strftime("%Y-%m-%d %H:%M:%S"), "start": date_text(t),
+                "linked": datetime.now().isoformat(" ", "microseconds")}   # the order of the files of one campaign
+        if campaign:
+            meta["campaign"] = campaign
+        self._path(gid).write_text(json.dumps({"meta": meta}) + "\n", encoding="utf-8")
+        self.how = how
         return gid
+
+    def _continue(self, gid: str, t: int, **meta) -> None:
+        """Appending to `gid` from day `t` on: later recorded days are cut, `meta` values (if not None) noted."""
+        rows = self._lines(gid)
+        if any("t" in r and r["t"] >= t for r in rows):
+            self._cut(gid, t)
+            rows = self._lines(gid)
+        meta = {k: v for k, v in meta.items() if v is not None}
+        head = next((r["meta"] for r in rows if "meta" in r), None)
+        if meta and head is not None and any(head.get(k) != v for k, v in meta.items()):
+            head.update(meta)
+            self._path(gid).write_text("".join(json.dumps(r, separators=(",", ":")) + "\n" for r in rows),
+                                       encoding="utf-8")
+
+    def request(self, gid: str | None) -> None:
+        """The user's choice for the next recorded day: None = a new campaign file, else continue `gid` (the days
+        recorded from that day on are cut, the campaign id is noted so that the game is recognised later)."""
+        if gid is not None and not self._path(gid).exists():
+            raise FileNotFoundError(gid)
+        with self._lock:
+            self.pending = {"continue": gid}
+
+    def cancel_request(self) -> None:
+        with self._lock:
+            self.pending = None
 
     def _cut(self, gid: str, t: int) -> None:
         rows = [r for r in self._lines(gid) if "t" not in r or r["t"] < t]
@@ -362,18 +420,25 @@ class IcHistory:
     def add(self, sample: dict) -> str:
         """Appends {"t", "player", "countries", "factions"?} and returns the campaign id."""
         with self._lock:
-            if self.active is None or sample["t"] <= self._last_t or sample["player"] != self._player:
-                self.active = self._choose(sample["player"], sample["t"])
+            campaign = sample.get("campaign")
+            if (self.active is None or sample["t"] <= self._last_t or sample["player"] != self._player
+                    or campaign != self._campaign or self.pending):
+                self.active = self._choose(sample["player"], sample["t"], campaign)
+                self.campaign = campaign
             row = {"t": sample["t"], "d": date_text(sample["t"]), "c": sample["countries"]}
             if sample.get("factions") is not None:
                 row["f"] = sample["factions"]
             with self._path(self.active).open("a", encoding="utf-8") as f:
                 f.write(json.dumps(row, separators=(",", ":")) + "\n")
-            self._last_t, self._player = sample["t"], sample["player"]
+            self._last_t, self._player, self._campaign = sample["t"], sample["player"], campaign
             return self.active
 
     _last_t = -1
     _player: str | None = None
+    _campaign: str | None = None
+    campaign: str | None = None   # the game's campaign id of the file being recorded
+    how: str | None = None        # how that file was chosen (_choose)
+    pending: dict | None = None   # the user's request for the next day (request)
 
 
 class IcRecorder:
@@ -390,6 +455,7 @@ class IcRecorder:
         self.actions = actions             # tags -> {tag: snapshot} (Players actions), None = off
         self._snaps: dict[str, dict] = {}  # last snapshot per watched country
         self._snaps_gid: str | None = None
+        self._chosen: tuple | None = None   # (file, how it was chosen) last logged
 
     def start(self) -> None:
         threading.Thread(target=self._run, name="ic-recorder", daemon=True).start()
@@ -398,8 +464,10 @@ class IcRecorder:
         self._stop.set()
 
     def status(self) -> dict:
-        return {"recording": self.history.active, "last": date_text(self.last_t) if self.last_t is not None else None,
-                "error": self.error}
+        h = self.history
+        return {"recording": h.active, "last": date_text(self.last_t) if self.last_t is not None else None,
+                "error": self.error, "campaign": h.campaign, "how": h.how,
+                "pending": None if h.pending is None else (h.pending.get("continue") or "new")}
 
     def step(self) -> bool:
         """One poll: records when a game day has passed; True when a sample was written. Only a date moving forward by
@@ -433,6 +501,10 @@ class IcRecorder:
             self._losses = losses
         designs = sample.pop("designs", None)
         gid = self.history.add(sample)
+        if (gid, self.history.how) != self._chosen:
+            self._chosen = (gid, self.history.how)
+            self.log.info("IC recorder: %s (game id %s) - %s", gid, sample.get("campaign") or "not readable",
+                          self.history.how)
         if designs is not None:
             self.history.note_designs(gid, t, designs)
         if self.actions is not None:
