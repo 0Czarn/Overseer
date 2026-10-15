@@ -18,6 +18,7 @@ import logs from './views/logs.js';
 import summary from './views/summary.js';
 import actions from './views/actions.js';
 import { loadNavOrder, moveTab, orderTabs, saveNavOrder } from './lib/nav-order.js';
+import { mountEye } from './lib/eye.js';
 
 const VIEWS = [dashboard, summary, actions, countries, countryEditor, research, construction, doctrines, stateEditor, focus, equipment, tools, logs];
 const STATUS_INTERVAL_MS = 3000;
@@ -215,6 +216,7 @@ function syncToggles() {
 
 async function init() {
   buildNav();
+  mountEye(document.querySelector('.main'));
   applyCompact();
   document.getElementById('toggle-compact').addEventListener('change', (e) => ctx.setState({ compact: e.target.checked }));
   document.getElementById('toggle-ontop').addEventListener('change', (e) => ctx.setAlwaysOnTop(e.target.checked));

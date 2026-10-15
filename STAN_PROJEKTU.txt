@@ -553,6 +553,10 @@ DO ZROBIENIA (w tej kolejności)
             (npx electron ...) -> app/assets/icon.png + icon.ico (16-256 px): okno, pasek zadań, skrót, logo w pasku bocznym.
 [x] IKONY ZAKŁADEK (2026-10-15): pasek boczny bez dwuznakowych skrótów - ikony z modów (app.js NAV_ICONS); skrót
             zostaje tylko dla widoku bez ikony.
+[x] STYL "1984" + OKO W TLE (2026-10-15): lib/eye.js - duże oko za widokami (22% krycia, linie "teleekranu",
+            napis THE OVERSEER IS WATCHING), tęczówka śledzi kursor (irisShift, requestAnimationFrame), mrugnięcie co
+            7-16 s (bez animacji przy "reduce motion"). Paleta: czerń, karmin #d41f2c, stal, kolor papieru; nagłówki
+            Bahnschrift SemiCondensed wersalikami; karty lekko przezroczyste; czerwony pasek aktywnej zakładki.
 [ ] Krok G  Game Tools (narzędzia lokalne)
             (zakładka Intelligence Lab USUNIĘTA 2026-10-13 na prośbę użytkownika - była tylko na danych DEMO)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)

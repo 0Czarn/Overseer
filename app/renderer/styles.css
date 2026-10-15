@@ -1,22 +1,25 @@
 :root {
-  --bg: #0f1318;
-  --bg-elev: #161b22;
-  --bg-elev-2: #1d232c;
-  --border: #2a313c;
-  --text: #e6e9ee;
-  --text-muted: #8b95a3;
-  --accent: #d4a24c;
-  --accent-soft: rgba(212, 162, 76, 0.14);
+  /* 1984: black, crimson, steel and newsprint */
+  --bg: #090808;
+  --bg-elev: #141212;
+  --bg-elev-2: #1d1a1a;
+  --border: #352b2b;
+  --text: #ece6da;
+  --text-muted: #978e84;
+  --accent: #d41f2c;
+  --accent-soft: rgba(212, 31, 44, 0.16);
+  --steel: #9aa3ad;
   --ok: #4cc38a;
   --warn: #e0b341;
   --bad: #ef6461;
-  --info: #5aa9e6;
+  --info: #8fa6bb;
   --debug: #b48cf2;
   --radius: 10px;
   --gap: 16px;
   --pad: 18px;
   --sidebar: 232px;
   --font: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --display: "Bahnschrift SemiCondensed", "Bahnschrift", "Arial Narrow", var(--font);
   --mono: "Cascadia Mono", Consolas, monospace;
   color-scheme: dark;
 }
@@ -53,7 +56,7 @@ p { margin: 0; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 16px; border-bottom: 1px solid var(--border); }
 .brand-mark {
   width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center;
-  background: var(--accent); color: #1a1408; font-weight: 800; font-size: 13px; flex: none;
+  background: var(--accent); color: #fff6ee; font-weight: 800; font-size: 13px; flex: none;
 }
 .brand-text { font-weight: 700; letter-spacing: 0.02em; white-space: nowrap; }
 .nav { display: flex; flex-direction: column; padding: 10px 8px; gap: 2px; overflow-y: auto; flex: 1; }
@@ -166,7 +169,7 @@ textarea.input { resize: vertical; width: 100%; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-small { padding: 4px 10px; font-size: 12.5px; }
 .btn-ghost { background: transparent; }
-.btn-primary { background: var(--accent); color: #1a1408; border-color: var(--accent); align-self: flex-start; }
+.btn-primary { background: var(--accent); color: #fff6ee; border-color: var(--accent); align-self: flex-start; }
 .btn-row { display: flex; gap: 6px; justify-content: flex-end; }
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
 .toolbar .input[type="search"] { flex: 1; min-width: 160px; }
@@ -1061,3 +1064,28 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
 .nav-img { width: 22px; height: 22px; object-fit: contain; background: none; border: 0; padding: 0; image-rendering: auto; }
 .nav a:not(.active) .nav-img { opacity: 0.75; filter: saturate(0.7); }
 .nav a:hover .nav-img, .nav a.active .nav-img { opacity: 1; filter: none; }
+
+/* --- 1984 look: the Overseer's eye behind the views (lib/eye.js), telescreen scanlines, condensed capitals --- */
+.main { position: relative; background: radial-gradient(ellipse at 50% 45%, #1a0b0c 0%, var(--bg) 70%); }
+.topbar, .view, .view-loading { position: relative; z-index: 1; }
+.bg-eye { position: absolute; inset: 0; z-index: 0; pointer-events: none; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 18px; opacity: 0.22; overflow: hidden; }
+.bg-eye::after { content: ""; position: absolute; inset: 0;
+  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.35) 0 1px, transparent 1px 3px); }
+.bg-eye-svg { width: min(78%, 980px); height: auto; filter: drop-shadow(0 0 40px rgba(212, 31, 44, 0.45)); }
+.eye-iris { transition: transform 0.12s ease-out; }
+.eye-lid { transform-box: view-box; transform-origin: 300px 200px; transform: scaleY(0); transition: transform 0.12s ease-in; }
+.eye-lid.eye-blink { transform: scaleY(1); }
+.bg-eye-slogan { font: 700 clamp(14px, 2.2vw, 30px) var(--display); letter-spacing: 0.5em; color: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .eye-iris, .eye-lid { transition: none; } }
+
+.card, .tool, .stat-tile { background: color-mix(in srgb, var(--bg-elev) 90%, transparent); }
+.card-head h2, .view-header h1, .brand-text, h4 { font-family: var(--display); text-transform: uppercase; letter-spacing: 0.08em; }
+.view-header h1 { font-size: 1.7em; font-weight: 700; }
+.card-head { border-bottom-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+.sidebar { border-top: 4px solid var(--accent); background: #0e0c0c; }
+.brand-text { font-weight: 700; letter-spacing: 0.14em; }
+.nav-label { font-family: var(--display); letter-spacing: 0.04em; }
+.nav a.active { background: linear-gradient(90deg, rgba(212, 31, 44, 0.28), rgba(212, 31, 44, 0.05)); color: #fff1e8;
+  box-shadow: inset 3px 0 0 var(--accent); }
+.topbar { background: rgba(10, 9, 9, 0.85); border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); }
