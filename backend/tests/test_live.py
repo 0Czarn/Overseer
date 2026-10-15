@@ -11,7 +11,7 @@ from pathlib import Path
 
 from hoi4dbg.integration import memory
 from hoi4dbg.integration.memory import ENCODINGS, needles_for, scan
-from hoi4dbg.live import console, layout, pointers
+from hoi4dbg.live import code_patch, console, layout, pointers
 from hoi4dbg.live.calibration import CalibrationError, FieldCalibration
 from hoi4dbg.live.service import LiveError, LiveService
 
@@ -63,6 +63,12 @@ class MemoryModuleTests(unittest.TestCase):
                           "PROCESS_ALL_ACCESS", "CreateRemoteThread"):
             self.assertNotIn(forbidden, source)
         self.assertEqual(memory.ACCESS_RIGHTS, 0x0400 | 0x0010)
+
+    def test_only_the_code_patcher_changes_page_protection(self):
+        from hoi4dbg.integration import code_write, memory_write
+        self.assertNotIn("_k32.VirtualProtectEx", Path(memory_write.__file__).read_text(encoding="utf-8"))
+        self.assertIn("_k32.VirtualProtectEx", Path(code_write.__file__).read_text(encoding="utf-8"))
+        self.assertEqual(code_write.MAX_PATCH, 16)
 
     def test_encodings_round_trip(self):
         for enc in ENCODINGS.values():
@@ -709,6 +715,36 @@ class CountryTableTests(TempDirMixin, unittest.TestCase):
             self.svc.write_value("stability", 0.5)
         self.assertEqual(ctx.exception.code, "mode_unknown")
         self.assertEqual(self.writes, [])
+
+    def test_combat_log_patch_is_single_player_only_remembered_and_undone(self):
+        region, at = self.mem.regions_data[self.MODULE], code_patch.GATE_RVA
+        region[at:at + 5] = code_patch.ORIGINAL
+
+        def replace(address, old, new):
+            self.assertEqual(self.mem.read(address, len(old)), old)
+            region[address - self.MODULE:address - self.MODULE + len(new)] = new
+        self.mem.replace = replace
+        self.svc._open_patcher = lambda pid: self.mem
+        self.assertEqual(self.svc.combat_log_patch(), {"enabled": False, "state": "off", "error": None})
+        self.svc.ensure_combat_log_patch()                                       # not turned on: nothing
+        self.assertEqual(bytes(region[at:at + 5]), code_patch.ORIGINAL)
+        self.assertEqual(self.svc.set_combat_log_patch(True), {"enabled": True, "state": "on", "error": None})
+        self.assertEqual(bytes(region[at:at + 5]), code_patch.PATCHED)
+        region[at:at + 5] = code_patch.ORIGINAL                                  # the game restarted
+        self.svc.ensure_combat_log_patch()
+        self.assertEqual(bytes(region[at:at + 5]), code_patch.PATCHED)
+        self.assertEqual(self.svc.set_combat_log_patch(False)["state"], "off")
+        self.assertEqual(bytes(region[at:at + 5]), code_patch.ORIGINAL)
+        self.game_log("MULTIPLAYER")
+        with self.assertRaises(LiveError) as ctx:
+            self.svc.set_combat_log_patch(True)
+        self.assertEqual(ctx.exception.code, "multiplayer")
+        self.assertEqual((bytes(region[at:at + 5]), self.svc.combat_log_patch()["enabled"]), (code_patch.ORIGINAL, False))
+        self.game_log("SINGLEPLAYER")
+        region[at:at + 5] = bytes(5)                                                # another build or tool: left alone
+        with self.assertRaises(LiveError) as ctx:
+            self.svc.set_combat_log_patch(True)
+        self.assertEqual((ctx.exception.code, self.svc.combat_log_patch()["state"]), ("unexpected_code", "unknown"))
 
     def test_player_with_fog_of_war_off_keeps_the_last_unambiguous_result(self):
         """Correction: the flag is fog-of-war visibility - after `fow` every existing country is visible."""

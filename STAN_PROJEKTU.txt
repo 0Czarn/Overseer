@@ -1,5 +1,5 @@
 HOI4 DEBUGGER - STAN PROJEKTU
-Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-13 (zakładka Construction, wzór "At war")
+Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-15 (Game summary: straty, UI listy państw)
 Szczegóły i dowody: docs/PROGRESS.md, plan: docs/STATUS-AND-PLAN.md
 
 ======================================================================
@@ -401,6 +401,47 @@ DO ZROBIENIA (w tej kolejności)
             i nazwie w obu trybach, wspólny kursor: najechanie na jeden wykres pokazuje dzień i wartości widocznych serii w
             obu. POPRAWKI: podpowiedź pokazywała "[object HTMLDivElement]" (replaceChildren z tablicą); kliknięte pole
             wyboru blokowało odświeżenie panelu grup.
+            ZMARNOWANE IC (2026-10-15, prośba użytkownika, osobno wojskowe / stocznie / cywilne): linie produkcji i budowy
+            +0x18 = przydzielone fabryki (SOV 1936: 33/33, 6/6, 23/23 wolnych cywilnych = gra). Bezczynne = fabryki
+            (read_factories; cywilne: "free" po dobrach konsumpcyjnych/handlu) - przydzielone; IC = bezczynne x własne IC na
+            przydzieloną fabrykę tego dnia (wydajność, premie), bez linii danego typu: BASE_FACTORY_SPEED_MIL 3,5 / NAV 2 /
+            4 (defines 1.19.3). Przykłady na żywo: GER pusta kolejka budowy (34 wolne), USA 49 wolnych na 2 liniach po 15.
+            STRATY SPRZĘTU W IC (2026-10-15, Combat_log.jpg, "combat log.jpg", combat_log_detailed.jpg; SOV-POL 1936):
+            [stan gry +0x880] = tablica NCombatLog::CManager* wg slotu państwa (RTTI); +0x8 grupy armii
+            (COrdersGroupLogs, +0xE4 id grupy = save group id), tablice CEquipmentLoss*: +0x8 straty wroga, +0x20 odzyskane,
+            +0x38 w walce, +0x50 i +0x68 attrition (gra sumuje obie). Rekord: +0x8 przyczyna, +0x18 data (godziny),
+            +0x48 tablica {wariant*, ilość fixed64}. Zgodne z grą: walka 1660, attrition 9061 (+ 248 z rozwiązanej grupy,
+            gra jej nie pokazuje), odzyskane 537, wróg 1448. Koszt sztuki: wariant +0x368 (build_cost_ic). Log TYLKO dla
+            gracza i państw w wojnie z nim (ITA/ETH w tej samej grze bez logu), max 12 miesięcy. Dzienne straty = przyrost
+            każdego wpisu (grupa, rodzaj, data rekordu, wariant) od poprzedniego dnia; pierwszy dzień po starcie aplikacji
+            / wczytaniu save'a nieznany; pominięte dni (szybka gra) jako średnia dzienna.
+            ZAKŁADKA: grupy "Wasted IC" (Military / Naval / Civilian / All) i "IC lost" (Combat / Attrition / All / Enemy),
+            wykres dzienny i narastający; sumy frakcji strat pomijają państwa bez logu.
+            [ ] (b) straty wszystkich państw z trwających bitew na żywo (SCombatData/CStatsObserver, tylko walka) - później
+            [ ] potwierdzić na żywo w grze: jeden dzień wojny -> przyrost strat w zakładce
+            POPRAWKA (2026-10-15, graph_cas.jpg: Combat - Countries POL/SOV/SWI, na wykresie tylko POL): dane były
+            poprawne - gra POL w wojnie z SOV, a log ZSRR w pamięci PUSTY (CManager +0x8 bez grup; tylko POL ma log).
+            Wcześniejsze "log dla państw w wojnie z graczem" nie zawsze prawda (ZSRR-gracz: POL miał log; POL-gracz: SOV
+            nie). UI: legenda oznacza serie bez danych ("no data"), ostrzeżenie wymienia wybrane państwa bez logu i te z
+            logiem; wybrane państwa na górze listy ("Shown on the chart"); zwinięcie/rozwinięcie grup zapamiętane
+            (prefs.openGroups) - odświeżanie co 5 s już ich nie przestawia. Test smoke usuwa swoją grupę "Smoke bloc"
+            (zostawała w prawdziwej kampanii POL - usunięta).
+            BRAMKA COMBAT LOGU (2026-10-15, deasemblacja hoi4.exe: capstone + pefile, venv w scratchpadzie): gra loguje
+            straty tylko państw przepuszczonych przez hoi4.exe+0xCDF8F0 - przegląda listę graczy ([stan gry +0xF8], liczba
+            +0x104, wpisy 0xA0, państwo +0x70; "Czarny" = POL) i zwraca prawdę TYLKO dla państwa gracza (lub tego samego
+            pod innym tagiem, +0x340). Wojna nie ma znaczenia. 7 miejsc wywołań - wszystkie tylko pobierają CManager do
+            logowania; bramka pomijana, gdy [stan gry +0x520] <= 0 (teraz 10). Sprostowanie: "log dla państw w wojnie z
+            graczem" było błędne.
+            [x] PRZEŁĄCZNIK "Combat log for every country" (Game summary, IC lost; domyślnie wyłączony, tylko singleplayer):
+                5 bajtów kodu w pamięci gry "mov al,1; ret" (live/code_patch.py, integration/code_write.py - jedyny moduł z
+                VirtualProtectEx; zapis tylko gdy bajty = oryginał, ochrona strony przywracana, odczyt kontrolny).
+                Wybór zapamiętany (live/combat_log_patch.json), rejestrator nakłada ponownie po restarcie gry. Włączony
+                2026-10-15 na prośbę użytkownika.
+            [x] POTWIERDZONE na żywo (1936.05.16-21): własne logi dostały SOV, ITA, ETH, ENG, TUR, JAP, MON; rejestrator
+                zapisuje ich straty co dzień (05.21 attrition: SOV 45,9 IC, ITA 22,7, ETH 6,0). Starsze dni bez danych.
+            [x] PAŃSTWA BEZ LOGU: projekt sprzętu +0x1C = numer państwa-twórcy (SOV = 3, zapis: creator="SOV"); straty
+                "enemy" z logów przypisane twórcy - państwo bez własnego logu ma jako straty w walce sprzęt zniszczony mu
+                przez państwa z logiem (bez attrition). Zdobyty / z Lend-Lease sprzęt liczy się twórcy.
             [ ] historia tylko z dni, gdy aplikacja działała (nie da się odtworzyć wstecz)
             [ ] gracz odczytany jako GER w grze SOV (2026-10-13) - sprawdzić, czy użyto `tag`
 [ ] Krok G  Game Tools (narzędzia lokalne)

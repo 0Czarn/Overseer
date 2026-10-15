@@ -1,0 +1,58 @@
+RAPORT 2026-10-15 - stan pracy i notatki do wznowienia
+======================================================================
+
+Zakładka Game summary liczy teraz zmarnowane IC (osobno wojskowe, stocznie i cywilne) oraz IC stracone w wojnie.
+Testy: 272 Python / 77 JS - wszystkie OK. Aplikacja uruchomiona z nowym kodem.
+Na żywo nie widziałem jeszcze ani jednego zapisanego dnia - gra stała na pauzie.
+NIC NIE JEST ZACOMMITOWANE (zmiany w backend/hoi4dbg/live/pointers.py, live/service.py, ic_history.py,
+app/renderer/views/summary.js, testy, STAN_PROJEKTU.txt; nowe screeny użytkownika nieśledzone).
+
+----------------------------------------------------------------------
+1. ZMARNOWANE IC (nowa grupa "Wasted IC": Military / Naval / Civilian / All)
+----------------------------------------------------------------------
+- Liczba fabryk przydzielonych do linii zgadza się z grą: ZSRR 33/33 wojskowych, 6/6 stoczni, 23/23 wolnych
+  cywilnych.
+- Wynik = liczba fabryk bez linii x średnie IC na przydzieloną fabrykę tego państwa w danym dniu. Gdy państwo nie
+  ma żadnej linii danego typu: bazowa wydajność fabryki z plików gry (3,5 / 2 / 4).
+- Na żywo od razu wyszły prawdziwe przestoje:
+  - Niemcy mają pustą kolejkę budowy - 34 fabryki cywilne stoją.
+  - USA mają 49 wolnych fabryk cywilnych, ale tylko 2 linie budowy po 15 - 19 się marnuje.
+
+----------------------------------------------------------------------
+2. IC STRACONE (nowa grupa "IC lost": Combat / Attrition / All / Enemy = zniszczony sprzęt wroga)
+----------------------------------------------------------------------
+- Straty z Combat Logu gry; koszt jednej sztuki sprzętu w IC odczytany z pamięci.
+- Zgodność ze screenami (Combat_log.jpg, combat log.jpg, combat_log_detailed.jpg):
+    W walce        1660
+    Odzyskane       537
+    Straty wroga   1448
+    Attrition      9061
+- W kolumnie attrition aplikacja liczy 248 sztuk więcej niż gra - to straty grupy armii, której gra już nie
+  pokazuje (pewnie rozwiązanej). Sprzęt przepadł, więc są wliczone.
+- W IC: ZSRR stracił dotąd 1308 IC w walce i 16 407 IC przez attrition; Polsce zniszczył sprzęt za 789 IC.
+
+OGRANICZENIA
+- Wariant (a): gra prowadzi Combat Log tylko dla gracza i państw, które z nim walczą. Inne państwa pokazują "-".
+- Pierwszy rozegrany dzień po uruchomieniu aplikacji albo po wczytaniu save'a nie ma wartości strat (brak
+  porównania).
+- Przy szybkiej grze straty z pominiętych dni rozkładane równo na te dni.
+- Log gry sięga najwyżej 12 miesięcy wstecz (rejestrator i tak zapisuje dane codziennie).
+
+----------------------------------------------------------------------
+PAMIĘĆ GRY (szczegóły w STAN_PROJEKTU.txt)
+----------------------------------------------------------------------
+- Linie produkcji i budowy +0x18 = przydzielone fabryki.
+- [stan gry +0x880] = tablica NCombatLog::CManager* wg slotu państwa; grupy armii (COrdersGroupLogs, +0xE4 id):
+  +0x8 straty wroga, +0x20 odzyskane, +0x38 w walce, +0x50 i +0x68 attrition. Wariant +0x368 = koszt w IC.
+- Narzędzia z %TEMP%\hoi4probe zniknęły; nowe skanery (scan/scanr/refs/rtti/findvt/objmap/peek) są w scratchpadzie
+  tej sesji - też tymczasowe.
+
+----------------------------------------------------------------------
+PIERWSZE KROKI RANO
+----------------------------------------------------------------------
+1. Odpauzować grę na kilka dni wojny i zajrzeć do Game summary -> IC lost / Wasted IC (potwierdzenie na żywo).
+2. Zdecydować o commicie (oraz o 4 plikach w commicie d6f024d z 2026-10-13: RAPORT_2026-10-09.txt,
+   restart_test.md, prompt5.md, FRAKCJE.PNG).
+3. Wariant (b): straty wszystkich państw z trwających bitew na żywo (tylko walka, bez attrition) - zapisany
+   w STAN_PROJEKTU.txt na później.
+4. Dalej wg STAN_PROJEKTU.txt: Krok G (Game Tools), H (test multiplayer), I (raport, instrukcja).

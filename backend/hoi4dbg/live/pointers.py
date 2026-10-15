@@ -850,16 +850,19 @@ FACTORIES = {"total": 0x43C, "from_trade": 0x3C8, "consumer_goods": 0x440, "mark
 # 312.32 -> 320.22 at 7.90 a day, convoys 8.17 -> 20.02 at 11.86); the construction lines (+ 0x70) hold the
 # construction points of the day at the same + 0x30. Like HOI4-IC-Graphs: MIL / NAV / CIV IC a day per country.
 PRODUCTION_LINES = 0x58
-PRODUCTION_LINE = {"kind": 0x8, "output": 0x30}
+PRODUCTION_LINE = {"kind": 0x8, "factories": 0x18, "output": 0x30}
 LINE_KINDS = {56: "mil", 57: "nav", 71: "nav"}
 
 
 def read_ic(memory, country: int) -> dict[str, float]:
-    """{"mil", "nav", "civ"}: IC a day on military production, naval production and construction."""
+    """{"mil", "nav", "civ"}: IC a day on military production, naval production and construction, and {"amil", "anav",
+    "aciv"}: the factories assigned to those lines (SOV 1936: 33/33 military, 6/6 dockyards, 23/23 free civilian as the
+    production and construction screens)."""
     status = _ptr(memory, country + PRODUCTION_STATUS)
     if status is None:
         raise PointerError("no_production", "The country's production status is not readable")
     out = {"mil": 0.0, "nav": 0.0, "civ": 0.0}
+    assigned = {"amil": 0, "anav": 0, "aciv": 0}
     for kind_of, array in ((None, PRODUCTION_LINES), ("civ", CONSTRUCTION_LINES)):
         for line in read_array(memory, status + array, 5000):
             raw = memory.read(line, 0x38) if line else None
@@ -867,10 +870,92 @@ def read_ic(memory, country: int) -> dict[str, float]:
                 continue
             kind = kind_of or LINE_KINDS.get(struct.unpack_from("<i", raw, PRODUCTION_LINE["kind"])[0])
             value = struct.unpack_from("<q", raw, PRODUCTION_LINE["output"])[0] / 100000
-            if kind is None or not 0 <= value < 1e6:
+            factories = struct.unpack_from("<i", raw, PRODUCTION_LINE["factories"])[0]
+            if kind is None or not 0 <= value < 1e6 or not 0 <= factories <= 1000:
                 raise PointerError("implausible", "Production line output out of range - layout does not match")
             out[kind] += value
-    return {k: round(v, 3) for k, v in out.items()}
+            assigned["a" + kind] += factories
+    return {**{k: round(v, 3) for k, v in out.items()}, **assigned}
+
+
+# Combat log (2026-10-15, SOV at war with POL 1936.07.28, equal to the game's Combat Log, Equipment tab, 12 months:
+# in combat 1660, by attrition 9061, recovered 537, enemy combat losses 1448; the save's combat_log blocks):
+# [game state + 0x880] = array of NCombatLog::CManager* by country slot (tag order + 1, 440 for 439 countries); the
+# game keeps a log only for the player and the countries at war with it (SOV, POL - not ITA / ETH in the same game).
+# CManager + 0x8 = array of COrdersGroupLogs* (an army group each, also disbanded ones), + 0x20 = country slot.
+# COrdersGroupLogs + 0xe4 = the army group id (save: group={ id=295 type=53 }), arrays of CEquipmentLoss*:
+# + 0x8 enemy losses, + 0x20 recovered, + 0x38 lost in combat, + 0x50 and + 0x68 attrition (reason 1 / 2 - the game
+# shows their sum "By Attrition": F-22 92 + 66 = 158). CEquipmentLoss + 0x8 = reason (int32), + 0x18 = date (hours,
+# like the game date), + 0x48 = array of {variant*, amount fixed64} (16 bytes; data, capacity, size as read_array).
+# One record collects a period (one battle chain, a month of attrition): its amounts grow while it is the newest.
+# The game shows the army groups still existing; a disbanded group's losses (here 136 SVT) are counted too.
+COMBAT_LOG = 0x880
+COMBAT_LOG_MAX = 1000
+CLOG_MANAGER = {"groups": 0x8, "slot": 0x20}
+CLOG_GROUP_ID = 0xE4
+CLOG_ARRAYS = {0x8: "enemy", 0x38: "combat", 0x50: "attrition", 0x68: "attrition"}
+CLOG_LOSS = {"date": 0x18, "items": 0x48}
+VARIANT_COST = 0x368   # build_cost_ic of one unit (fixed64; SVT-38/40 0.5, a light tank 14.35)
+# country slot of the design's creator (int32; save: equipment variant creator="SOV" -> 3). Enemy losses of the
+# player's log name no country - the creator of the destroyed equipment does (captured or lend-leased equipment counts
+# for its creator).
+VARIANT_CREATOR = 0x1C
+
+
+def read_combat_log(memory, module_base: int, tags: list[str]) -> dict[str, dict[tuple, tuple]]:
+    """{tag: {(army group id, kind, record date, variant id): (units, IC of one unit, creator tag)}} of every country
+    with a combat log; kind = "combat" | "attrition" | "enemy" (losses inflicted). Amounts only grow, so a day's losses
+    are the growth of each entry (ic_history.loss_deltas)."""
+    table = _ptr(memory, module_base + COUNTRY_TABLE[0])
+    head = memory.read(table + COMBAT_LOG, 16) if table else None
+    if head is None:
+        raise PointerError("unreadable", "The combat log is not readable")
+    array, _cap, size = struct.unpack("<Qii", head)
+    if not 0 < size <= len(tags) + 1 or not array:
+        raise PointerError("implausible", f"Combat log of {size} countries - layout does not match")
+    managers = memory.read(array, 8 * size)
+    if managers is None:
+        raise PointerError("unreadable", "The combat log is not readable")
+    costs: dict[int, tuple[int, float, str | None]] = {}
+    out: dict[str, dict] = {}
+    for slot in range(1, size):
+        manager = struct.unpack_from("<Q", managers, 8 * slot)[0]
+        raw = memory.read(manager, 0x28) if manager else None
+        if raw is None or struct.unpack_from("<i", raw, CLOG_MANAGER["groups"] + 12)[0] == 0:
+            continue
+        if struct.unpack_from("<i", raw, CLOG_MANAGER["slot"])[0] != slot:
+            raise PointerError("implausible", "Combat log of another country - layout does not match")
+        entries = out.setdefault(tags[slot - 1], {})
+        for group in read_array(memory, manager + CLOG_MANAGER["groups"], COMBAT_LOG_MAX):
+            gid = memory.read(group + CLOG_GROUP_ID, 4) if group else None
+            if gid is None:
+                continue
+            gid = struct.unpack("<i", gid)[0]
+            for offset, kind in CLOG_ARRAYS.items():
+                for record in read_array(memory, group + offset, COMBAT_LOG_MAX):
+                    rec = memory.read(record, 0x58) if record else None
+                    if rec is None:
+                        continue
+                    date = struct.unpack_from("<i", rec, CLOG_LOSS["date"])[0]
+                    data, _cap, count = struct.unpack_from("<Qii", rec, CLOG_LOSS["items"])
+                    items = memory.read(data, 16 * count) if data and 0 < count <= 1000 else None
+                    for i in range(len(items or b"") // 16):
+                        variant, amount = struct.unpack_from("<Qq", items, 16 * i)
+                        if variant not in costs:
+                            vr = memory.read(variant, VARIANT_COST + 8) if variant else None
+                            if vr is None:
+                                continue
+                            creator = struct.unpack_from("<i", vr, VARIANT_CREATOR)[0]
+                            costs[variant] = (struct.unpack_from("<i", vr, VARIANT["id"])[0],
+                                              struct.unpack_from("<q", vr, VARIANT_COST)[0] / 100000,
+                                              tags[creator - 1] if 0 < creator <= len(tags) else None)
+                        vid, cost, creator = costs[variant]
+                        if not 0 <= cost < 100_000 or not 0 <= amount / 100000 < 10_000_000:
+                            raise PointerError("implausible", "Combat log amount out of range - layout does not match")
+                        key = (gid, kind, date, vid)
+                        units = entries.get(key, (0.0,))[0] + amount / 100000
+                        entries[key] = (units, cost, creator)
+    return out
 
 
 def read_civilian_factories(memory, country: int) -> dict[str, int]:

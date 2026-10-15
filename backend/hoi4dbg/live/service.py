@@ -18,10 +18,11 @@ from pathlib import Path
 from typing import Callable
 
 from ..integration.memory import ENCODINGS, MemoryAccessError, ProcessMemory, needles_for, scan
+from ..integration.code_write import ProcessCodePatcher
 from ..integration.memory_write import ProcessMemoryWriter
 from .. import construction as construction_mod
 from .. import ic_history
-from . import console, layout, pointers
+from . import code_patch, console, layout, pointers
 from .calibration import SCAN_LIMIT, CalibrationError, FieldCalibration, holds, scan_many, tolerance_for
 
 TOLERANCE = 0.0005           # values are fixed point with 3 decimals
@@ -44,11 +45,15 @@ class LiveService:
     def __init__(self, detect: Callable[[], dict], save_values: Callable[[], dict], store_dir: Path,
                  logger: logging.Logger, open_memory: Callable[[int], object] = ProcessMemory,
                  clock: Callable[[], float] = time.time,
-                 open_writer: Callable[[int], object] = ProcessMemoryWriter) -> None:
+                 open_writer: Callable[[int], object] = ProcessMemoryWriter,
+                 open_patcher: Callable[[int], object] = ProcessCodePatcher) -> None:
         self._detect = detect
         self._save_values = save_values      # newest save's values for its player country (envelope)
         self._open_memory = open_memory
         self._open_writer = open_writer
+        self._open_patcher = open_patcher
+        self._patch_file = store_dir / "combat_log_patch.json"   # the user's choice, re-applied after a game restart
+        self._patch_failed: tuple | None = None   # process key the automatic re-apply failed for (logged once)
         self._clock = clock
         self.log = logger
         self.store = store_dir / "calibrations.json"
@@ -862,10 +867,81 @@ class LiveService:
         except LiveError:
             return None
 
+    # -- combat log for every country (code_patch.py) ----------------------------------------------
+    def _patch_enabled(self) -> bool:
+        try:
+            return bool(json.loads(self._patch_file.read_text(encoding="utf-8")).get("enabled"))
+        except (OSError, ValueError, AttributeError):
+            return False
+
+    def combat_log_patch(self) -> dict:
+        """{"enabled": the user's choice, "state": "on" | "off" | "unknown" | None (no readable game), "error"}."""
+        out = {"enabled": self._patch_enabled(), "state": None, "error": None}
+        try:
+            out["state"] = self._game_memory(lambda mem, base, _t, _p: code_patch.state(mem, base))
+        except LiveError as exc:
+            out["error"] = str(exc)
+        return out
+
+    def set_combat_log_patch(self, enabled: bool) -> dict:
+        """Turns the combat log for every country on or off now (game running) and remembers the choice."""
+        self._patch_file.parent.mkdir(parents=True, exist_ok=True)
+        if enabled:
+            self._apply_patch(True)
+        else:
+            try:
+                self._apply_patch(False)
+            except LiveError as exc:
+                if exc.code not in ("game_not_running", "no_access", "unsupported_version"):   # nothing to undo
+                    raise
+        self._patch_file.write_text(json.dumps({"enabled": enabled}), encoding="utf-8")
+        return self.combat_log_patch()
+
+    def ensure_combat_log_patch(self) -> None:
+        """Re-applies the patch the user turned on to a game started since (once a game day, from the recorder)."""
+        if not self._patch_enabled() or self.combat_log_patch()["state"] != "off":
+            return
+        try:
+            self._apply_patch(True)
+        except LiveError as exc:
+            process = self._process_or_none()
+            key = process and (process["pid"], process.get("started"))
+            if key != self._patch_failed:
+                self._patch_failed = key
+                self.log.warning("Combat log for every country not applied: %s", exc)
+
+    def _process_or_none(self) -> dict | None:
+        try:
+            return self._process()
+        except LiveError:
+            return None
+
+    def _apply_patch(self, on: bool) -> str:
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "The combat log patch is only verified for 1.19.3.0.c01a")
+        if on:
+            self._require_single_player()
+        try:
+            with self._open_patcher(process["pid"]) as mem:
+                base = mem.modules()[pointers.MODULE][0]
+                now = code_patch.state(mem, base)
+                if now == "unknown":
+                    raise LiveError("unexpected_code", "The game's code is not the expected one - not patched")
+                if (now == "on") != on:
+                    old, new = (code_patch.ORIGINAL, code_patch.PATCHED) if on else (code_patch.PATCHED, code_patch.ORIGINAL)
+                    mem.replace(base + code_patch.GATE_RVA, old, new)
+                    self.log.warning("LOCAL code patch: combat log for every country %s", "on" if on else "off")
+                return "on" if on else "off"
+        except (MemoryAccessError, OSError, KeyError) as exc:
+            raise LiveError("memory_error", f"Code patch failed: {exc}") from exc
+
     def ic_snapshot(self, with_factions: bool = False) -> dict:
-        """{"t", "player", "countries": {tag: [mil, nav, civ, civilian factories, military factories, dockyards]},
-        "factions": {tag: faction name} or None} - IC a day (pointers.read_ic) and factories as the game shows them
-        (pointers.read_factories) of every existing country."""
+        """{"t", "player", "countries": {tag: [mil, nav, civ, civilian factories, military factories, dockyards,
+        wasted mil, wasted nav, wasted civ]}, "factions": {tag: faction name} or None, "losses": combat logs} - IC a
+        day (pointers.read_ic), factories as the game shows them (pointers.read_factories), IC a day of the factories
+        without a line (ic_history.wasted_ic) of every existing country and the combat logs
+        (pointers.read_combat_log)."""
         def read(mem, base, tags, process):
             t = ic_history.day_number(pointers.read_date(mem, base))
             countries = pointers.country_objects(mem, base, tags)
@@ -877,10 +953,15 @@ class LiveService:
                 try:
                     ic = pointers.read_ic(mem, c)
                     fac = pointers.read_factories(mem, c)
+                    civ = pointers.read_civilian_factories(mem, c)
                 except pointers.PointerError:   # a country being created or annexed right now
                     continue
+                wasted = ic_history.wasted_ic(ic, {"mil": fac["military"]["total"] - ic["amil"],
+                                                   "nav": fac["dockyards"]["total"] - ic["anav"],
+                                                   "civ": civ["free"] - ic["aciv"]})
                 out[tag] = [ic["mil"], ic["nav"], ic["civ"],
-                            fac["civilian"]["total"], fac["military"]["total"], fac["dockyards"]["total"]]
+                            fac["civilian"]["total"], fac["military"]["total"], fac["dockyards"]["total"],
+                            wasted["wmil"], wasted["wnav"], wasted["wciv"]]
             factions = None
             if with_factions:
                 by_object = {c: t for t, c in countries.items()}
@@ -893,7 +974,12 @@ class LiveService:
                     if f and f.get("name"):
                         factions[tag] = f["name"]
             player = pointers.player_country(mem, base, tags) or self.player_tag(process)
-            return {"t": t, "player": player, "countries": out, "factions": factions}
+            try:
+                losses = pointers.read_combat_log(mem, base, tags)
+            except pointers.PointerError as exc:   # the IC values are still worth recording
+                self.log.info("Combat log not readable: %s", exc)
+                losses = None
+            return {"t": t, "player": player, "countries": out, "factions": factions, "losses": losses}
         return self._game_memory(read)
 
     def stockpile(self, tag: str | None = None) -> dict:

@@ -147,7 +147,10 @@ export function lineChart({ title, series, format = compact, sync = null }) {
     if (sync) sync.charts.forEach((c) => c.showAt(t)); else showAt(t);
   });
   hit.addEventListener('mouseleave', () => (sync ? sync.charts.forEach((c) => c.hide()) : hide()));
-  const legend = series.length > 1 ? h('div', { class: 'lc-legend' }, series.map((s) => h('span', { class: 'lc-legend-item' },
-    h('span', { class: `lc-swatch ${s.dash ? 'lc-swatch-dash' : ''}`, style: { borderColor: s.color } }), s.label))) : null;
+  // a series without any value stays in the legend, marked, so a chosen country never silently disappears
+  const legend = series.length > 1 ? h('div', { class: 'lc-legend' }, series.map((s) => h('span', {
+    class: `lc-legend-item ${s.points.length ? '' : 'lc-legend-empty'}`, title: s.points.length ? null : 'No value recorded' },
+    h('span', { class: `lc-swatch ${s.dash ? 'lc-swatch-dash' : ''}`, style: { borderColor: s.color } }), s.label,
+    s.points.length ? null : h('span', { class: 'lc-legend-note' }, 'no data')))) : null;
   return h('div', { class: 'lc' }, h('div', { class: 'lc-title' }, title), legend, box);
 }

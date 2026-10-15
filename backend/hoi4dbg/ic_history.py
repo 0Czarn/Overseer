@@ -1,11 +1,14 @@
 """IC history of a campaign, like HOI4-IC-Graphs (github.com/otti086-Org/HOI4-IC-Graphs) but from game memory instead
 of a DLL injected into the game: once per game day, every existing country's IC a day on military production (MIL),
 naval production (NAV) and construction (CIV) - live/pointers.read_ic - and its civilian factories, military factories
-and dockyards as the game shows them (live/pointers.read_factories).
+and dockyards as the game shows them (live/pointers.read_factories); the IC wasted by factories left without a
+production or construction line (wasted_ic); and the IC of equipment lost in combat, to attrition and destroyed of the
+enemy (live/pointers.read_combat_log - the game keeps it only for the player's country unless the combat log patch is
+on, live/code_patch.py; a country without one gets as combat losses its equipment destroyed by the countries with one).
 
 One file per campaign in <data dir>/ic-history/<id>.jsonl: a "meta" line, then one line per recorded day
-{"t": day number (365-day years), "d": "1941.11.02", "c": {tag: [mil, nav, civ, fciv, fmil, fdock]}, "f": {tag: faction} (every
-FACTION_EVERY days)}. Days skipped at high game speed are filled when graphing (the value holds until the next sample).
+{"t": day number (365-day years), "d": "1941.11.02", "c": {tag: [STORED values]}, "f": {tag: faction} (every
+FACTION_EVERY days)}; rows recorded before a value existed are shorter (the value is None). Days skipped at high game speed are filled when graphing (the value holds until the next sample).
 A campaign continues while the player's country stays the same and the date moves on (also in a later session, up to a
 month after its last day); loading an earlier save during the session cuts the days after that date (the timeline was
 replayed); another country or a jump back of more than a month starts a new file, and files of earlier sessions are
@@ -42,9 +45,55 @@ def date_text(t: int) -> str:
     return f"{year}.{month + 1:02d}.{day + 1:02d}"
 
 
-STORED = ("mil", "nav", "civ", "fciv", "fmil", "fdock")   # order of the values in a file row
-METRICS = STORED + ("fall",)   # fall = all factories (civilian + military + dockyards)
+STORED = ("mil", "nav", "civ", "fciv", "fmil", "fdock",   # order of the values in a file row
+          "wmil", "wnav", "wciv",                        # IC a day wasted by idle military / naval / civilian factories
+          "lcom", "latt", "lenemy")                      # IC of equipment lost in combat / to attrition / of the enemy
+SUMS = {"fall": ("fciv", "fmil", "fdock"), "wall": ("wmil", "wnav", "wciv"), "lall": ("lcom", "latt")}
+METRICS = STORED + tuple(SUMS)
+LOSS_METRICS = ("lcom", "latt", "lenemy", "lall")   # only countries with a combat log have them
 NO_FACTION = "Non-aligned"
+
+# IC a day of one factory without any line to compare with (common/defines NProduction, 1.19.3): BASE_FACTORY_SPEED_MIL,
+# BASE_FACTORY_SPEED_NAV, BASE_FACTORY_SPEED (construction)
+BASE_SPEED = {"mil": 3.5, "nav": 2.0, "civ": 4.0}
+
+
+def wasted_ic(ic: dict, idle: dict) -> dict:
+    """{"wmil", "wnav", "wciv"}: IC a day the idle factories (`idle` = {"mil", "nav", "civ"} factories without a line)
+    would add at the country's own average output per assigned factory that day (its efficiency and bonuses); the
+    game's base factory speed when no factory of the kind is assigned."""
+    out = {}
+    for kind in ("mil", "nav", "civ"):
+        assigned = ic["a" + kind]
+        per = ic[kind] / assigned if assigned else BASE_SPEED[kind]
+        out["w" + kind] = round(max(0, idle[kind]) * per, 3)
+    return out
+
+
+def loss_deltas(before: dict | None, now: dict) -> dict[str, list[float | None]] | None:
+    """{tag: [IC lost in combat, IC lost to attrition, IC of enemy equipment destroyed]} since `before`
+    (pointers.read_combat_log: {tag: {(group, kind, record date, variant id): (units, IC of one unit, creator)}});
+    None without an earlier reading (the first day after the app started or a save was loaded is unknown). Entries
+    only grow; new ones (a new battle, a new country at war) count whole, ones the game dropped (older than 12 months)
+    are ignored. A country without a log of its own gets [the IC of its equipment the countries with a log destroyed
+    (by the creator of the equipment), None, None] - only its losses against them."""
+    if before is None:
+        return None
+    out = {}
+    inflicted: dict[str, float] = {}
+    for tag, entries in now.items():
+        old = before.get(tag, {})
+        sums = {"combat": 0.0, "attrition": 0.0, "enemy": 0.0}
+        for key, (units, cost, *creator) in entries.items():
+            ic = max(0.0, units - old.get(key, (0.0,))[0]) * cost
+            sums[key[1]] += ic
+            if key[1] == "enemy" and creator and creator[0] and ic:
+                inflicted[creator[0]] = inflicted.get(creator[0], 0.0) + ic
+        out[tag] = [round(sums[k], 3) for k in ("combat", "attrition", "enemy")]
+    for tag, ic in inflicted.items():
+        if tag not in now:
+            out[tag] = [round(ic, 3), None, None]
+    return out
 
 
 TAG = re.compile(r"^[A-Z0-9]{2,4}$")
@@ -95,13 +144,19 @@ def view(game: dict, metric: str, tags: list[str] | None, by_faction: bool, grou
     series = []
     if by_faction:
         sums: dict[str, list[float]] = {}
+        skip_unknown = metric in LOSS_METRICS   # most countries have no combat log: sum the known ones
         for t, v in countries.items():
             name = factions.get(t) or NO_FACTION
-            acc = sums.setdefault(name, [0.0] * len(game["t"]))
+            acc = sums.setdefault(name, [None if skip_unknown else 0.0] * len(game["t"]))
             for i, x in enumerate(v[metric]):
-                acc[i] = None if x is None or acc[i] is None else acc[i] + x
+                if skip_unknown:
+                    acc[i] = acc[i] if x is None else (acc[i] or 0.0) + x
+                else:
+                    acc[i] = None if x is None or acc[i] is None else acc[i] + x
         for name in groups["custom"]:   # an empty group of the user's still shows (as zero)
-            sums.setdefault(name, [0.0] * len(game["t"]))
+            sums.setdefault(name, [None if skip_unknown else 0.0] * len(game["t"]))
+        if skip_unknown:   # groups without any combat log are not drawn
+            sums = {n: v for n, v in sums.items() if any(x is not None for x in v) or n in groups["custom"]}
         order = sorted(sums, key=lambda n: (n == NO_FACTION, -(sums[n][-1] or 0) if sums[n] else 0))
         series = [{"key": n, "values": [None if x is None else round(x, 3) for x in sums[n]]} for n in order]
     else:
@@ -166,10 +221,11 @@ class IcHistory:
             for tag in tags:
                 values = r["c"].get(tag)
                 row = list(values) + [None] * (len(STORED) - len(values)) if values else [0] * len(STORED)
-                for k, v in zip(STORED, row):   # rows recorded before factories were counted have none (None)
+                for k, v in zip(STORED, row):   # rows recorded before a value was counted have none (None)
                     series[tag][k].append(v)
-                fac = row[3:6]
-                series[tag]["fall"].append(None if None in fac else sum(fac))
+                for k, parts in SUMS.items():
+                    vals = [series[tag][p][-1] for p in parts]
+                    series[tag][k].append(None if None in vals else round(sum(vals), 3))
             if "f" in r:
                 factions = r["f"]
         return {"id": gid, "player": meta.get("player"), "t": [r["t"] for r in days], "dates": [r["d"] for r in days],
@@ -238,6 +294,7 @@ class IcRecorder:
         self.error: str | None = None
         self._stop = threading.Event()
         self._last_faction_t = -FACTION_EVERY
+        self._losses: dict | None = None   # combat log of the last recorded day (loss_deltas)
 
     def start(self) -> None:
         threading.Thread(target=self._run, name="ic-recorder", daemon=True).start()
@@ -255,7 +312,11 @@ class IcRecorder:
         hovered country as player, and loading a save jumps the date - neither is a played day."""
         t = self.live.game_day()
         previous, self.seen_t = self.seen_t, t
+        if t is not None and t != previous:   # a game started since the user turned it on gets it too
+            self.live.ensure_combat_log_patch()
         if t is None or previous is None or not 0 < t - previous <= MAX_STEP:
+            if t != previous:   # another game state: its combat log does not continue the last one
+                self._losses = None
             return False
         with_factions = t - self._last_faction_t >= FACTION_EVERY or self.last_t is None or t < self.last_t
         sample = self.live.ic_snapshot(with_factions)
@@ -264,6 +325,16 @@ class IcRecorder:
             return False
         if not any(any(v) for v in sample["countries"].values()):   # production not set up yet (loading)
             return False
+        losses = sample.pop("losses", None)
+        if losses is not None:
+            deltas = loss_deltas(self._losses, losses)
+            days = max(1, t - self.last_t) if self.last_t is not None else 1
+            for tag, values in sample["countries"].items():   # a day's average over skipped days; None = not known
+                if deltas and tag in deltas:
+                    values.extend(None if v is None else round(v / days, 3) for v in deltas[tag])
+                else:
+                    values.extend([None, None, None])
+            self._losses = losses
         self.history.add(sample)
         if with_factions:
             self._last_faction_t = t

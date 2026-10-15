@@ -72,6 +72,9 @@ class FakeLive:
     def game_day(self):
         return self.t
 
+    def ensure_combat_log_patch(self):
+        pass
+
     def ic_snapshot(self, with_factions):
         self.snapshots += 1
         return {"t": self.t, "player": "SOV", "countries": {"SOV": [1.0, 0.0, 2.0]},
@@ -189,3 +192,60 @@ class GroupsTest(unittest.TestCase):
         self.assertEqual(len(history.games()), 1)   # the groups file is not a campaign
         with self.assertRaises(FileNotFoundError):
             history.set_groups("NOPE_1", {})
+
+
+class WastedAndLossesTest(unittest.TestCase):
+    def test_idle_factories_at_the_countrys_own_output(self):
+        ic = {"mil": 75.0, "nav": 0.0, "civ": 120.0, "amil": 30, "anav": 0, "aciv": 30}
+        w = ic_history.wasted_ic(ic, {"mil": 3, "nav": 2, "civ": -1})
+        self.assertEqual(w, {"wmil": 7.5, "wnav": 4.0, "wciv": 0})   # 2.5 a factory; no dockyard line: base speed
+
+    def test_loss_deltas_count_growth_new_records_and_ignore_dropped_ones(self):
+        before = {"SOV": {(295, "combat", 1, 9): (100.0, 0.5), (295, "attrition", 1, 9): (50.0, 0.5),
+                          (291, "attrition", 0, 9): (10.0, 0.5)}}
+        now = {"SOV": {(295, "combat", 1, 9): (110.0, 0.5), (295, "attrition", 1, 9): (50.0, 0.5),
+                       (295, "combat", 2, 4506): (2.0, 14.35), (295, "enemy", 2, 1699): (40.0, 0.5)},
+               "POL": {(323, "attrition", 3, 1699): (4.0, 0.5)}}
+        self.assertIsNone(ic_history.loss_deltas(None, now))
+        self.assertEqual(ic_history.loss_deltas(before, now), {"SOV": [33.7, 0.0, 20.0], "POL": [0.0, 2.0, 0.0]})
+
+    def test_a_country_without_a_log_gets_its_equipment_the_logged_ones_destroyed(self):
+        before = {"POL": {(1, "enemy", 5, 1455): (100.0, 0.5, "SOV")}}
+        now = {"POL": {(1, "enemy", 5, 1455): (140.0, 0.5, "SOV"), (1, "enemy", 6, 1459): (2.0, 3.0, "SOV"),
+                       (1, "enemy", 6, 9): (4.0, 1.0, "MON"), (1, "combat", 6, 7): (1.0, 2.0, "POL")},
+               "ITA": {(2, "enemy", 6, 3): (10.0, 1.0, "ETH")}, "ETH": {(3, "combat", 6, 4): (1.0, 1.0, "ETH")}}
+        self.assertEqual(ic_history.loss_deltas(before, now), {
+            "POL": [2.0, 0.0, 30.0], "ITA": [0.0, 0.0, 10.0], "ETH": [1.0, 0.0, 0.0],   # ETH: its own log wins
+            "SOV": [26.0, None, None], "MON": [4.0, None, None]})
+
+    def test_recorder_adds_losses_from_the_second_day(self):
+        live = FakeLive()
+        log = {"SOV": {(1, "combat", 0, 9): (10.0, 1.0)}}
+        live.ic_snapshot = lambda f: {"t": live.t, "player": "SOV", "factions": None, "losses": {k: dict(v) for k, v in log.items()},
+                                      "countries": {"SOV": [1.0, 0, 0, 1, 1, 0, 0, 0, 0], "ITA": [1.0, 0, 0, 1, 1, 0, 2.5, 0, 0]}}
+        history = IcHistory(Path(tempfile.mkdtemp()))
+        rec = IcRecorder(live, history, logging.getLogger("test"))
+        rec.step()
+        for units, step in ((12.0, 1), (15.0, 1), (21.0, 3)):   # 3 days skipped at high speed: 2 a day
+            live.t += step
+            log["SOV"][(1, "combat", 0, 9)] = (units, 1.0)
+            self.assertTrue(rec.step())
+        first = history.active
+        live.t = day(1941, 6, 1)   # a save loaded: its first played day is unknown again
+        rec.step()
+        live.t += 1
+        rec.step()
+        self.assertEqual(history.game(history.active)["countries"]["SOV"]["lcom"], [None])
+        game = history.game(first)
+        sov, ita = game["countries"]["SOV"], game["countries"]["ITA"]
+        self.assertEqual((sov["lcom"], sov["lall"], ita["lcom"], ita["wall"]),
+                         ([None, 3.0, 2.0], [None, 3.0, 2.0], [None, None, None], [2.5, 2.5, 2.5]))
+
+    def test_loss_sums_skip_countries_without_a_combat_log(self):
+        game = {"t": [1, 2], "dates": ["a", "b"], "factions": {"SOV": "Comintern", "MON": "Comintern"},
+                "countries": {"SOV": {"lcom": [None, 5.0]}, "MON": {"lcom": [None, None]}, "ITA": {"lcom": [None, None]}}}
+        for k in ic_history.METRICS:
+            for c in game["countries"].values():
+                c.setdefault(k, [0, 0])
+        v = ic_history.view(game, "lcom", None, True)
+        self.assertEqual(v["series"], [{"key": "Comintern", "values": [None, 5.0]}])   # no Non-aligned line

@@ -67,6 +67,12 @@ def build_routes(svc: DebuggerService) -> list[Route]:
                                       str(body.get("tag") or "").upper() or None,
                                       _number(before) if before is not None else None)
 
+    def combat_log_patch(body: dict) -> dict:
+        enabled = body.get("enabled") is True
+        if enabled and body.get("confirm_local") is not True:
+            raise LiveError("not_confirmed", "The combat log patch must be enabled explicitly (local only)")
+        return live().set_combat_log_patch(enabled)
+
     def construction_sort(body: dict) -> dict:
         if body.get("confirm_local") is not True:
             raise LiveError("not_confirmed", "Direct memory writes must be enabled explicitly (local only)")
@@ -104,6 +110,8 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})", lambda q, b, gid: svc.summary_game(
             gid, (q.get("metric") or ["mil"])[0], [t for t in (q.get("tags") or [""])[0].upper().split(",") if t],
             (q.get("factions") or [""])[0] == "1", (q.get("groups_from") or [""])[0] or None)),
+        r("GET", "/api/live/combat-log-patch", lambda q, b: live().combat_log_patch()),
+        r("POST", "/api/live/combat-log-patch", lambda q, b: combat_log_patch(b)),
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/groups", lambda q, b, gid: svc.summary_groups(gid)),
         r("POST", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/groups", lambda q, b, gid: svc.summary_groups(gid, b)),
         r("GET", f"/api/countries/{tag}/doctrines", lambda q, b, tag: svc.doctrines(tag)),

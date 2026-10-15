@@ -1,15 +1,24 @@
 // Game summary: IC history of a campaign, like HOI4-IC-Graphs - IC a day on military production, naval production or
-// construction per country or summed per faction, daily and cumulative, and the number of factories, optionally against
-// a second campaign. The backend records every country once per game day while the app runs (ic_history.py).
+// construction per country or summed per faction, daily and cumulative, the number of factories, the IC idle factories
+// waste and the IC of equipment lost in combat and to attrition, optionally against a second campaign. The backend
+// records every country once per game day while the app runs (ic_history.py).
 import { h, notice, viewHeader } from '../lib/dom.js';
 import { compact, dayText, hoverSync, lineChart } from '../lib/linechart.js';
 
 // categorical slots in fixed order (dark steps of the validated reference palette); a colour follows its series
 export const SERIES_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'];
 export const MAX_SERIES = SERIES_COLORS.length;
-const IC_METRICS = [['mil', 'Military IC'], ['nav', 'Naval IC'], ['civ', 'Civilian IC (construction)']];
-const FACTORY_METRICS = [['fciv', 'Civilian factories'], ['fmil', 'Military factories'], ['fdock', 'Dockyards'], ['fall', 'All factories']];
-const METRICS = [...IC_METRICS, ...FACTORY_METRICS];
+// [key, chart title, button]
+const IC_METRICS = [['mil', 'Military IC', 'Military'], ['nav', 'Naval IC', 'Naval'], ['civ', 'Civilian IC (construction)', 'Civilian']];
+const FACTORY_METRICS = [['fciv', 'Civilian factories', 'Civilian'], ['fmil', 'Military factories', 'Military'],
+  ['fdock', 'Dockyards', 'Dockyards'], ['fall', 'All factories', 'All']];
+const WASTED_METRICS = [['wmil', 'IC wasted by idle military factories', 'Military'],
+  ['wnav', 'IC wasted by idle dockyards', 'Naval'], ['wciv', 'IC wasted by idle civilian factories', 'Civilian'],
+  ['wall', 'IC wasted by idle factories', 'All']];
+const LOSS_METRICS = [['lcom', 'IC of equipment lost in combat', 'Combat'], ['latt', 'IC of equipment lost to attrition', 'Attrition'],
+  ['lall', 'IC of equipment lost', 'All'], ['lenemy', 'IC of enemy equipment destroyed', 'Enemy']];
+const METRICS = [...IC_METRICS, ...FACTORY_METRICS, ...WASTED_METRICS, ...LOSS_METRICS];
+export const isLossMetric = (m) => LOSS_METRICS.some(([k]) => k === m);
 /** Factory counts are a level, not a flow: no cumulative chart, whole numbers. */
 export const isFactoryMetric = (m) => FACTORY_METRICS.some(([k]) => k === m);
 const PREFS_KEY = 'hoi4dbg.summary';
@@ -23,13 +32,14 @@ function savePrefs(p) {
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch { /* preference only */ }
 }
 
-/** Running total of IC: each sample's value counts for the days until the next sample (skipped days). */
+/** Running total of IC: each sample's value counts for the days until the next sample (skipped days); unknown
+ * days (null) add nothing, and the total is unknown until the first known day. */
 export function cumulative(t, values) {
   const out = [];
-  let sum = 0;
+  let sum = null;
   for (let i = 0; i < values.length; i++) {
-    sum += values[i] * (i === 0 ? 1 : t[i] - t[i - 1]);
-    out.push(Math.round(sum * 100) / 100);
+    if (values[i] != null) sum = (sum ?? 0) + values[i] * (i === 0 ? 1 : t[i] - t[i - 1]);
+    out.push(sum == null ? null : Math.round(sum * 100) / 100);
   }
   return out;
 }
@@ -85,7 +95,10 @@ export default {
   short: 'GS',
   async render(root, ctx) {
     const prefs = { metric: 'mil', factions: false, tags: [], colors: {}, groupColors: {}, hiddenGroups: [],
-      customColors: { countries: {}, groups: {} }, ...loadPrefs() };
+      customColors: { countries: {}, groups: {} }, openGroups: {}, ...loadPrefs() };
+    const persist = () => savePrefs({ metric: prefs.metric, factions: prefs.factions, tags: prefs.tags, colors: prefs.colors,
+      game: prefs.game, compare: prefs.compare, groupColors: prefs.groupColors, hiddenGroups: prefs.hiddenGroups,
+      customColors: prefs.customColors, openGroups: prefs.openGroups });
     const status = h('div', { class: 'gs-status muted' });
     const controls = h('div', { class: 'gs-controls' });
     let search = '';
@@ -107,6 +120,8 @@ export default {
     let tableOpen = false;
     let groups = { custom: [], assign: {} };   // the user's grouping of the chosen campaign
     let newGroup = '';
+    let patch = null;   // combat log for every country: {enabled, state, error} (backend live/code_patch.py)
+    let patchBusy = false;
 
     const query = (groupsFrom) => {
       const p = new URLSearchParams({ metric: prefs.metric });
@@ -135,6 +150,18 @@ export default {
         onclick: (e) => e.stopPropagation(),
         onchange: (e) => { colorMap()[key] = e.target.value; load(); },
         oncontextmenu: (e) => { e.preventDefault(); delete colorMap()[key]; load(); } });
+    }
+
+    // A folding group of the picker that stays as the user left it: the list is rebuilt every few seconds. A search
+    // opens every group without changing what is remembered.
+    function fold(key, byDefault, summary, children) {
+      const forced = search.trim() !== '';
+      let open = forced || (prefs.openGroups[key] ?? byDefault);
+      return h('details', { class: 'gs-group', open: open || null, ontoggle: (e) => {
+        if (e.target.open === open) return;   // the toggle event of the element being created
+        open = e.target.open;
+        if (!forced) { prefs.openGroups[key] = open; persist(); }
+      } }, summary, children);
     }
 
     function visibleGroups() {
@@ -172,7 +199,7 @@ export default {
           .filter(([g, list]) => !searching || list.length || g.toLowerCase().includes(search.trim().toLowerCase()))
           .map(([g, list, total]) => {
           const shown = visible.includes(g);
-          return h('details', { class: 'gs-group', open: (searching || (g !== NO_FACTION && total <= 12)) || null },
+          return fold(`g:${g}`, g !== NO_FACTION && total <= 12,
             h('summary', null,
               h('input', { type: 'checkbox', checked: shown || null, title: 'Show on the chart',
                 disabled: (!shown && visible.length >= MAX_SERIES) || null, onclick: (e) => e.stopPropagation(),
@@ -217,10 +244,9 @@ export default {
         h('label', null, 'Campaign ', select(opts, prefs.game, (v) => { prefs.game = v; load(); })),
         h('label', null, 'Compare with ', select(opts.filter(([v]) => v !== prefs.game), prefs.compare,
           (v) => { prefs.compare = v || null; load(); }, '-')),
-        h('span', { class: 'gs-seg-label' }, 'IC a day'),
-        seg(IC_METRICS.map(([k, l]) => [k, l.split(' ')[0]]), prefs.metric, (v) => { prefs.metric = v; load(); }),
-        h('span', { class: 'gs-seg-label' }, 'Factories'),
-        seg(FACTORY_METRICS.map(([k, l]) => [k, l.split(' ')[0]]), prefs.metric, (v) => { prefs.metric = v; load(); }),
+        ...[['IC a day', IC_METRICS], ['Factories', FACTORY_METRICS], ['Wasted IC', WASTED_METRICS], ['IC lost', LOSS_METRICS]]
+          .flatMap(([label, list]) => [h('span', { class: 'gs-seg-label' }, label),
+            seg(list.map(([k, , b]) => [k, b]), prefs.metric, (v) => { prefs.metric = v; load(); })]),
         seg([[false, 'Countries'], [true, 'Factions']], prefs.factions, (v) => { prefs.factions = v; load(); }));
     }
 
@@ -235,22 +261,67 @@ export default {
         groups.get(f).push(c);
       }
       const full = prefs.tags.length >= MAX_SERIES;
-      const searching = search.trim() !== '';
       pickerHead.replaceChildren(`Countries (${prefs.tags.length}/${MAX_SERIES})`,
         prefs.tags.length ? h('button', { class: 'btn btn-small btn-ghost', onclick: () => { prefs.tags = []; load(); } }, 'Clear') : null);
-      const blocks = [...groups.entries()].sort((a, b) => (a[0] === 'Non-aligned') - (b[0] === 'Non-aligned'))
+      const row = (c) => {
+        const on = prefs.tags.includes(c.tag);
+        return h('label', { class: `gs-country ${on ? 'gs-country-on' : ''}`, title: c.name },
+          h('input', { type: 'checkbox', checked: on || null, disabled: (!on && full) || null,
+            onchange: () => { prefs.tags = on ? prefs.tags.filter((t) => t !== c.tag) : [...prefs.tags, c.tag]; load(); } }),
+          h('span', { class: 'gs-country-tag' }, c.tag, on && prefs.colors[c.tag] != null ? colorInput(c.tag) : null),
+          h('span', { class: 'gs-country-value' }, c[prefs.metric] == null ? '-' : compact(c[prefs.metric])));
+      };
+      // the chosen countries on top, whatever group they are in and however the groups are folded (not while searching)
+      const chosen = search.trim() ? [] : prefs.tags.map((t) => main.countries.find((c) => c.tag === t)).filter(Boolean);
+      const blocks = [...groups.entries()].sort((a, b) => (a[0] === NO_FACTION) - (b[0] === NO_FACTION))
           .map(([f, all]) => [f, all.filter((c) => matches(c, search))]).filter(([, list]) => list.length).map(([f, list]) =>
-          h('details', { class: 'gs-group', open: (searching || f !== 'Non-aligned') || null },
-            h('summary', null, `${f} (${list.length})`),
-            list.map((c) => {
-              const on = prefs.tags.includes(c.tag);
-              return h('label', { class: 'gs-country', title: c.name },
-                h('input', { type: 'checkbox', checked: on || null, disabled: (!on && full) || null,
-                  onchange: () => { prefs.tags = on ? prefs.tags.filter((t) => t !== c.tag) : [...prefs.tags, c.tag]; load(); } }),
-                h('span', { class: 'gs-country-tag' }, c.tag, on && prefs.colors[c.tag] != null ? colorInput(c.tag) : null),
-                h('span', { class: 'gs-country-value' }, c[prefs.metric] == null ? '-' : compact(c[prefs.metric])));
-            })));
-      pickerList.replaceChildren(...(blocks.length ? blocks : [h('p', { class: 'muted' }, 'No country matches.')]));
+          fold(`c:${f}`, f !== NO_FACTION, h('summary', null, `${f} (${list.length})`), list.map(row)));
+      pickerList.replaceChildren(
+        chosen.length ? h('div', { class: 'gs-chosen' }, h('div', { class: 'gs-chosen-head' }, 'Shown on the chart'), chosen.map(row)) : null,
+        ...(blocks.length ? blocks : [h('p', { class: 'muted' }, 'No country matches.')]));
+    }
+
+    async function setPatch(on) {
+      if (on && !window.confirm('Keep a combat log for every country?\n\nThe debugger changes 5 bytes of the game\'s code '
+        + 'in memory (single player only, nothing on disk) so the game logs the losses of all countries, not only yours. '
+        + 'It stays until you turn it off or close the game and comes back when the game starts again. '
+        + 'Saves and the game\'s memory grow a little with the logs.')) { renderCharts(); return; }
+      patchBusy = true;
+      renderCharts();
+      try {
+        patch = (await ctx.api.post('/api/live/combat-log-patch', { enabled: on, confirm_local: on })).data;
+      } catch (err) {
+        patch = { ...(patch ?? {}), error: err.message };
+      }
+      patchBusy = false;
+      renderCharts();
+    }
+
+    function patchBar() {
+      const on = !!patch?.enabled;
+      const state = patch?.error ? `Not active: ${patch.error}`
+        : patch?.state === 'on' ? 'Active in the running game'
+          : patch?.state === 'unknown' ? 'The game\'s code is not the expected one - not active'
+            : on ? 'Waiting for the game' : 'Off: the game logs only your country';
+      return h('div', { class: 'gs-patch' },
+        h('label', { class: 'gs-patch-toggle', title: 'LOCAL change of the game in memory, single player only' },
+          h('input', { type: 'checkbox', checked: on || null, disabled: patchBusy || null, onchange: (e) => setPatch(e.target.checked) }),
+          'Combat log for every country'),
+        h('span', { class: `gs-patch-state ${patch?.state === 'on' && !patch?.error ? 'gs-patch-on' : 'muted'}` }, patchBusy ? '…' : state));
+    }
+
+    /** Which chosen series have no combat log - the game keeps one for the player and only some countries at war with
+     * it (POL 1936 at war with SOV: SOV's log stays empty). */
+    function lossNotice(keys) {
+      const empty = main.series.filter((s) => keys.includes(s.key) && !s.values.some((v) => v != null)).map((s) => s.key);
+      const logged = main.countries.filter((c) => c[prefs.metric] != null).map((c) => c.tag);
+      const text = (patch?.state === 'on' ? 'Every country keeps a combat log from the day it was turned on. '
+        : 'The game keeps a combat log only for the player\'s country. ')
+        + `With a log now: ${logged.length ? logged.join(', ') : 'none'}. A country without one shows as combat losses only `
+        + 'its equipment destroyed by the countries with a log (no attrition). The first day after the app starts or a save '
+        + 'is loaded is not known.';
+      return notice(empty.length ? 'warn' : 'info', empty.length
+        ? [h('strong', null, `No losses known for ${empty.join(', ')}. `), text] : text);
     }
 
     function renderCharts() {
@@ -283,10 +354,14 @@ export default {
           h('tbody', null, main.series.filter((s) => keys.includes(s.key)).map((s) => h('tr', null, h('td', null, s.key),
             h('td', { class: 'num' }, s.values[last] == null ? '—' : s.values[last].toLocaleString(undefined, { maximumFractionDigits: 1 })),
             isFactoryMetric(prefs.metric) ? null
-              : h('td', { class: 'num' }, cumulative(main.t, s.values)[last].toLocaleString(undefined, { maximumFractionDigits: 0 })))))));
+              : h('td', { class: 'num' }, cumulative(main.t, s.values)[last]?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? '—'))))));
       const factories = isFactoryMetric(prefs.metric);
       const sync = hoverSync();   // the hovered day shows in both charts
       charts.replaceChildren(...[   // replaceChildren would print a null
+        isLossMetric(prefs.metric) ? patchBar() : null,
+        isLossMetric(prefs.metric) ? lossNotice(keys) : null,
+        prefs.metric.startsWith('w') ? notice('info', 'Factories without a production or construction line, at the '
+          + 'country\'s own IC per assigned factory that day (a construction line takes at most 15 factories).') : null,
         lineChart({ title: factories ? metric : `Daily ${metric}`, series: sets(false), sync,
           format: factories ? (v) => String(Math.round(v)) : compact }),
         factories ? null : lineChart({ title: `Cumulative ${metric}`, series: sets(true), sync }),
@@ -294,8 +369,7 @@ export default {
     }
 
     async function load() {
-      savePrefs({ metric: prefs.metric, factions: prefs.factions, tags: prefs.tags, colors: prefs.colors, game: prefs.game,
-        compare: prefs.compare, groupColors: prefs.groupColors, hiddenGroups: prefs.hiddenGroups, customColors: prefs.customColors });
+      persist();
       try {
         const res = await ctx.api.get('/api/summary/games');
         if (stopped) return;
@@ -312,6 +386,9 @@ export default {
         }
         other = prefs.compare ? await fetchGame(prefs.compare, prefs.game) : null;
         groups = main ? (await ctx.api.get(`${gameUrl(prefs.game)}/groups`)).data : { custom: [], assign: {} };
+        if (isLossMetric(prefs.metric) && !patchBusy) {
+          patch = await ctx.api.get('/api/live/combat-log-patch').then((r) => r.data, (err) => ({ ...(patch ?? {}), error: err.message }));
+        }
         if (stopped) return;
         const a = document.activeElement;   // do not reset a list being picked or a group name being typed
         if (!(pickerList.contains(a) && (a.tagName === 'SELECT' || a.type === 'text'))) renderPicker();

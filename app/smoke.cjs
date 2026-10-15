@@ -168,6 +168,10 @@ function runSmoke(win, outDir, quit) {
               info.summary.groups = await wc.executeJavaScript(`({ groups: document.querySelectorAll('.gs-group').length,
                 legend: [...document.querySelectorAll('.lc-legend-item')].map((e) => e.textContent) })`);
               if (!info.summary.groups.legend.includes('Smoke bloc')) result.failures.push('wide/summary: a new group is not on the chart');
+              // the campaign is the user's own: delete the test group (its country goes back to its faction)
+              await wc.executeJavaScript(`[...document.querySelectorAll('.gs-group summary')].find((s) => s.textContent.includes('Smoke bloc'))
+                ?.querySelector('.gs-del')?.click()`);
+              await waitFor(wc, `![...document.querySelectorAll('.gs-group-name')].some((e) => e.textContent.startsWith('Smoke bloc'))`, 10000);
             }
           }
           if (tab === 'doctrines') {

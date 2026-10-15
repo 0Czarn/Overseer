@@ -1,0 +1,87 @@
+RAPORT 2026-10-13 - stan pracy i notatki do wznowienia
+======================================================================
+
+COMMITY DZIŚ (od najstarszego)
+- 08c3b27  Research: jeden kafelek na zakładki i drzewko, przeciąganie, wykluczenia XOR, linie omijają pola
+- 4a67085  Stabilność i poparcie wojny z sum modyfikatorów gry, część UNKNOWN, wojny na żywo
+- faf21c9  Usunięte stare pliki promptów, notatki i screeny
+- f0d87a6  Zakładka Construction z pamięci gry, wzór "At war", bezpieczne odczyty pamięci
+- 7c4c011  Construction: fabryki cywilne wg zadań, auto-sortowanie kolejki gracza
+- 1adc48c / 63e743f / 3348d9d  Strona wiki o defines (referencja), doradca handlowy w kafelku zasobów, screen opinii
+- 299734e  Drzewko National Focus jak w grze, na żywo z pamięci; poprawka liczby ukończonych celów
+- 6d3047b  Auto-start celów z kolejki, kafelek planu, przybliżanie drzewek, kafelek fabryk, numer gracza
+- 41b0504  Zakładka Doctrines (główna doktryna, subdoktryny, biegłość) z pamięci
+- d02da1c  Zakładka Army/Air/Navy (dywizje, samoloty, floty na żywo); usunięta zakładka Intelligence Lab
+- 2230097  Wolna siła ludzka + statystyki szablonu dywizji jak w projektancie dywizji
+- d6f024d  Nowa zakładka Game summary (historia IC i fabryk, grupy, kolory, wyszukiwanie)
+  UWAGA: d6f024d zawiera też pliki użytkownika wciągnięte przez `git add -A`: RAPORT_2026-10-09.txt (1 linia),
+  restart_test.md (+220 linii), prompt5.md, FRAKCJE.PNG - decyzja otwarta: wyjąć z commita czy zostawić.
+  Nic nie jest wypchnięte (commity tylko lokalne). FRAKCJE.PNG jeszcze nieobejrzany.
+
+Testy na koniec dnia: 268 Python / 76 JS - wszystkie OK; smoke zakładek Army/Air/Navy i Game summary OK.
+Szczegóły offsetów i reguł: STAN_PROJEKTU.txt (aktualny).
+
+----------------------------------------------------------------------
+1. WOLNA SIŁA LUDZKA (Army/Air/Navy, kafelek Army)
+----------------------------------------------------------------------
+- Gra trzyma manpower W STANACH, nie w państwie (jak save: manpower_pool = { available locked total }).
+  Znalezione dwoma `manpower 100000` na pauzie (pełny zrzut pamięci przed/po).
+- [stan gry]+0x2C8 = tablica CState* wg numeru stanu; stan +0xC8 właściciel, +0xCC KONTROLER,
+  +0x848/+0x84C/+0x850 available/locked/total.
+- Free manpower = suma available stanów KONTROLOWANYCH (SOV: 461 566 = gra "461.56K").
+- Kraj +0x338 = w szkoleniu, +0x348 = w polu (gra zaokrągla te wiersze do 2 cyfr znaczących).
+- Kafelek: Free manpower / In the field / In training.
+- NIE ZROBIONE: ludzie w lotnictwie / marynarce / garnizonie, Total Manpower, wyposażenie armii % -
+  to nie są osobne pola w pamięci (gra liczy je na bieżąco).
+
+----------------------------------------------------------------------
+2. STATYSTYKI SZABLONU DYWIZJI (jak projektant dywizji)
+----------------------------------------------------------------------
+- Gra NIE zapisuje tych statystyk nigdzie (przeszukana cała pamięć 7,5 GB) - liczone w backend/hoi4dbg/divisions.py.
+- Wejście: common/units (statystyki, need, kategorie, battalion_mult) + najnowsze projekty sprzętu Z PAMIĘCI
+  ([produkcja]+0xB8, z premiami MIO i duchów armii) + zbadane technologie + odblokowane doktryny.
+- Reguły ustalone ze screenami użytkownika (dywizja.png, batalion-piech.png):
+  premie DODAJĄ się do współczynnika jednostki; battalion_mult w kompaniach wsparcia (Commandos: +5 HP piechocie,
+  add=yes przed mnożnikami); org = średnia; pancerz 0,3 max + 0,7 średnia; przebicie 0,4 max + 0,6 średnia;
+  gra OBCINA wartości (122,96 -> 122,9). Podpowiedź batalionu = usunięcie batalionu RAZEM z baterią pułku.
+- Wynik: SOV Strelkovaya Diviziya 19/20 statystyk = gra.
+- OTWARTE: niezawodność (gra 95,5%, aplikacja 92,9% - wzór nieznany, pokazywana z "≈"; pomoże screen
+  podpowiedzi "Av. Reliability"), dywizje z czołgami (kilka projektów jednego typu - "estimate"),
+  kamienie milowe doktryn nieliczone.
+
+----------------------------------------------------------------------
+3. ZAKŁADKA GAME SUMMARY (nowa, wzór: github.com/otti086-Org/HOI4-IC-Graphs)
+----------------------------------------------------------------------
+- Decyzja: odczyt pamięci zamiast DLL wstrzykiwanego do gry (tamto narzędzie robi DLL) - bez ryzyka crasha
+  i antywirusa, jedno miejsce na offsety, koszt pomijalny.
+- REJESTRATOR (wątek w backendzie, backend/hoi4dbg/ic_history.py): raz na ROZEGRANY dzień gry, dla każdego
+  państwa: IC/dzień MIL (produkcja wojskowa), NAV (okręty + przezbrojenia), CIV (budowa) oraz liczba fabryk
+  cywilnych, wojskowych i stoczni. Wszystkie państwa ~20 ms.
+  Pamięć: [produkcja]+0x58 linie produkcji (+0x8 rodzaj: 56/57/71), +0x30 = IC wyprodukowane danego dnia
+  (sprawdzone testem 1 dnia), linie budowy +0x70 (to samo +0x30).
+- Pliki: %LOCALAPPDATA%\HOI4Debugger\ic-history\<gracz>_<data>_<czas>.jsonl (jeden na kampanię),
+  grupy: <id>.groups.json. Nagrywa tylko jedna instancja aplikacji (blokada pliku).
+- Zapis tylko po upływie dnia gry (menu, ekran wyboru państwa i wczytanie save'a to nie dni) - poprawka po
+  tym, jak powstały puste kampanie SOV/SWI 1936 i duplikaty GER (śmieciowe pliki usunięte).
+- Zakładka: wybór kampanii + porównanie z drugą (linie przerywane); IC a day: Military/Naval/Civilian;
+  Factories: Civilian/Military/Dockyards/All (tylko wykres dzienny); Countries / Factions; wykres dzienny
+  i narastający, wspólny kursor (wartości widocznych serii w obu wykresach), tabela; do 8 serii.
+- Grupy (tryb Factions): przenoszenie państw między frakcjami, własne grupy, Reset, pokaż/ukryj; zapis per
+  kampania, tylko zmiany względem gry. Kolory grup i państw do zmiany (prawy klik = domyślny).
+  Wyszukiwanie po tagu i nazwie.
+- OGRANICZENIE: historia tylko z dni, gdy aplikacja była włączona w trakcie gry.
+
+----------------------------------------------------------------------
+NA CO UWAŻAĆ / PYTANIA OTWARTE
+----------------------------------------------------------------------
+- Gra podawała GER jako państwo gracza w kampanii SOV (stan gry +0x520) - czy użyto `tag`? Kampania nagrana
+  jako "GER". Do sprawdzenia przy następnej grze.
+- Zrzuty pamięci: narzędzia w %TEMP%\hoi4probe\rtti (dump.py ~7,5 GB / 6 s, dlib.py diff); zrzuty po pracy usuwać.
+- Smoke z danymi testowymi: HOI4DBG_DATA_DIR=<katalog> (osobny od prawdziwych danych), HOI4DBG_SMOKE_SHOW=1,
+  HOI4DBG_SMOKE_TABS=summary.
+- Krok F (Focus Manager): zostało tylko potwierdzenie powiadomienia Windows o ukończonym celu w grze.
+
+PIERWSZE KROKI PO POWROCIE
+1. Zdecydować o 4 plikach użytkownika w commicie d6f024d (wyjąć / zostawić); obejrzeć FRAKCJE.PNG.
+2. Pograć z włączoną aplikacją i obejrzeć Game summary na prawdziwych danych.
+3. Dalej wg STAN_PROJEKTU.txt: Krok G (Game Tools), H (test multiplayer), I (raport, instrukcja).

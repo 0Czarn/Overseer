@@ -50,3 +50,7 @@ test('search by tag or name, case-insensitive', async () => {
   assert.equal(matches(sov, 'union'), true);
   assert.equal(matches(sov, 'GER'), false);
 });
+
+test('cumulative losses start at the first known day and skip unknown ones', () => {
+  assert.deepEqual(cumulative([1, 2, 3, 6], [null, 3, null, 2]), [null, 3, 3, 9]);
+});
