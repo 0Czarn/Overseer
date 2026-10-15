@@ -1174,3 +1174,6 @@ body.compact .players-rail { width: 96px; }
   box-shadow: inset 3px 0 0 var(--accent); }
 body.theme-classic .nav-pinned a.active { background: var(--accent-soft); color: var(--accent); box-shadow: none; }
 body.compact .nav-pinned .nav-label { display: none; }
+
+.amount-name { display: inline-flex; align-items: center; }
+.amounts .tx-icon { width: 20px; height: 20px; }

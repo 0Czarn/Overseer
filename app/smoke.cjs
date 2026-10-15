@@ -138,10 +138,12 @@ function runSmoke(win, outDir, quit) {
                 return document.querySelectorAll('#view table tbody tr').length; };
               const live = await rows('Live');
               const save = await rows('Save');
+              const icons = document.querySelectorAll('.amounts .tx-icon').length;
               if (before) btn(before)?.click();
-              return { live, save };
+              return { live, save, icons };
             })()`);
             if (!info.states.save) result.failures.push(`${size.name}/state-editor: the save view lists no states`);
+            if (!info.states.icons) result.failures.push(`${size.name}/state-editor: no building icons`);
           }
           if (tab === 'options') {   // style, eye, background images; no stray "null" text
             info.options = await wc.executeJavaScript(`({ rows: document.querySelectorAll('.opt-row').length,

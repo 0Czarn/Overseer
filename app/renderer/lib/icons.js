@@ -23,6 +23,9 @@ function img(file) {
   return file ? h('img', { class: 'tx-icon', src: ASSETS + file, alt: '', loading: 'lazy' }) : null;
 }
 
+/** <img> of an icon file of assets/texticons. */
+export const iconImg = (file) => img(file);
+
 /** <img> of a modifier's icon, or null when it has none. */
 export const modifierIcon = (key) => img(modifierIconFile(key));
 

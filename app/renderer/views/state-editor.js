@@ -2,16 +2,20 @@ import { h, card, demoBanner, keyValues, notice, select, sourceBadge, table, vie
 import { filterByText, humanize } from '../lib/format.js';
 import { loadCountries, tagChip } from './shared.js';
 import { refreshControl } from '../lib/refresh.js';
+import { iconImg, modifierIcon } from '../lib/icons.js';
 import { numberLocale } from '../lib/options.js';
 
 function chips(tags) {
   return tags?.length ? h('span', { class: 'chip-row' }, tags.map((t) => tagChip(t))) : h('span', { class: 'muted' }, '—');
 }
 
-function amounts(obj) {
+/** Buildings / resources with their icons (mods Modifier Icons / Descriptive Icons, by the building or resource
+ *  id); a building without one (landmarks, mod buildings) gets the generic building icon. */
+function amounts(obj, fallback = null) {
   const entries = Object.entries(obj ?? {});
   if (!entries.length) return h('span', { class: 'muted' }, 'None');
-  return h('ul', { class: 'amounts' }, entries.map(([k, v]) => h('li', null, h('span', null, humanize(k)), h('b', null, v))));
+  return h('ul', { class: 'amounts' }, entries.map(([k, v]) => h('li', null,
+    h('span', { class: 'amount-name' }, modifierIcon(k) ?? (fallback ? iconImg(fallback) : null), humanize(k)), h('b', null, v))));
 }
 
 const fmtInt = (v) => (v === null || v === undefined ? '—' : Math.round(v).toLocaleString(numberLocale()));
@@ -34,9 +38,9 @@ function detail(state) {
       state.provinces ? ['Provinces', String(state.provinces)] : null,
     ].filter(Boolean)),
     h('div', { class: 'two-col' },
-      h('div', null, h('h4', null, 'State buildings'), amounts(state.buildings)),
+      h('div', null, h('h4', null, 'State buildings'), amounts(state.buildings, 'building_slot_building_texticon.png')),
       h('div', null, h('h4', null, 'Resources'), amounts(state.resources))),
-    state.province_buildings ? h('div', null, h('h4', null, 'Province buildings (sum of levels)'), amounts(state.province_buildings)) : null,
+    state.province_buildings ? h('div', null, h('h4', null, 'Province buildings (sum of levels)'), amounts(state.province_buildings, 'building_slot_building_texticon.png')) : null,
     h('p', { class: 'hint' }, 'Buildings and resources are listed by the names the save uses, including ones added by mods. '
       + 'Names shown as #xxxx are binary-save codes not mapped yet.'),
   ].filter(Boolean);
