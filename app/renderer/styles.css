@@ -1035,3 +1035,14 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
 .pa-k-focus { --pa-hue: #c98500; } .pa-k-research { --pa-hue: #3987e5; } .pa-k-ideas { --pa-hue: #9085e9; }
 .pa-k-people { --pa-hue: #d55181; } .pa-k-war { --pa-hue: #e66767; } .pa-k-army { --pa-hue: #199e70; } .pa-k-build { --pa-hue: #8a8a8a; }
 @media (max-width: 700px) { .pa-event { grid-template-columns: 44px minmax(0, 1fr); } .pa-action, .pa-name { grid-column: 2; } }
+
+/* Icons of modifiers and country values (Modifier Icons / Descriptive Icons mods, lib/icons.js) */
+.tx-icon { width: 16px; height: 16px; object-fit: contain; vertical-align: -3px; margin-right: 5px; flex: none; }
+.hoi-mod { display: inline-flex; align-items: center; }
+.stat-label .tx-icon, .hoi-chip-label .tx-icon { width: 18px; height: 18px; vertical-align: -4px; }
+
+/* Game Tools: technical data, folded tiles (views/tech-data.js) */
+.tech-tile { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev-2); margin-top: 8px; }
+.tech-tile > summary { cursor: pointer; padding: 8px 12px; font-weight: 600; }
+.tech-tile[open] > summary { border-bottom: 1px solid var(--border); }
+.tech-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }

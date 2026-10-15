@@ -34,6 +34,10 @@ PLAYER_SLOT = 0x520
 # game_unique_seed at +0x720. Found 2026-10-15: saves IRQ_A, IRQ_B and the autosave of one campaign had the same
 # game_unique_id, two POL campaigns different ones; the only copy in memory near the game state.
 CAMPAIGN_ID = 0x728
+# byte at hoi4.exe + 0x332F63A: 1 = fog of war off. The console command `fow` (handler hoi4.exe+0x2589F0, registered
+# with "fow" / "debug_fow", "Turns off fog of war in a province or in general") only does flag = !flag and redraws the
+# map (2026-10-15, static analysis of 1.19.3.0.c01a). A setting of this client: other players never see it.
+FOG_OFF = 0x332F63A
 CAMPAIGN_ID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 # int32 at country + 0x484: number of states the country owns (0 = does not exist). 2026-10-10: equal to the
 # owner count of the save for 439/439 tags (99 existing, 340 not), next best location 437/439.

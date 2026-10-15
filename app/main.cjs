@@ -68,7 +68,7 @@ function createWindow() {
     minWidth: 420,
     minHeight: 480,
     backgroundColor: '#0f1318',
-    title: 'HOI4 Debugger',
+    title: 'Project OVERSEER',
     autoHideMenuBar: true,
     show: !SMOKE_DIR || process.env.HOI4DBG_SMOKE_SHOW === '1',   // visible smoke run: screenshots of large views
     webPreferences: {
@@ -92,7 +92,7 @@ function createWindow() {
 }
 
 // Windows shows system notifications (focus alerts) only for an app with a user model id.
-if (process.platform === 'win32') app.setAppUserModelId('HOI4Debugger');
+if (process.platform === 'win32') app.setAppUserModelId('ProjectOverseer');
 
 app.whenReady().then(async () => {
   serveRenderer();
@@ -110,7 +110,7 @@ app.whenReady().then(async () => {
     });
   } catch (err) {
     console.error(err.message);
-    if (!SMOKE_DIR) dialog.showErrorBox('HOI4 Debugger - backend error', err.message);
+    if (!SMOKE_DIR) dialog.showErrorBox('Project OVERSEER - backend error', err.message);
   }
   createWindow();
 });

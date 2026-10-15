@@ -1,4 +1,4 @@
-# HOI4 Debugger
+# Project OVERSEER
 
 Desktopowa aplikacja do debugowania aktywnej rozgrywki Hearts of Iron IV (Windows, Steam).
 

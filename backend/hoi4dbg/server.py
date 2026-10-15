@@ -73,6 +73,11 @@ def build_routes(svc: DebuggerService) -> list[Route]:
             raise LiveError("not_confirmed", "The combat log patch must be enabled explicitly (local only)")
         return {"data": live().set_combat_log_patch(enabled)}
 
+    def fog_of_war(body: dict) -> dict:
+        if body.get("confirm_local") is not True or not isinstance(body.get("fog"), bool):
+            raise LiveError("not_confirmed", "Fog of war switching must be confirmed explicitly (local only)")
+        return {"data": live().set_fog_of_war(body["fog"])}
+
     def construction_sort(body: dict) -> dict:
         if body.get("confirm_local") is not True:
             raise LiveError("not_confirmed", "Direct memory writes must be enabled explicitly (local only)")
@@ -150,6 +155,8 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("POST", "/api/live/write", lambda q, b: live_write(b)),
         r("GET", "/api/live/focus/autostart", lambda q, b: svc.focus_autostart(apply=False)),
         r("POST", "/api/live/focus/autostart", lambda q, b: focus_autostart(b)),
+        r("GET", "/api/live/fog-of-war", lambda q, b: {"data": live().fog_of_war()}),
+        r("POST", "/api/live/fog-of-war", lambda q, b: fog_of_war(b)),
         r("GET", "/api/live/construction/sort", lambda q, b: svc.construction_sort(apply=False)),
         r("POST", "/api/live/construction/sort", lambda q, b: construction_sort(b)),
         r("GET", "/api/live/stockpile", lambda q, b: svc.live_stockpile(_str(q, "tag").upper() or None)),

@@ -98,7 +98,7 @@ async function renderView() {
   document.body.dataset.loading = '1';
   delete document.body.dataset.rendered; // set only when THIS view's content is on screen (smoke test waits on it)
   for (const link of document.querySelectorAll('.nav a')) link.classList.toggle('active', link.dataset.view === view.id);
-  document.title = `${view.title} - HOI4 Debugger`;
+  document.title = `${view.title} - Project OVERSEER`;
 
   const root = h('div', { class: 'view-inner' });
   let viewCleanup = null;
@@ -192,7 +192,7 @@ async function init() {
   if (!smoke) setTimeout(() => startFocusWatch(api, (message) => {
     toast(message, 'info');
     api.log('info', `Focus alert: ${message}`);
-    try { new Notification('HOI4 Debugger - national focus', { body: message }); } catch { /* notifications unavailable */ }
+    try { new Notification('Project OVERSEER - national focus', { body: message }); } catch { /* notifications unavailable */ }
   }), 5000);
   // Optional construction queue auto-sort (switch on the Construction tab): a refusal (multiplayer, player not
   // known) is shown once per reason, not every few seconds
@@ -214,7 +214,7 @@ async function init() {
     if (msg) {
       toast(msg.text, msg.kind);
       api.log(msg.kind === 'ok' ? 'warning' : 'info', `Focus auto-start: ${msg.text}`);
-      try { new Notification('HOI4 Debugger - national focus', { body: msg.text }); } catch { /* unavailable */ }
+      try { new Notification('Project OVERSEER - national focus', { body: msg.text }); } catch { /* unavailable */ }
     }
     if (err && err.message !== lastFocusError) toast(`Focus auto-start: ${err.message}`, 'warn');
     lastFocusError = err ? err.message : null;

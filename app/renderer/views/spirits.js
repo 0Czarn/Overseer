@@ -1,6 +1,7 @@
 // National spirits of the selected country (newest save): HOI4-like icon row; modifiers show on hover / focus.
 import { h, notice } from '../lib/dom.js';
 import { livePanel } from '../lib/refresh.js';
+import { modifierIcon } from '../lib/icons.js';
 
 // Modifiers where a higher value is worse for the country (shown red when positive), as in the game's tooltips.
 const BAD_WHEN_HIGH = /cost|penalty|accident|consumption|losses|attrition|requirement|need|to_others|weekly_casualties|enemy_|weight/;
@@ -9,6 +10,12 @@ export function formatModifier(key, value) {
   const percent = key.endsWith('_factor') || (!Number.isInteger(value) && Math.abs(value) < 5);
   const shown = percent ? `${+(value * 100).toFixed(2)}%` : `${+value.toFixed(2)}`;
   return `${value > 0 ? '+' : ''}${shown}`;
+}
+
+/** One modifier as the game lists it: icon (Descriptive Icons), name, coloured value. */
+export function modifierLine(m) {
+  return h('div', { class: 'hoi-line' }, h('span', { class: 'hoi-mod' }, modifierIcon(m.key), m.label),
+    h('span', { class: `hoi-num ${modifierClass(m.key, m.value)}` }, formatModifier(m.key, m.value)));
 }
 
 export function modifierClass(key, value) {
@@ -34,8 +41,7 @@ export function iconTile(item, { round = false } = {}) {
       item.traits?.length ? h('div', { class: 'spirit-tip-traits' }, item.traits.join(' · ')) : null,
       item.modifiers.length || item.tooltips.length
         ? h('div', { class: 'spirit-tip-mods' },
-          item.modifiers.map((m) => h('div', { class: 'hoi-line' }, h('span', null, m.label),
-            h('span', { class: `hoi-num ${modifierClass(m.key, m.value)}` }, formatModifier(m.key, m.value)))),
+          item.modifiers.map(modifierLine),
           item.tooltips.map((t) => h('div', { class: 'spirit-tip-custom' }, t)))
         : h('div', { class: 'muted' }, 'No direct modifiers'),
       item.description ? h('div', { class: 'spirit-tip-desc' }, item.description) : null,

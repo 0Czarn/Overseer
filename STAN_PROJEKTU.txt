@@ -527,6 +527,23 @@ DO ZROBIENIA (w tej kolejności)
             country" w UI zawsze wyglądał na wyłączony (w grze był włączony).
             Okres 07.1936-08.1940 tej gry: nie odtworzony (log trzyma wpisy z datą rozpoczęcia, od ~09.1939).
             Logi państw dynamicznych (D01...) nieliczone - czyje są, nieustalone.
+[x] NAZWA: Project OVERSEER (2026-10-15, prośba użytkownika): okno, tytuły, pasek boczny (znak "PO"), powiadomienia,
+            backend, README, package.json; uruchamiacz "Project OVERSEER.lnk" -> "Uruchom Project OVERSEER.vbs".
+            Folder danych bez zmian: %LOCALAPPDATA%\HOI4Debugger (dane użytkownika zostają).
+[x] IKONY MODÓW (2026-10-15, prośba użytkownika): Descriptive Icons (3797575405) + jego baza Modifier Icons
+            (2668048070). hoi4dbg/texticons.py: lokalizacja angielska modów (£ikona przed nazwą) -> klucz modyfikatora,
+            *.gfx -> tekstura; PNG w app/renderer/assets/texticons (871 ikon, 4516 kluczy, 3,5 MB), mapa
+            app/renderer/lib/texticons.js; aplikacja nie potrzebuje modów. gfx.py: dekoder DXT1/DXT3/DXT5.
+            Widok: ikona przy każdym modyfikatorze (duchy, prawa, doradcy, cechy przywódcy - spirits.modifierLine) i przy
+            wartościach "Live game memory" (lib/icons.statIcon). Po aktualizacji modów: python -m hoi4dbg.texticons
+            "<gra>" "<workshop>/2668048070" "<workshop>/3797575405".
+[x] GAME TOOLS (2026-10-15): "Technical data" na dole, zwinięte kafelki (views/tech-data.js): "Save values - TAG"
+            (surowe pola zapisu) i "Political Power - change test (diagnostic)" - przeniesione z Country Editor (x1.jpg).
+[x] MGŁA WOJNY (2026-10-15, prośba użytkownika): bajt hoi4.exe+0x332F63A (1 = bez mgły) - komenda konsoli `fow`
+            (handler +0x2589F0) robi tylko flag = !flag i odświeża mapę (analiza statyczna). Przełącznik w Game Tools,
+            zapis LOKALNY, tylko singleplayer (GET/POST /api/live/fog-of-war, confirm_local). MULTIPLAYER: odmówione -
+            to byłby podgląd mapy, którego inni gracze nie mają.
+            [ ] potwierdzić na żywo: czy mapa przerysowuje się po samym zapisie bajtu
 [ ] Krok G  Game Tools (narzędzia lokalne)
             (zakładka Intelligence Lab USUNIĘTA 2026-10-13 na prośbę użytkownika - była tylko na danych DEMO)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)

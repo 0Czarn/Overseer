@@ -31,7 +31,7 @@ def build_integration(disabled: bool):
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="hoi4dbg", description="HOI4 Debugger backend")
+    parser = argparse.ArgumentParser(prog="hoi4dbg", description="Project OVERSEER backend")
     parser.add_argument("--port", type=int, default=0, help="TCP port on 127.0.0.1 (0 = random free port)")
     parser.add_argument("--no-game", action="store_true", help="never touch the game (tests / offline UI work)")
     parser.add_argument("--watch-stdin", action="store_true", help="exit when stdin is closed (parent died)")
@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     token = os.environ.get("HOI4DBG_TOKEN") or secrets.token_urlsafe(24)
     data_dir = paths.data_dir()
     logger, ring = applog.setup(data_dir / "logs")
-    logger.info("HOI4 Debugger backend %s starting (data dir: %s)", __version__, data_dir)
+    logger.info("Project OVERSEER backend %s starting (data dir: %s)", __version__, data_dir)
 
     saves = SaveAnalyzer(SaveSnapshotter(data_dir / "save-cache"), logger)
     service = DebuggerService(build_integration(args.no_game), ReportStore(data_dir / "reports"), ring,

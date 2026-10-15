@@ -69,8 +69,9 @@ TOOLS: list[dict] = [
      "description": "Opens the game's log folder in Explorer. Read-only."},
     {"id": "save_inspector", "name": "Save inspector", "scope": "local", "status": "available",
      "description": "Reads a copy of any save file (header, players, mods, structure check). Never modifies saves."},
-    {"id": "debug_overlay", "name": "Debug visibility preview", "scope": "local", "status": "planned",
-     "description": "Shows extra information inside the debugger only. Never changes what other players see."},
+    {"id": "fog_of_war", "name": "Fog of war", "scope": "local", "status": "available",
+     "description": "Turns the fog of war of your own client off and on, like the console command fow. Single player "
+                    "only - in multiplayer it would show you what the other players cannot see."},
     {"id": "value_edit", "name": "Shared value change", "scope": "shared", "status": "planned",
      "description": "Changing country/state/equipment values. Requires a game-compatible sync method, "
                     "verified on two clients before it is offered in multiplayer."},

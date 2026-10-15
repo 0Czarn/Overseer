@@ -1093,6 +1093,38 @@ class LiveService:
         return {"tag": tag, "id": str(equipment_id), "name": name, "before": before, "after": after,
                 "scope": "local", "written_at": self._clock()}
 
+    def fog_of_war(self) -> dict:
+        """{"fog": True = fog of war on, "mode": SINGLEPLAYER / MULTIPLAYER / None}."""
+        def read(mem, base, _tags, _p):
+            raw = mem.read(base + pointers.FOG_OFF, 1)
+            if raw is None or raw[0] > 1:
+                raise pointers.PointerError("implausible", "Fog of war flag not readable - layout does not match")
+            return raw[0] == 0
+        return {"fog": self._game_memory(read), "mode": self.game_mode()}
+
+    def set_fog_of_war(self, fog: bool) -> dict:
+        """LOCAL: fog of war on / off as the console command `fow` does (pointers.FOG_OFF). Single player only - in
+        multiplayer it would show this player what the others cannot see."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Fog of war switching is only verified for 1.19.3.0.c01a")
+        self._require_single_player()
+        key = (process["pid"], process.get("started"))
+        try:
+            with self._open_writer(process["pid"]) as mem:
+                if key not in self._module_base:
+                    self._module_base[key] = mem.modules()[pointers.MODULE][0]
+                at = self._module_base[key] + pointers.FOG_OFF
+                raw = mem.read(at, 1)
+                if raw is None or raw[0] > 1:
+                    raise LiveError("implausible", "Fog of war flag not readable - layout does not match")
+                if raw[0] != (0 if fog else 1):
+                    mem.write(at, bytes([0 if fog else 1]))
+        except (MemoryAccessError, OSError, KeyError) as exc:
+            raise LiveError("memory_error", f"Memory write failed: {exc}") from exc
+        self.log.warning("LOCAL memory write: fog of war %s", "on" if fog else "off")
+        return self.fog_of_war()
+
     def _require_single_player(self) -> None:
         mode = self.game_mode()
         if mode != "SINGLEPLAYER":

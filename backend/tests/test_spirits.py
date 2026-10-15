@@ -22,9 +22,19 @@ class GfxTests(unittest.TestCase):
         raw = zlib.decompress(idat[:struct.unpack(">I", png[png.index(b"IDAT") - 4:png.index(b"IDAT")])[0]])
         self.assertEqual(raw, b"\x00" + bytes([3, 2, 1, 255, 30, 20, 10, 128]))      # filter byte + R G B A
 
+    def test_dxt_blocks_are_decoded(self):   # the mod icons (Modifier Icons, Descriptive Icons) are DXT5
+        block = struct.pack("<HHI", 0xF800, 0x001F, 0x55555555)   # red, blue; every pixel index 1 = blue
+        dxt1 = bytearray(dds(4, 4, block))
+        struct.pack_into("<I4s", dxt1, 80, 0x4, b"DXT1")
+        w, h, rgba = gfx._dxt_rgba(bytes(dxt1[128:]), 4, 4, b"DXT1")
+        self.assertEqual((w, h, rgba[:4]), (4, 4, bytes([0, 0, 255, 255])))
+        alpha = bytes([255, 0]) + bytes(6)                          # DXT5: alpha index 0 = 255 everywhere
+        self.assertEqual(gfx._dxt_rgba(alpha + block, 4, 4, b"DXT5")[2][:4], bytes([0, 0, 255, 255]))
+        self.assertTrue(gfx.dds_to_png(bytes(dxt1)).startswith(b"\x89PNG"))
+
     def test_compressed_or_broken_textures_are_skipped(self):
         compressed = bytearray(dds(4, 4, bytes(64)))
-        struct.pack_into("<I4s", compressed, 80, 0x4, b"DXT5")
+        struct.pack_into("<I4s", compressed, 80, 0x4, b"BC7 ")   # a compression not decoded
         self.assertIsNone(gfx.dds_to_png(bytes(compressed)))
         self.assertIsNone(gfx.dds_to_png(b"not a dds"))
         self.assertIsNone(gfx.dds_to_png(dds(64, 64, bytes(10))))                  # truncated pixels

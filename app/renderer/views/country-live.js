@@ -3,6 +3,7 @@
 // with the base value editable directly (local memory write, single player only).
 import { h, notice, scopeBadge, toast } from '../lib/dom.js';
 import { dataKey, refreshControl } from '../lib/refresh.js';
+import { statIcon } from '../lib/icons.js';
 import { FIELD_LABELS, changeSection, directEnabled } from './live-ui.js';
 
 const STRIP = ['political_power', 'command_power', 'fuel', 'army_experience', 'navy_experience', 'air_experience'];
@@ -56,7 +57,7 @@ function chip(ctx, tag, field) {
   };
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') set(); });
   const el = h('div', { class: 'hoi-chip' },
-    h('span', { class: 'hoi-chip-label' }, FIELD_LABELS[field]), value,
+    h('span', { class: 'hoi-chip-label' }, statIcon(field), FIELD_LABELS[field]), value,
     h('div', { class: 'hoi-chip-edit' }, input, h('button', { class: 'hoi-chip-btn', type: 'button', onClick: set, title: 'Set now (local memory write)' }, 'Set')));
   return {
     el,

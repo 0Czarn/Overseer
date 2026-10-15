@@ -72,7 +72,9 @@ def _dds_rgba(data: bytes, max_side: int) -> tuple[int, int, bytes] | None:
     if len(data) < 128 or data[:4] != b"DDS ":
         return None
     height, width = struct.unpack_from("<II", data, 12)
-    pf_flags, _fourcc, bits, rm, gm, bm, am = struct.unpack_from("<I4sIIIII", data, 80)
+    pf_flags, fourcc, bits, rm, gm, bm, am = struct.unpack_from("<I4sIIIII", data, 80)
+    if pf_flags & 0x4 and fourcc in (b"DXT1", b"DXT3", b"DXT5") and 0 < width <= max_side and 0 < height <= max_side:
+        return _dxt_rgba(data[128:], width, height, fourcc)
     if pf_flags & 0x4 or bits not in (16, 24, 32) or not (0 < width <= max_side and 0 < height <= max_side):
         return None
     if not (pf_flags & 0x1):   # DDPF_ALPHAPIXELS not set: the alpha mask is not used
@@ -91,6 +93,53 @@ def _dds_rgba(data: bytes, max_side: int) -> tuple[int, int, bytes] | None:
         v = int.from_bytes(pixels[i * size:(i + 1) * size], "little")
         for c, (mask, shift, top) in enumerate(channels):
             out[i * 4 + c] = ((v & mask) >> shift) * 255 // top if mask else 0xFF
+    return width, height, bytes(out)
+
+
+def _rgb565(c: int) -> tuple[int, int, int]:
+    return ((c >> 11) & 31) * 255 // 31, ((c >> 5) & 63) * 255 // 63, (c & 31) * 255 // 31
+
+
+def _dxt_rgba(blocks: bytes, width: int, height: int, fourcc: bytes) -> tuple[int, int, bytes] | None:
+    """(width, height, RGBA) of a block-compressed DDS (DXT1 / DXT3 / DXT5, 4x4 pixel blocks; the mod icons)."""
+    size = 8 if fourcc == b"DXT1" else 16
+    bw, bh = (width + 3) // 4, (height + 3) // 4
+    if len(blocks) < bw * bh * size:
+        return None
+    out = bytearray(width * height * 4)
+    pos = 0
+    for by in range(bh):
+        for bx in range(bw):
+            block = blocks[pos:pos + size]
+            pos += size
+            alpha = [255] * 16
+            if fourcc == b"DXT3":
+                bits = int.from_bytes(block[:8], "little")
+                alpha = [((bits >> (4 * i)) & 15) * 17 for i in range(16)]
+            elif fourcc == b"DXT5":
+                a0, a1 = block[0], block[1]
+                table = [a0, a1] + ([((7 - i) * a0 + i * a1) // 7 for i in range(1, 7)] if a0 > a1
+                                    else [((5 - i) * a0 + i * a1) // 5 for i in range(1, 5)] + [0, 255])
+                bits = int.from_bytes(block[2:8], "little")
+                alpha = [table[(bits >> (3 * i)) & 7] for i in range(16)]
+            color = block[size - 8:]
+            c0, c1 = struct.unpack_from("<HH", color)
+            p0, p1 = _rgb565(c0), _rgb565(c1)
+            if c0 > c1 or fourcc != b"DXT1":
+                palette = [p0, p1, tuple((2 * a + b) // 3 for a, b in zip(p0, p1)), tuple((a + 2 * b) // 3 for a, b in zip(p0, p1))]
+                opaque = [True] * 4
+            else:
+                palette = [p0, p1, tuple((a + b) // 2 for a, b in zip(p0, p1)), (0, 0, 0)]
+                opaque = [True, True, True, False]
+            idx = struct.unpack_from("<I", color, 4)[0]
+            for i in range(16):
+                x, y = bx * 4 + i % 4, by * 4 + i // 4
+                if x >= width or y >= height:
+                    continue
+                k = (idx >> (2 * i)) & 3
+                o = (y * width + x) * 4
+                out[o:o + 3] = bytes(palette[k])
+                out[o + 3] = alpha[i] if opaque[k] else 0
     return width, height, bytes(out)
 
 

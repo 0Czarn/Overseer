@@ -2,6 +2,7 @@
 // A number is shown only when the backend confirmed the memory location for the running process.
 import { h, card, keyValues, notice, scopeBadge, toast } from '../lib/dom.js';
 import { PERCENT_FIELDS, classifyLive, formatLiveValue, toValueUnits } from '../lib/live.js';
+import { statIcon } from '../lib/icons.js';
 
 const FIELD = 'political_power';
 export const FIELD_LABELS = {
@@ -127,7 +128,7 @@ function otherFields(last) {
     if (!known) return null;
     const info = classifyLive({ status: last.status, value: entry, fetchedAt: entry.status === 'live' ? now : NaN, now });
     return h('div', { class: `stat-tile live-mini live-${info.state}`, title: info.message },
-      h('div', { class: 'stat-label' }, FIELD_LABELS[f]),
+      h('div', { class: 'stat-label' }, statIcon(f), FIELD_LABELS[f]),
       h('div', { class: 'stat-value' }, info.value !== undefined ? formatLiveValue(info.value, f) : '—'),
       h('div', { class: 'stat-source' }, info.label));
   }).filter(Boolean);

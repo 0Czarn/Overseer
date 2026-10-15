@@ -2,7 +2,7 @@
 // in the style of the game's politics screen.
 import { h, notice } from '../lib/dom.js';
 import { livePanel } from '../lib/refresh.js';
-import { formatModifier, modifierClass } from './spirits.js';
+import { modifierLine } from './spirits.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
 
@@ -63,8 +63,7 @@ function leaderBlock(l, ruling) {
     h('div', { class: 'spirit-tip', role: 'tooltip' }, h('div', { class: 'spirit-tip-name' }, l.name),
       h('div', { class: 'spirit-tip-kind' }, `Country leader · ${l.ideology_name ?? l.ideology ?? ''}`),
       l.traits.length ? l.traits.map((t) => h('div', { class: 'spirit-tip-mods' }, h('div', { class: 'spirit-tip-traits' }, t.name),
-        t.modifiers.map((m) => h('div', { class: 'hoi-line' }, h('span', null, m.label),
-          h('span', { class: `hoi-num ${modifierClass(m.key, m.value)}` }, formatModifier(m.key, m.value))))))
+        t.modifiers.map(modifierLine)))
         : h('div', { class: 'muted' }, 'No leader traits'),
       ruling?.long_name ? h('div', { class: 'spirit-tip-desc' }, ruling.long_name) : null));
 }
