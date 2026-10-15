@@ -918,6 +918,32 @@ class LiveService:
         except LiveError:
             return None
 
+    def overlay(self) -> dict:
+        """The player's values for the overlay window (one memory read): {"tag", "date", "values": {field: value},
+        "ic": {"mil", "nav", "civ"}}; a value not readable is left out."""
+        def read(mem, base, tags, process):
+            tag = pointers.player_country(mem, base, tags) or self.player_tag(process)
+            country = pointers.country_object(mem, base, tags, tag)
+            values = {}
+            for field in pointers.FIELDS:
+                try:
+                    values[field] = pointers.read_field(mem, country, field)
+                except pointers.PointerError:
+                    continue
+            try:
+                ic = {k: round(v, 2) for k, v in pointers.read_ic(mem, country).items() if k in ("mil", "nav", "civ")}
+            except pointers.PointerError:
+                ic = None
+            t = ic_history.day_number(pointers.read_date(mem, base))
+            return {"tag": tag, "date": ic_history.date_text(t) if t is not None else None, "values": values, "ic": ic,
+                    "read_at": self._clock()}
+        return self._game_memory(read)
+
+    def session_players(self) -> dict:
+        """{"players": [{"name", "tag", "local"}], "mode": SINGLEPLAYER / MULTIPLAYER / None} of the running game."""
+        players = self._game_memory(lambda mem, base, tags, _p: pointers.read_players(mem, base, tags))
+        return {"players": players, "mode": self.game_mode(), "read_at": self._clock()}
+
     def running_game(self) -> dict | None:
         """{"campaign", "player", "date"} of the running game (pointers.campaign_id), None when not readable."""
         def read(mem, base, tags, _p):

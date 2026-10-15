@@ -133,6 +133,35 @@ def campaign_id(memory, module_base: int) -> str | None:
     return text if text and CAMPAIGN_ID_RE.fullmatch(text) else None
 
 
+# The session's players: [game state + 0xF8] = array of entries 0xA0 apart (count int32 at +0x104): +0x20 std::string
+# player name (the account name of the saves' player_countries), +0x70 int32 slot of the player's country. Found
+# 2026-10-15 in single player (1 entry "Czarny", slot 20 = SWI = PLAYER_SLOT); the gate of the combat log walks the
+# same list (code_patch.py) for every player of a multiplayer game.
+PLAYERS = {"array": 0xF8, "count": 0x104, "size": 0xA0, "name": 0x20, "slot": 0x70}
+MAX_PLAYERS = 64
+
+
+def read_players(memory, module_base: int, tags: list[str]) -> list[dict]:
+    """[{"name", "tag", "local"}] of every player of the session (local = this computer's player)."""
+    table = _ptr(memory, module_base + COUNTRY_TABLE[0])
+    head = memory.read(table + PLAYERS["array"], 16) if table else None
+    if head is None:
+        raise PointerError("unreadable", "The player list is not readable")
+    array, _cap, count = struct.unpack("<Qii", head)
+    if not 0 <= count <= MAX_PLAYERS or (count and not 0x10000 <= array < 0x7FFF_FFFF_FFFF):
+        raise PointerError("implausible", f"Player list of {count} - layout does not match")
+    local = player_country(memory, module_base, tags)
+    out = []
+    for i in range(count):
+        entry = array + i * PLAYERS["size"]
+        raw = memory.read(entry + PLAYERS["slot"], 4)
+        slot = struct.unpack("<i", raw)[0] if raw else 0
+        tag = tags[slot - 1] if 0 < slot <= len(tags) else None
+        out.append({"name": _msvc_string(memory, entry + PLAYERS["name"], 64) or None, "tag": tag,
+                    "local": tag is not None and tag == local})
+    return out
+
+
 def player_tags(memory, module_base: int, tags: list[str]) -> list[str]:
     """Countries not hidden by fog of war - the player's own country when that is unambiguous. Empty when the flag
     is not readable or too many countries are visible (fog of war off). Not a multiplayer indicator."""

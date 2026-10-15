@@ -577,6 +577,19 @@ DO ZROBIENIA (w tej kolejności)
             Propozycje w zakładce: dźwięki, ukrywanie zakładek, ulubione państwo, auto-sprzątanie, start z Windows /
             zasobnik, tryb nakładki, kolory dla daltonistów.
             [ ] język PL: treść widoków (poza nagłówkami) nadal po angielsku
+[x] OPTIONS - pomysły 2-5 + LISTA GRACZY (2026-10-15): (2) ukrywanie zakładek, ulubione państwo (★ na górze każdej
+            listy państw, shared.pinFavourite); (3) automatyczne sprzątanie przy starcie: nagrania starsze niż N dni,
+            limit MB folderu danych (POST /api/data/cleanup, nagrywana kampania nietykalna) + "Posprzątaj teraz";
+            (4) app/desktop.cjs: start z Windows (opcjonalnie ukryty w zasobniku, --hidden), ikona w zasobniku z menu,
+            zamykanie/minimalizacja do zasobnika, "pokaż okno, gdy gra się uruchomi", jedna instancja aplikacji;
+            (5) nakładka: okno zawsze na wierzchu (overlay.html/js/css), wybrane wartości gracza z /api/live/overlay
+            (PP, stabilność, poparcie wojny, CP, paliwo, XP, IC, data), przezroczystość, blokada (kliknięcia do gry),
+            pozycja zapamiętana; sprawdzone na żywo (SWI 1943.05.06).
+            LISTA GRACZY: pamięć gry [stan gry+0xF8] wpisy 0xA0: +0x20 nazwa konta, +0x70 slot państwa
+            (pointers.read_players, /api/live/players); kolumna po lewej od zakładek (lib/players-rail.js): w MP /
+            zawsze / nigdy. Sprawdzone w SP (Czarny, SWI); [ ] potwierdzić w multiplayerze.
+            NAPRAWA: profil Electrona (localStorage) zależał od nazwy w package.json - po zmianach nazwy ustawienia
+            "znikały". main.cjs przypina %APPDATA%\hoi4-debugger; tools/merge-profiles.cjs scalił 3 profile (27 kluczy).
 [ ] Krok G  Game Tools (narzędzia lokalne)
             (zakładka Intelligence Lab USUNIĘTA 2026-10-13 na prośbę użytkownika - była tylko na danych DEMO)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)

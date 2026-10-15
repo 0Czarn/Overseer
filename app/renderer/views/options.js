@@ -4,8 +4,9 @@
 // recordings, export / import of these settings), text size and keyboard shortcuts. Texts in English or Polish (tt).
 import { h, card, notice, toast, viewHeader } from '../lib/dom.js';
 import { tt } from '../lib/i18n.js';
-import { FITS, LANGS, NUMBERS, REFRESH, TEXT_MAX, TEXT_MIN, THEMES, applyOptions, backgroundUri, loadOptions,
-  saveOptions } from '../lib/options.js';
+import { FITS, LANGS, NUMBERS, OVERLAY_FIELDS, PLAYERS_RAIL, REFRESH, TEXT_MAX, TEXT_MIN, THEMES, applyOptions, backgroundUri,
+  loadOptions, saveOptions } from '../lib/options.js';
+import { loadCountries } from './shared.js';
 import { SHORTCUTS } from '../lib/shortcuts.js';
 
 const MAX_MB = 12;
@@ -94,6 +95,16 @@ export default {
     const language = h('div');
     const data = h('div');
     const keyboard = h('div');
+    const tabs = h('div');
+    const desktopBox = h('div');
+    const overlayBox = h('div');
+    let desk = null;      // desktop integration state from the main process (desktop.cjs)
+    let countries = [];
+
+    async function setDesk(patch) {
+      try { desk = await ctx.bridge.setDesktop(patch); } catch (err) { toast(err.message, 'error'); }
+      draw();
+    }
 
     async function loadImages() {
       try {
@@ -228,6 +239,21 @@ export default {
             h('td', null, g.active ? h('span', { class: 'gs-camp-rec' }, tt('recording', 'nagrywana'))
               : h('button', { class: 'btn btn-small btn-ghost', onclick: () => deleteCampaign(g) }, tt('Delete', 'Usuń'))))))
             : h('span', { class: 'muted' }, tt('None yet.', 'Jeszcze brak.'))) : null,
+        row(tt('Automatic clean-up', 'Automatyczne sprzątanie'), tt('At every start; 0 = off. The campaign being recorded stays.',
+          'Przy każdym starcie; 0 = wyłączone. Nagrywana kampania zostaje.'),
+          h('label', { class: 'opt-num' }, tt('Delete recordings older than', 'Usuń nagrania starsze niż'),
+            h('input', { type: 'number', class: 'input', min: 0, max: 3650, value: o.cleanupDays, onchange: (e) => set({ cleanupDays: +e.target.value }) }),
+            tt('days', 'dni')),
+          h('label', { class: 'opt-num' }, tt('Keep the data folder under', 'Folder danych poniżej'),
+            h('input', { type: 'number', class: 'input', min: 0, max: 100000, value: o.cleanupMB, onchange: (e) => set({ cleanupMB: +e.target.value }) }),
+            'MB'),
+          h('button', { class: 'btn btn-small', onclick: async () => {
+            try {
+              const res = (await ctx.api.post('/api/data/cleanup', { days: o.cleanupDays, limit_mb: o.cleanupMB })).data;
+              toast(`${tt('Deleted', 'Usunięto')}: ${res.deleted.length}`, 'ok');
+            } catch (err) { toast(err.message, 'error'); }
+            loadUsage();
+          } }, tt('Clean up now', 'Posprzątaj teraz'))),
         row(tt('These settings', 'Te ustawienia'), tt('Save them to a file or load them on another computer.', 'Zapisz do pliku albo wczytaj na innym komputerze.'),
           h('button', { class: 'btn btn-small', onclick: exportSettings }, tt('Export…', 'Eksportuj…')),
           h('button', { class: 'btn btn-small', onclick: () => importInput.click() }, tt('Import…', 'Importuj…')), importInput),
@@ -235,6 +261,41 @@ export default {
     }
 
     function draw() {
+      fill(tabs, [
+        row(tt('Shown tabs', 'Widoczne zakładki'), tt('Hide the tabs you do not use (Options always stays).', 'Ukryj nieużywane zakładki (Ustawienia zostają zawsze).'),
+          h('div', { class: 'opt-checks' }, ctx.views.filter((v) => v.id !== 'options').map((v) => check(!o.hiddenTabs.includes(v.id), (show) => {
+            set({ hiddenTabs: show ? o.hiddenTabs.filter((t) => t !== v.id) : [...o.hiddenTabs, v.id] });
+            ctx.renderNav?.();
+          }, v.title)))),
+        row(tt('Favourite country', 'Ulubione państwo'), tt('Pinned first (★) in every country picker.', 'Przypięte na górze (★) każdej listy państw.'),
+          h('select', { class: 'input', onchange: (e) => set({ favCountry: e.target.value }) },
+            h('option', { value: '' }, tt('None', 'Brak')),
+            countries.map((c) => h('option', { value: c.tag, selected: o.favCountry === c.tag || null }, `${c.tag} - ${c.name}`)))),
+        row(tt('Players list', 'Lista graczy'), tt('The players of the session left of the tabs.', 'Gracze sesji po lewej stronie zakładek.'),
+          seg(Object.entries(PLAYERS_RAIL).map(([k, label]) => [k, tt(label, { mp: 'W multiplayerze', always: 'Zawsze', never: 'Nigdy' }[k])]),
+            o.playersRail, (k) => { set({ playersRail: k }, true); ctx.playersRail?.redraw(); })),
+      ]);
+      fill(desktopBox, desk ? [
+        row(tt('Start with Windows', 'Start z Windows'), null,
+          check(desk.openAtLogin, (v) => setDesk({ openAtLogin: v }), tt('Enabled', 'Włączony')),
+          check(desk.startHidden, (v) => setDesk({ startHidden: v }), tt('Start hidden in the tray', 'Start ukryty w zasobniku'))),
+        row(tt('Tray', 'Zasobnik'), tt('The icon next to the clock: click shows the window, right click has a menu.', 'Ikona przy zegarze: kliknięcie pokazuje okno, prawy przycisk - menu.'),
+          check(desk.closeToTray, (v) => setDesk({ closeToTray: v }), tt('Closing the window hides it in the tray', 'Zamknięcie okna chowa je do zasobnika')),
+          check(desk.minimizeToTray, (v) => setDesk({ minimizeToTray: v }), tt('Minimising hides it in the tray', 'Minimalizacja chowa do zasobnika'))),
+        row(tt('With the game', 'Razem z grą'), tt('With "start with Windows" in the tray: the app waits for the game.', 'Ze "startem z Windows" w zasobniku: aplikacja czeka na grę.'),
+          check(o.showOnGame, (v) => set({ showOnGame: v }), tt('Show the window when the game starts', 'Pokaż okno, gdy gra się uruchomi'))),
+      ] : [notice('warn', tt('Desktop settings are not available in this window.', 'Ustawienia pulpitu niedostępne w tym oknie.'))]);
+      fill(overlayBox, [
+        row(tt('Overlay over the game', 'Nakładka nad grą'), tt('A small window always on top. The game must run in "borderless" or windowed mode.',
+          'Małe okno zawsze na wierzchu. Gra musi działać w trybie okna bez ramki albo w oknie.'),
+          check(desk?.overlay, async (v) => { try { await ctx.bridge.setOverlay(v); desk = await ctx.bridge.desktop(); } catch (err) { toast(err.message, 'error'); } draw(); },
+            tt('Show', 'Pokaż')),
+          check(desk?.overlayLocked, (v) => setDesk({ overlayLocked: v }), tt('Lock (clicks pass through to the game)', 'Zablokuj (kliknięcia trafiają do gry)'))),
+        row(tt('Values', 'Wartości'), tt('Of your country, read from game memory.', 'Twojego państwa, z pamięci gry.'),
+          h('div', { class: 'opt-checks' }, Object.entries(OVERLAY_FIELDS).map(([k, label]) => check(o.overlayFields.includes(k),
+            (v) => set({ overlayFields: v ? [...o.overlayFields, k] : o.overlayFields.filter((f) => f !== k) }), label)))),
+        row(tt('Overlay transparency', 'Przezroczystość nakładki'), null, slider(o.overlayOpacity, 20, 100, (v) => set({ overlayOpacity: v }))),
+      ]);
       fill(appearance, [
         row(tt('Style', 'Styl'), tt('Colours, fonts and the look of the panels.', 'Kolory, czcionki i wygląd paneli.'),
           seg(Object.entries(THEMES), o.theme, (k) => set(k === 'classic' ? { theme: k, eye: false } : { theme: k, eye: true }, true))),
@@ -309,6 +370,9 @@ export default {
       viewHeader('Options', 'Settings of this app - nothing here changes the game.'),
       card('Appearance', appearance),
       card('Window and tabs', layout),
+      card('Tabs and countries', tabs),
+      card('Desktop', desktopBox),
+      card('Overlay', overlayBox),
       card('Notifications', notes),
       card('Live reading', reading),
       card('Language and numbers', language),
@@ -316,12 +380,13 @@ export default {
       card('Data', data),
       card('More ideas', h('ul', { class: 'opt-ideas' },
         h('li', null, tt('Sound alerts (a short signal when a focus ends or a campaign starts recording).', 'Dźwięki alertów (krótki sygnał po zakończeniu celu albo starcie nagrywania).')),
-        h('li', null, tt('Hide tabs you do not use; a "favourite country" pinned in every country picker.', 'Ukrywanie nieużywanych zakładek; "ulubione państwo" przypięte w każdym wyborze państwa.')),
-        h('li', null, tt('Automatic clean-up: delete recordings older than N days, limit of the data folder size.', 'Automatyczne sprzątanie: usuwanie nagrań starszych niż N dni, limit rozmiaru folderu danych.')),
-        h('li', null, tt('Start with Windows / with the game, minimise to the tray.', 'Start z Windows / razem z grą, minimalizacja do zasobnika.')),
-        h('li', null, tt('Overlay mode: a small transparent window over the game with chosen values.', 'Tryb nakładki: małe przezroczyste okno nad grą z wybranymi wartościami.')),
+        h('li', null, tt('Overlay: alerts in it (focus finished, war declared) and a second layout with resources.', 'Nakładka: alerty w niej (cel skończony, wypowiedziana wojna) i drugi układ z zasobami.')),
+        h('li', null, tt('Notifications of Players actions (e.g. "GER declared war") for the watched countries.', 'Powiadomienia z Działań graczy (np. "GER wypowiedziała wojnę") dla obserwowanych państw.')),
         h('li', null, tt('Colour-blind friendly chart colours; own accent colour.', 'Kolory wykresów dla daltonistów; własny kolor akcentu.'))), { cls: 'opt-later' }),
     );
-    await Promise.all([loadImages(), loadUsage()]);
+    await Promise.all([loadImages(), loadUsage(),
+      ctx.bridge?.desktop?.().then((d) => { desk = d; }, () => {}),
+      loadCountries(ctx).then((r) => { countries = r.data.filter((c) => c.exists !== false); }, () => {})]);
+    draw();
   },
 };

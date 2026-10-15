@@ -37,3 +37,24 @@ class BackgroundsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CleanupTest(unittest.TestCase):
+    def test_old_campaigns_and_size_limit(self):
+        import os
+        import time
+        from tests.helpers import make_service
+        tmp = Path(tempfile.mkdtemp())
+        svc = make_service(tmp)
+        t = 1936 * 365
+        old = svc.ic_history.add({"t": t, "player": "POL", "countries": {"POL": [1, 2, 3]}, "factions": None})
+        svc.ic_history.active = None   # another game started since
+        new = svc.ic_history.add({"t": t, "player": "GER", "countries": {"GER": [1, 2, 3]}, "factions": None})
+        for p in svc.ic_history.folder.glob(f"{old}.*"):
+            os.utime(p, (time.time() - 40 * 86400,) * 2)
+        res = svc.data_cleanup({"days": 30})["data"]
+        self.assertEqual(res["deleted"], [old])
+        self.assertEqual([g["id"] for g in svc.ic_history.games()], [new])   # the one being recorded stays
+        self.assertEqual(svc.data_cleanup({"limit_mb": 0.000001})["data"]["deleted"], [])
+        with self.assertRaises(Exception):
+            svc.data_cleanup({"days": -1})

@@ -36,3 +36,18 @@ test('data sizes, settings files and shortcuts', async () => {
   assert.equal(shortcutAction({ key: 'a', ctrlKey: true }), null);
   assert.equal(shortcutAction({ key: '3' }), null);
 });
+
+test('players list visibility and the favourite country first', async () => {
+  const { railVisible } = await import('../renderer/lib/players-rail.js');
+  const { pinFavourite } = await import('../renderer/views/shared.js');
+  const sp = { mode: 'SINGLEPLAYER', players: [{ name: 'Czarny', tag: 'SWI', local: true }] };
+  const mp = { mode: 'MULTIPLAYER', players: [{ tag: 'GER' }, { tag: 'ITA' }] };
+  assert.equal(railVisible('mp', sp), false);
+  assert.equal(railVisible('mp', mp), true);
+  assert.equal(railVisible('always', sp), true);
+  assert.equal(railVisible('never', mp), false);
+  assert.equal(railVisible('always', null), false);
+  const list = [{ tag: 'AAA' }, { tag: 'GER' }, { tag: 'POL' }];
+  assert.deepEqual(pinFavourite(list, 'POL').map((c) => c.tag), ['POL', 'AAA', 'GER']);
+  assert.equal(pinFavourite(list, ''), list);
+});

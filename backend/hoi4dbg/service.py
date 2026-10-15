@@ -2108,6 +2108,35 @@ class DebuggerService:
         return {"data": {"path": str(root.resolve()), "parts": parts, "campaigns": campaigns,
                          "total": sum(p["size"] for p in parts)}}
 
+    def data_cleanup(self, data) -> dict:
+        """Automatic clean-up (Options): deletes recorded campaigns not recorded for more than `days` days, then the
+        oldest ones while the data folder is above `limit_mb` MB. The campaign being recorded is never deleted."""
+        data = data if isinstance(data, dict) else {}
+        days, limit = data.get("days") or 0, data.get("limit_mb") or 0
+        if not isinstance(days, (int, float)) or not isinstance(limit, (int, float)) or days < 0 or limit < 0:
+            raise ReportError("days and limit_mb must be numbers >= 0")
+        folder = Path(self.data_dir or ".") / "ic-history"
+
+        def touched(gid: str) -> float:
+            return max((p.stat().st_mtime for p in folder.glob(f"{gid}.*") if p.is_file()), default=0.0)
+        deleted = []
+        games = [g for g in self.ic_history.games() if not g["active"]]
+        if days:
+            cutoff = time.time() - days * 86400
+            for g in games:
+                if touched(g["id"]) < cutoff:
+                    self.ic_history.delete(g["id"])
+                    deleted.append(g["id"])
+        if limit:
+            left = sorted((g for g in games if g["id"] not in deleted), key=lambda g: touched(g["id"]))
+            while left and self.data_usage()["data"]["total"] > limit * 1024 * 1024:
+                gid = left.pop(0)["id"]
+                self.ic_history.delete(gid)
+                deleted.append(gid)
+        if deleted:
+            self.log.info("Options: clean-up deleted %d campaign(s): %s", len(deleted), ", ".join(deleted))
+        return {"data": {"deleted": deleted, **self.data_usage()["data"]}}
+
     # -- Options: the user's background images (backgrounds.py) ----------------------------------------
     def backgrounds_list(self) -> dict:
         return {"data": self.backgrounds.list()}

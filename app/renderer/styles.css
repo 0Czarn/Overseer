@@ -1141,3 +1141,25 @@ body.theme-classic .btn-primary, body.theme-classic .brand-mark { color: #1a1408
 .opt-table td { padding: 3px 12px 3px 0; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .opt-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
 kbd { font: 12px var(--mono); padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; background: var(--bg-elev-2); white-space: nowrap; }
+
+/* Players of the session, left of the tabs (lib/players-rail.js) */
+.players-rail { width: 132px; flex: none; display: flex; flex-direction: column; background: #070606; border-right: 1px solid var(--border);
+  border-top: 4px solid var(--accent); overflow-y: auto; }
+.players-rail[hidden] { display: none; }
+.pr-head { display: flex; justify-content: space-between; align-items: center; padding: 18px 10px 10px; font: 700 12px var(--display);
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+.pr-count { color: var(--accent); }
+.pr-list { display: flex; flex-direction: column; gap: 4px; padding: 8px 6px; }
+.pr-player { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 6px; padding: 6px; border-radius: 6px; border: 1px solid transparent; }
+.pr-player:hover { background: var(--bg-elev-2); }
+.pr-local { border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: var(--accent-soft); }
+.pr-tag { grid-row: span 2; align-self: center; font: 700 11px var(--mono); padding: 3px 4px; border-radius: 4px; background: var(--bg-elev-2);
+  border: 1px solid var(--border); }
+.pr-name { font-weight: 600; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-country { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.compact .players-rail { width: 96px; }
+@media (max-width: 760px) { .players-rail { display: none; } }
+
+.opt-checks { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.opt-num { display: inline-flex; align-items: center; gap: 6px; }
+.opt-num input { width: 80px; }

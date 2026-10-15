@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>The OVERSEER overlay</title>
+  <link rel="stylesheet" href="overlay.css">
+  <script type="module" src="overlay.js"></script>
+</head>
+<body>
+  <div class="ov-box" id="box">
+    <div class="ov-head">
+      <img class="ov-logo" src="assets/overseer.svg" alt="">
+      <span class="ov-title" id="title">THE OVERSEER</span>
+      <button class="ov-close" id="close" title="Close the overlay">×</button>
+    </div>
+    <div class="ov-rows" id="rows"><span class="ov-muted">Waiting for the game…</span></div>
+  </div>
+</body>
+</html>

@@ -15,7 +15,19 @@ export const DEFAULTS = {
   lang: 'en', numbers: 'en',   // interface language, number format ('en' 1,234.5 | 'pl' 1 234,5 | 'system')
   textSize: 100,          // % zoom of the whole window
   shortcuts: true,
+  hiddenTabs: [],         // tab ids not shown in the sidebar
+  favCountry: '',         // pinned first in every country picker
+  cleanupDays: 0, cleanupMB: 0,   // automatic clean-up of recorded campaigns (0 = off)
+  showOnGame: false,      // bring the window up when the game starts
+  overlayFields: ['political_power', 'stability', 'war_support', 'command_power', 'fuel', 'ic'],
+  overlayOpacity: 85,
+  playersRail: 'mp',      // the players of the session left of the tabs: 'mp' | 'always' | 'never'
 };
+export const OVERLAY_FIELDS = {
+  political_power: 'Political Power', stability: 'Stability', war_support: 'War Support', command_power: 'Command Power',
+  fuel: 'Fuel', army_experience: 'Army XP', navy_experience: 'Navy XP', air_experience: 'Air XP', ic: 'IC a day', date: 'Date',
+};
+export const PLAYERS_RAIL = { mp: 'In multiplayer', always: 'Always', never: 'Never' };
 export const REFRESH = { fast: ['Fast', 0.5], normal: ['Normal', 1], light: ['Light on the CPU', 2.5] };
 export const LANGS = { en: 'English', pl: 'Polski' };
 export const NUMBERS = { en: '1,234.5', pl: '1 234,5', system: 'As in Windows' };
@@ -44,6 +56,13 @@ export function normalizeOptions(raw) {
     numbers: o.numbers in NUMBERS ? o.numbers : DEFAULTS.numbers,
     textSize: clamp(o.textSize, TEXT_MIN, TEXT_MAX, DEFAULTS.textSize),
     shortcuts: Boolean(o.shortcuts),
+    hiddenTabs: Array.isArray(o.hiddenTabs) ? o.hiddenTabs.filter((t) => typeof t === 'string' && t !== 'options') : [],
+    favCountry: typeof o.favCountry === 'string' && /^[A-Z0-9]{2,4}$/.test(o.favCountry) ? o.favCountry : '',
+    cleanupDays: clamp(o.cleanupDays, 0, 3650, 0), cleanupMB: clamp(o.cleanupMB, 0, 100000, 0),
+    showOnGame: Boolean(o.showOnGame),
+    overlayFields: Array.isArray(o.overlayFields) ? o.overlayFields.filter((f) => f in OVERLAY_FIELDS) : DEFAULTS.overlayFields,
+    overlayOpacity: clamp(o.overlayOpacity, 20, 100, DEFAULTS.overlayOpacity),
+    playersRail: o.playersRail in PLAYERS_RAIL ? o.playersRail : DEFAULTS.playersRail,
   };
 }
 
@@ -53,6 +72,12 @@ export function loadOptions() {
   if (current) return current;
   try { current = normalizeOptions(JSON.parse(localStorage.getItem(OPTIONS_KEY))); } catch { current = normalizeOptions(null); }
   return current;
+}
+
+/** Read the stored options again (another window of the app - the overlay - changed them). */
+export function reloadOptions() {
+  current = null;
+  return loadOptions();
 }
 
 export function saveOptions(options) {

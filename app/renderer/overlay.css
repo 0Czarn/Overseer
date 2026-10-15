@@ -1,0 +1,19 @@
+/* The overlay window over the game (desktop.cjs, overlay.js): transparent, dragged by its header */
+:root { --accent: #d41f2c; --text: #ece6da; --muted: #978e84; --mono: "Cascadia Mono", Consolas, monospace;
+  --display: "Bahnschrift SemiCondensed", "Bahnschrift", "Segoe UI", sans-serif; color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; font: 13px/1.35 "Segoe UI", sans-serif; color: var(--text); }
+.ov-box { height: 100%; display: flex; flex-direction: column; border: 1px solid rgba(212, 31, 44, 0.7); border-radius: 8px;
+  background: rgba(10, 8, 8, var(--ov-alpha, 0.85)); overflow: hidden; }
+.ov-head { display: flex; align-items: center; gap: 6px; padding: 4px 6px 4px 8px; background: rgba(212, 31, 44, 0.22);
+  -webkit-app-region: drag; user-select: none; }
+.ov-logo { width: 18px; height: 18px; }
+.ov-title { flex: 1; font: 700 12px var(--display); letter-spacing: 0.14em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-close { -webkit-app-region: no-drag; background: none; border: 0; color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer; }
+.ov-close:hover { color: #fff; }
+.ov-rows { flex: 1; padding: 6px 10px; display: flex; flex-direction: column; gap: 3px; overflow: hidden; }
+.ov-row { display: flex; align-items: center; gap: 6px; }
+.ov-row img { width: 16px; height: 16px; flex: none; }
+.ov-label { flex: 1; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-value { font: 600 13px var(--mono); font-variant-numeric: tabular-nums; }
+.ov-muted { color: var(--muted); }

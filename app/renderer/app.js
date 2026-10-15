@@ -22,6 +22,7 @@ import { mountEye, mountLogoEye } from './lib/eye.js';
 import { TEXT_MAX, TEXT_MIN, applyOptions, loadOptions, refreshMs, saveOptions } from './lib/options.js';
 import { shortcutAction } from './lib/shortcuts.js';
 import { tr } from './lib/i18n.js';
+import { startPlayersRail } from './lib/players-rail.js';
 import options from './views/options.js';
 
 const VIEWS = [dashboard, summary, actions, countries, countryEditor, research, construction, doctrines, stateEditor, focus, equipment, tools, logs, options];
@@ -151,7 +152,8 @@ function buildNav() {
   };
   function render() {
     const custom = order.join() !== ids.join();
-    nav.replaceChildren(...order.map((id) => {
+    const hidden = loadOptions().hiddenTabs;   // Options > Tabs
+    nav.replaceChildren(...order.filter((id) => !hidden.includes(id) || id === currentViewId()).map((id) => {
       const v = VIEWS.find((x) => x.id === id);
       return h('a', { href: `#/${v.id}`, 'data-view': v.id, title: `${tr(v.title)} - drag to move (or Alt+Up / Alt+Down)`,
         draggable: 'true', class: v.id === currentViewId() ? 'active' : '',
@@ -214,6 +216,7 @@ statusListeners.add((status) => {
   const detected = Boolean(status?.game?.detected);
   if (lastDetected !== null && detected !== lastDetected) {
     notify('game', 'game', detected ? 'Hearts of Iron IV is running - the Overseer is watching.' : 'Hearts of Iron IV was closed.');
+    if (detected && loadOptions().showOnGame) bridge?.showWindow?.();   // Options > Desktop: show the window with the game
   }
   lastDetected = detected;
 });
@@ -240,6 +243,18 @@ async function watchRecording() {
 function translateShell() {
   document.querySelector('#toggle-ontop + span').textContent = tr('On top');
   document.querySelector('#toggle-compact + span').textContent = tr('Compact');
+}
+
+/** Automatic clean-up of old recorded campaigns (Options > Data), once after the start. */
+async function autoCleanup() {
+  const { cleanupDays, cleanupMB } = loadOptions();
+  if (!cleanupDays && !cleanupMB) return;
+  try {
+    const { data } = await api.post('/api/data/cleanup', { days: cleanupDays, limit_mb: cleanupMB });
+    if (data.deleted.length) toast(`Clean-up: ${data.deleted.length} old recorded campaign(s) deleted`, 'info');
+  } catch (err) {
+    api.log('warning', `Automatic clean-up failed: ${err.message}`);
+  }
 }
 
 /** Keyboard shortcuts (lib/shortcuts.js; Options can turn them off). */
@@ -318,6 +333,8 @@ async function init() {
     notify('focus', 'national focus', message);
   }), 5000);
   if (!smoke) watchRecording();
+  ctx.playersRail = startPlayersRail(api, document.getElementById('players-rail'));
+  if (!smoke) setTimeout(autoCleanup, 10000);
   // Optional construction queue auto-sort (switch on the Construction tab): a refusal (multiplayer, player not
   // known) is shown once per reason, not every few seconds
   let lastSortError = null;

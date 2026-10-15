@@ -8,10 +8,15 @@ const { pathToFileURL } = require('node:url');
 const { app, BrowserWindow, Menu, ipcMain, protocol, net, shell, dialog } = require('electron');
 const { startBackend } = require('./backend-process.cjs');
 const { forwardApiRequest } = require('./api-bridge.cjs');
+const desktop = require('./desktop.cjs');
 
 const RENDERER_DIR = path.join(__dirname, 'renderer');
 const BACKEND_DIR = path.join(__dirname, '..', 'backend');
 const SMOKE_DIR = process.env.HOI4DBG_SMOKE_DIR || '';
+
+// The UI settings (localStorage) live in Electron's user data folder, named after package.json by default: pinned,
+// so renaming the app never starts an empty profile again (tools/merge-profiles.cjs joined the earlier ones).
+app.setPath('userData', path.join(app.getPath('appData'), 'hoi4-debugger'));
 
 let backend = null;
 let mainWindow = null;
@@ -69,6 +74,13 @@ function registerIpc() {
   });
 }
 
+const WEB_PREFERENCES = {
+  preload: path.join(__dirname, 'preload.cjs'),
+  contextIsolation: true,
+  sandbox: true,
+  nodeIntegration: false,
+};
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1320,
@@ -79,14 +91,12 @@ function createWindow() {
     title: 'The OVERSEER',
     icon: path.join(__dirname, 'assets', 'icon.png'),
     autoHideMenuBar: true,
-    show: !SMOKE_DIR || process.env.HOI4DBG_SMOKE_SHOW === '1',   // visible smoke run: screenshots of large views
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.cjs'),
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-    },
+    show: false,
+    webPreferences: WEB_PREFERENCES,
   });
+  // the smoke test runs hidden (unless asked to show); started with Windows into the tray: hidden too
+  const hidden = SMOKE_DIR ? process.env.HOI4DBG_SMOKE_SHOW !== '1' : desktop.setup(mainWindow, WEB_PREFERENCES, ipcMain);
+  if (!hidden) mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (!url.startsWith('app://ui/')) event.preventDefault();
@@ -103,7 +113,15 @@ function createWindow() {
 // Windows shows system notifications (focus alerts) only for an app with a user model id.
 if (process.platform === 'win32') app.setAppUserModelId('TheOverseer');
 
+// One running app: started again (shortcut, or once more after starting with Windows into the tray) it shows the
+// window it has. The smoke test runs beside the user's app on purpose.
+if (!SMOKE_DIR) {
+  if (!app.requestSingleInstanceLock()) app.exit(0);
+  else app.on('second-instance', () => desktop.showMain());
+}
+
 app.whenReady().then(async () => {
+  desktop.init();
   // The default menu's zoom keys would fight the app's own text size (Options, Ctrl+= / Ctrl+- / Ctrl+0): a menu
   // without them, hidden like before (Alt shows it)
   Menu.setApplicationMenu(Menu.buildFromTemplate([{ label: 'View', submenu: [{ role: 'reload' }, { role: 'forceReload' },

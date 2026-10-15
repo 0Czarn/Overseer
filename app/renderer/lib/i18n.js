@@ -41,9 +41,9 @@ const PL = {
   'Research slots': 'Sloty badań', 'Research tabs & technology tree': 'Karty badań i drzewko technologii',
   'Construction queue': 'Kolejka budowy', Army: 'Armia', 'Air Force': 'Lotnictwo', Navy: 'Flota', Doctrines: 'Doktryny',
   Notifications: 'Powiadomienia', 'Live reading': 'Odczyt na żywo', 'Language and numbers': 'Język i liczby',
-  Data: 'Dane', 'Text and keyboard': 'Tekst i klawiatura', 'More ideas': 'Więcej pomysłów',
+  Data: 'Dane', 'Tabs and countries': 'Zakładki i państwa', Desktop: 'Pulpit Windows', Overlay: 'Nakładka', 'Text and keyboard': 'Tekst i klawiatura', 'More ideas': 'Więcej pomysłów',
   // top bar
-  'On top': 'Na wierzchu', Compact: 'Kompaktowy', 'Reset tab order': 'Przywróć kolejność zakładek',
+  Players: 'Gracze', 'On top': 'Na wierzchu', Compact: 'Kompaktowy', 'Reset tab order': 'Przywróć kolejność zakładek',
 };
 
 /** The text in the chosen language (English when there is no translation). */

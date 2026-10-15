@@ -10,6 +10,11 @@ contextBridge.exposeInMainWorld('hoi4dbg', {
   openGameLogsFolder: () => ipcRenderer.invoke('shell:openGameLogs'),
   backendInfo: () => ipcRenderer.invoke('backend:info'),
   openDataFolder: () => ipcRenderer.invoke('shell:openDataFolder'),
+  // desktop integration (Options): start with Windows, tray, overlay window
+  desktop: () => ipcRenderer.invoke('desktop:get'),
+  setDesktop: (patch) => ipcRenderer.invoke('desktop:set', patch),
+  showWindow: () => ipcRenderer.invoke('window:show'),
+  setOverlay: (on) => ipcRenderer.invoke('overlay:set', Boolean(on)),
   // text size (Options): zoom of this window, 0.7 - 1.6
   setZoom: (factor) => webFrame.setZoomFactor(Math.min(1.6, Math.max(0.7, Number(factor) || 1))),
 });
