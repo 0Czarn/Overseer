@@ -590,6 +590,10 @@ DO ZROBIENIA (w tej kolejności)
             zawsze / nigdy. Sprawdzone w SP (Czarny, SWI); [ ] potwierdzić w multiplayerze.
             NAPRAWA: profil Electrona (localStorage) zależał od nazwy w package.json - po zmianach nazwy ustawienia
             "znikały". main.cjs przypina %APPDATA%\hoi4-debugger; tools/merge-profiles.cjs scalił 3 profile (27 kluczy).
+[x] KOLEJNOŚĆ ZAKŁADEK TRWAŁA + OPTIONS PRZYPIĘTE (2026-10-15): kolejność zapisywana przez proces główny od razu do
+            pliku (desktop-options.json, navOrder) + localStorage jako zapas (localStorage gubił ostatnią zmianę przy
+            twardym zamknięciu). Options poza listą przesuwanych zakładek, na dole paska bocznego (#nav-pinned), nie
+            do przesunięcia ani ukrycia; Ctrl+1..9 / Ctrl+Tab chodzą po zwykłych zakładkach.
 [ ] Krok G  Game Tools (narzędzia lokalne)
             (zakładka Intelligence Lab USUNIĘTA 2026-10-13 na prośbę użytkownika - była tylko na danych DEMO)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)

@@ -107,7 +107,7 @@ async function renderView() {
   document.body.dataset.view = view.id;
   document.body.dataset.loading = '1';
   delete document.body.dataset.rendered; // set only when THIS view's content is on screen (smoke test waits on it)
-  for (const link of document.querySelectorAll('.nav a')) link.classList.toggle('active', link.dataset.view === view.id);
+  for (const link of document.querySelectorAll('.nav a, .nav-pinned a')) link.classList.toggle('active', link.dataset.view === view.id);
   document.title = `${tr(view.title)} - The OVERSEER`;
 
   const root = h('div', { class: 'view-inner' });
@@ -140,23 +140,38 @@ const NAV_ICONS = {
 };
 
 // The sidebar in the user's order (lib/nav-order.js): drag a tab, or Alt+Up / Alt+Down on a focused one.
-function buildNav() {
+// Options is not one of them: pinned below the list, never moved. The order is kept by the main process in a file
+// written at once (desktop.cjs) - browser storage may lose the last change when the app is killed - and in
+// localStorage as a fallback.
+const PINNED = ['options'];
+
+function navLink(v, extra = {}) {
+  return h('a', { href: `#/${v.id}`, 'data-view': v.id, class: v.id === currentViewId() ? 'active' : '', ...extra },
+    NAV_ICONS[v.id] ? h('img', { class: 'nav-icon nav-img', src: `assets/texticons/${NAV_ICONS[v.id]}`, alt: '' })
+      : h('span', { class: 'nav-icon' }, v.short),
+    h('span', { class: 'nav-label' }, tr(v.title)));
+}
+
+function buildNav(savedOrder) {
   const nav = document.getElementById('nav');
-  const ids = VIEWS.map((v) => v.id);
-  let order = orderTabs(ids, loadNavOrder());
+  const pinned = document.getElementById('nav-pinned');
+  const ids = VIEWS.map((v) => v.id).filter((id) => !PINNED.includes(id));
+  let order = orderTabs(ids, savedOrder ?? loadNavOrder());
   let dragged = null;
   const apply = (next) => {
     order = next;
-    saveNavOrder(order.join() === ids.join() ? null : order);
+    const saved = order.join() === ids.join() ? null : order;
+    saveNavOrder(saved);
+    Promise.resolve(bridge?.setDesktop?.({ navOrder: saved })).catch(() => {});
     render();
   };
   function render() {
+    pinned.replaceChildren(...PINNED.map((id) => navLink(VIEWS.find((v) => v.id === id), { title: tr(VIEWS.find((v) => v.id === id).title) })));
     const custom = order.join() !== ids.join();
     const hidden = loadOptions().hiddenTabs;   // Options > Tabs
     nav.replaceChildren(...order.filter((id) => !hidden.includes(id) || id === currentViewId()).map((id) => {
       const v = VIEWS.find((x) => x.id === id);
-      return h('a', { href: `#/${v.id}`, 'data-view': v.id, title: `${tr(v.title)} - drag to move (or Alt+Up / Alt+Down)`,
-        draggable: 'true', class: v.id === currentViewId() ? 'active' : '',
+      return navLink(v, { title: `${tr(v.title)} - drag to move (or Alt+Up / Alt+Down)`, draggable: 'true',
         ondragstart: (e) => { dragged = v.id; e.dataTransfer.effectAllowed = 'move'; e.currentTarget.classList.add('nav-dragging'); },
         ondragend: (e) => { dragged = null; e.currentTarget.classList.remove('nav-dragging'); },
         ondragover: (e) => { if (dragged && dragged !== v.id) { e.preventDefault(); e.currentTarget.classList.add('nav-drop'); } },
@@ -169,13 +184,11 @@ function buildNav() {
           if (i < 0 || i >= order.length) return;
           apply(moveTab(order, v.id, order[i]));
           nav.querySelector(`a[data-view="${v.id}"]`)?.focus();
-        } },
-      NAV_ICONS[v.id] ? h('img', { class: 'nav-icon nav-img', src: `assets/texticons/${NAV_ICONS[v.id]}`, alt: '' })
-        : h('span', { class: 'nav-icon' }, v.short),
-      h('span', { class: 'nav-label' }, tr(v.title)));
+        } });
     }), ...(custom ? [h('button', { class: 'nav-reset', title: 'Back to the default order of the tabs',
       onclick: () => apply(ids) }, tr('Reset tab order'))] : []));
   }
+  if (!savedOrder && loadNavOrder()) Promise.resolve(bridge?.setDesktop?.({ navOrder: loadNavOrder() })).catch(() => {});   // into the file
   ctx.resetNavOrder = () => apply(ids);
   ctx.renderNav = render;
   render();
@@ -302,7 +315,7 @@ function syncToggles() {
 }
 
 async function init() {
-  buildNav();
+  buildNav((await Promise.resolve(bridge?.desktop?.()).catch(() => null))?.navOrder);
   mountEye(document.querySelector('.main'));
   mountLogoEye(document.getElementById('brand-logo'));
   ctx.views = VIEWS;

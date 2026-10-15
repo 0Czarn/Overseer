@@ -1163,3 +1163,13 @@ body.compact .players-rail { width: 96px; }
 .opt-checks { display: flex; flex-wrap: wrap; gap: 4px 16px; }
 .opt-num { display: inline-flex; align-items: center; gap: 6px; }
 .opt-num input { width: 80px; }
+
+/* Options, pinned below the tabs (not movable) */
+.nav-pinned { display: flex; flex-direction: column; padding: 8px; border-top: 1px solid var(--border); }
+.nav-pinned a { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px;
+  color: var(--text-muted); text-decoration: none; white-space: nowrap; }
+.nav-pinned a:hover { background: var(--bg-elev-2); color: var(--text); }
+.nav-pinned a.active { background: linear-gradient(90deg, rgba(212, 31, 44, 0.28), rgba(212, 31, 44, 0.05)); color: #fff1e8;
+  box-shadow: inset 3px 0 0 var(--accent); }
+body.theme-classic .nav-pinned a.active { background: var(--accent-soft); color: var(--accent); box-shadow: none; }
+body.compact .nav-pinned .nav-label { display: none; }

@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const { app, BrowserWindow, Menu, Tray, nativeImage } = require('electron');
 
 const DEFAULTS = { openAtLogin: false, startHidden: false, closeToTray: false, minimizeToTray: false,
-  overlay: false, overlayLocked: false, overlayBounds: null };
+  overlay: false, overlayLocked: false, overlayBounds: null, navOrder: null };
 const HIDDEN_ARG = '--hidden';
 
 let options = { ...DEFAULTS };
@@ -85,8 +85,12 @@ function setOverlay(on) {
   return Boolean(overlay);
 }
 
+/** The user's order of the sidebar tabs: tab ids, or null for the default order. */
+const checkOrder = (v) => (Array.isArray(v) && v.length <= 64 && v.every((id) => typeof id === 'string' && /^[a-z-]{1,40}$/.test(id)) ? v : null);
+
 function setOptions(patch) {
   for (const key of Object.keys(DEFAULTS)) if (key in (patch ?? {}) && key !== 'overlayBounds') options[key] = patch[key];
+  options.navOrder = checkOrder(options.navOrder);
   save();
   applyLogin();
   if (overlay) overlay.setIgnoreMouseEvents(Boolean(options.overlayLocked), { forward: true });
