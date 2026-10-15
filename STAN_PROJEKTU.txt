@@ -519,8 +519,14 @@ DO ZROBIENIA (w tej kolejności)
             <plik> (game id ...) - <jak>". POPRAWKA: nagłówek "Groups (x/8 shown)" wypisywał "null".
 [x] URUCHAMIACZ (2026-10-15): "HOI4 Debugger.lnk" (skrót, ikona Electrona, poza gitem - ścieżka tej maszyny) ->
             "Uruchom HOI4 Debugger.vbs" (npm start bez okna konsoli; komunikat, gdy brak node_modules).
-[ ] Combat log: od 15:57 w nowej grze SWI "Combat log amount out of range / of another country - layout does not
-            match" (71 razy) - do zbadania; IC nagrywane dalej.
+[x] COMBAT LOG - NAPRAWA (2026-10-15, zgłoszenie użytkownika, "combat graph.jpg": gra SWI, IC lost = 0 od 07.1936):
+            państwa dynamiczne wojny domowej w Hiszpanii (D01/D03) mają w slocie 365/367 log z numerem 461/463 -
+            read_combat_log odrzucał przez to CAŁY odczyt wszystkich państw. Teraz pomija pojedynczy niezgodny log /
+            wpis / tablicę; błąd układu dopiero gdy większość niezgodna. Na żywo: 82 państwa z logiem, 0 złych wpisów.
+            POPRAWKA 2: GET/POST /api/live/combat-log-patch zwracały dane bez "data" - przełącznik "Combat log for every
+            country" w UI zawsze wyglądał na wyłączony (w grze był włączony).
+            Okres 07.1936-08.1940 tej gry: nie odtworzony (log trzyma wpisy z datą rozpoczęcia, od ~09.1939).
+            Logi państw dynamicznych (D01...) nieliczone - czyje są, nieustalone.
 [ ] Krok G  Game Tools (narzędzia lokalne)
             (zakładka Intelligence Lab USUNIĘTA 2026-10-13 na prośbę użytkownika - była tylko na danych DEMO)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)

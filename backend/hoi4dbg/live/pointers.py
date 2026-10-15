@@ -932,7 +932,10 @@ VARIANT_CREATOR = 0x1C
 def read_combat_log(memory, module_base: int, tags: list[str]) -> dict[str, dict[tuple, tuple]]:
     """{tag: {(army group id, kind, record date, variant id): (units, IC of one unit, creator tag)}} of every country
     with a combat log; kind = "combat" | "attrition" | "enemy" (losses inflicted). Amounts only grow, so a day's losses
-    are the growth of each entry (ic_history.loss_deltas)."""
+    are the growth of each entry (ic_history.loss_deltas).
+    One odd log or item is skipped, not the whole read: 2026-10-15 (SWI game, Spanish civil war 07.1936) the logs of the
+    dynamic countries D01 / D03 held slot 461 / 463 in slots 365 / 367 - aborting on them lost every country's losses
+    from that day on. Only when most logs or items are odd the layout is taken as not matching."""
     table = _ptr(memory, module_base + COUNTRY_TABLE[0])
     head = memory.read(table + COMBAT_LOG, 16) if table else None
     if head is None:
@@ -945,21 +948,34 @@ def read_combat_log(memory, module_base: int, tags: list[str]) -> dict[str, dict
         raise PointerError("unreadable", "The combat log is not readable")
     costs: dict[int, tuple[int, float, str | None]] = {}
     out: dict[str, dict] = {}
+    logs = other = items_ok = items_bad = 0
     for slot in range(1, size):
         manager = struct.unpack_from("<Q", managers, 8 * slot)[0]
         raw = memory.read(manager, 0x28) if manager else None
         if raw is None or struct.unpack_from("<i", raw, CLOG_MANAGER["groups"] + 12)[0] == 0:
             continue
-        if struct.unpack_from("<i", raw, CLOG_MANAGER["slot"])[0] != slot:
-            raise PointerError("implausible", "Combat log of another country - layout does not match")
-        entries = out.setdefault(tags[slot - 1], {})
-        for group in read_array(memory, manager + CLOG_MANAGER["groups"], COMBAT_LOG_MAX):
+        logs += 1
+        if struct.unpack_from("<i", raw, CLOG_MANAGER["slot"])[0] != slot:   # a dynamic country: whose is not known
+            other += 1
+            continue
+        entries: dict = {}
+        try:
+            groups = read_array(memory, manager + CLOG_MANAGER["groups"], COMBAT_LOG_MAX)
+        except PointerError:
+            items_bad += 1
+            continue
+        for group in groups:
             gid = memory.read(group + CLOG_GROUP_ID, 4) if group else None
             if gid is None:
                 continue
             gid = struct.unpack("<i", gid)[0]
             for offset, kind in CLOG_ARRAYS.items():
-                for record in read_array(memory, group + offset, COMBAT_LOG_MAX):
+                try:
+                    records = read_array(memory, group + offset, COMBAT_LOG_MAX)
+                except PointerError:   # an array being changed by the game right now
+                    items_bad += 1
+                    continue
+                for record in records:
                     rec = memory.read(record, 0x58) if record else None
                     if rec is None:
                         continue
@@ -978,10 +994,17 @@ def read_combat_log(memory, module_base: int, tags: list[str]) -> dict[str, dict
                                               tags[creator - 1] if 0 < creator <= len(tags) else None)
                         vid, cost, creator = costs[variant]
                         if not 0 <= cost < 100_000 or not 0 <= amount / 100000 < 10_000_000:
-                            raise PointerError("implausible", "Combat log amount out of range - layout does not match")
+                            items_bad += 1   # freed or being written: this item only
+                            continue
+                        items_ok += 1
                         key = (gid, kind, date, vid)
                         units = entries.get(key, (0.0,))[0] + amount / 100000
                         entries[key] = (units, cost, creator)
+        out[tags[slot - 1]] = entries   # a log without losses yet still counts as a log (ic_history.loss_deltas)
+    if logs and other * 2 > logs:
+        raise PointerError("implausible", "Combat log of another country - layout does not match")
+    if items_bad > max(10, items_ok):
+        raise PointerError("implausible", "Combat log amount out of range - layout does not match")
     return out
 
 

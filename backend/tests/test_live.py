@@ -38,10 +38,10 @@ class FakeMemory:
                 return bytes(data[address - base:address - base + size])
         return None
 
-    def put(self, address, fmt, value):
+    def put(self, address, fmt, *values):
         for base, data in self.regions_data.items():
             if base <= address < base + len(data):
-                struct.pack_into("<" + fmt, data, address - base, value)
+                struct.pack_into("<" + fmt, data, address - base, *values)
                 return
         raise AssertionError("address outside fake memory")
 
@@ -1183,6 +1183,39 @@ class IdeaPointerTests(unittest.TestCase):
         mem.put(act + pointers.JUSTIFICATION_SIDES + 4, "i", -5)
         with self.assertRaises(pointers.PointerError):
             pointers.read_justifications(mem, country)
+
+    def test_combat_log_skips_a_dynamic_countrys_log_and_odd_items(self):
+        mem = FakeMemory(0x8000)
+        module, table = BASE - pointers.COUNTRY_TABLE[0], BASE + 0x100
+        mem.put(module + pointers.COUNTRY_TABLE[0], "Q", table)
+        managers, variant = BASE + 0x1000, BASE + 0x2000
+        mem.put(table + pointers.COMBAT_LOG, "Qii", managers, 4, 4)
+        mem.put(variant + pointers.VARIANT["id"], "i", 7)
+        mem.put(variant + pointers.VARIANT_CREATOR, "i", 1)
+        mem.put(variant + pointers.VARIANT_COST, "q", 50000)   # 0.5 IC a unit
+
+        def log(at, slot, amounts):   # manager, one group, one combat record with (variant, amount) items
+            group, groups, records, record, items = at + 0x40, at + 0x200, at + 0x220, at + 0x240, at + 0x300
+            mem.put(at + pointers.CLOG_MANAGER["groups"], "Qii", groups, 1, 1)
+            mem.put(at + pointers.CLOG_MANAGER["slot"], "i", slot)
+            mem.put(groups, "Q", group)
+            mem.put(group + pointers.CLOG_GROUP_ID, "i", 3)
+            mem.put(group + 0x38, "Qii", records, 1, 1)   # "combat"
+            mem.put(records, "Q", record)
+            mem.put(record + pointers.CLOG_LOSS["date"], "i", 100)
+            mem.put(record + pointers.CLOG_LOSS["items"], "Qii", items, len(amounts), len(amounts))
+            for i, amount in enumerate(amounts):
+                mem.put(items + 16 * i, "Qq", variant, amount)
+            return at
+        tags = ["GER", "POL", "D01"]
+        mem.put(managers + 8, "Q", log(BASE + 0x3000, 1, [200000, -5]))   # GER: 2 units, one odd item skipped
+        mem.put(managers + 16, "Q", log(BASE + 0x4000, 2, []))            # POL: a log without losses yet
+        mem.put(managers + 24, "Q", log(BASE + 0x5000, 461, [100000]))    # D01 holds another slot number
+        self.assertEqual(pointers.read_combat_log(mem, module, tags),
+                         {"GER": {(3, "combat", 100, 7): (2.0, 0.5, "GER")}, "POL": {}})
+        mem.put(BASE + 0x3000 + pointers.CLOG_MANAGER["slot"], "i", 9)   # most logs odd: another layout
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_combat_log(mem, module, tags)
 
     def test_focus_start_and_player_slot(self):
         mem = FakeMemory(0x4000)

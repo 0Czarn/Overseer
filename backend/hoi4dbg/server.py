@@ -71,7 +71,7 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         enabled = body.get("enabled") is True
         if enabled and body.get("confirm_local") is not True:
             raise LiveError("not_confirmed", "The combat log patch must be enabled explicitly (local only)")
-        return live().set_combat_log_patch(enabled)
+        return {"data": live().set_combat_log_patch(enabled)}
 
     def construction_sort(body: dict) -> dict:
         if body.get("confirm_local") is not True:
@@ -118,7 +118,7 @@ def build_routes(svc: DebuggerService) -> list[Route]:
             (q.get("factions") or [""])[0] == "1", (q.get("groups_from") or [""])[0] or None)),
         r("GET", "/api/actions", lambda q, b: svc.players_actions((q.get("game") or [""])[0] or None)),
         r("POST", "/api/actions/watch", lambda q, b: svc.players_actions_watch(b)),
-        r("GET", "/api/live/combat-log-patch", lambda q, b: live().combat_log_patch()),
+        r("GET", "/api/live/combat-log-patch", lambda q, b: {"data": live().combat_log_patch()}),
         r("POST", "/api/live/combat-log-patch", lambda q, b: combat_log_patch(b)),
         r("POST", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/delete", lambda q, b, gid: svc.summary_delete(gid)),
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/groups", lambda q, b, gid: svc.summary_groups(gid)),
