@@ -605,6 +605,8 @@ DO ZROBIENIA (w tej kolejności)
             (pointers.read_states, 1081 regionów w 0,4 s). Porównanie z autosave 1943.05: kategorie, zasoby, roszczenia
             100%; budynki 20 różnic i 1 właściciel = zmiany od autosave; rdzenie państw dynamicznych (D01...) pomijane.
             Na żywo bez budynków prowincji i kontrolerów pojedynczych prowincji (tylko w widoku Save).
+[x] STATE EDITOR - IKONY (2026-10-15): budynki regionu i prowincji oraz zasoby z ikonami modów (po id budynku /
+            zasobu); bez własnej ikony (pomniki, budynki modów) - ogólna ikona budynku.
 [ ] Krok G  Game Tools (narzędzia lokalne)
             (zakładka Intelligence Lab USUNIĘTA 2026-10-13 na prośbę użytkownika - była tylko na danych DEMO)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)
