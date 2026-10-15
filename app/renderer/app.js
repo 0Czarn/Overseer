@@ -19,8 +19,10 @@ import summary from './views/summary.js';
 import actions from './views/actions.js';
 import { loadNavOrder, moveTab, orderTabs, saveNavOrder } from './lib/nav-order.js';
 import { mountEye } from './lib/eye.js';
+import { applyOptions, loadOptions } from './lib/options.js';
+import options from './views/options.js';
 
-const VIEWS = [dashboard, summary, actions, countries, countryEditor, research, construction, doctrines, stateEditor, focus, equipment, tools, logs];
+const VIEWS = [dashboard, summary, actions, countries, countryEditor, research, construction, doctrines, stateEditor, focus, equipment, tools, logs, options];
 const STATUS_INTERVAL_MS = 3000;
 const PREFS_KEY = 'hoi4dbg.prefs';
 
@@ -74,6 +76,8 @@ const ctx = {
     location.hash = `#/${id}`;
   },
   rerender: () => renderView(),
+  views: null,           // the tabs (set below; Options lists them)
+  resetNavOrder: () => {},   // set by buildNav
   onStatus(fn) {
     statusListeners.add(fn);
     return () => statusListeners.delete(fn);
@@ -86,7 +90,7 @@ const ctx = {
 };
 
 function currentViewId() {
-  return location.hash.replace(/^#\/?/, '') || 'dashboard';
+  return location.hash.replace(/^#\/?/, '') || loadOptions().startTab || 'dashboard';
 }
 
 async function renderView() {
@@ -128,7 +132,7 @@ const NAV_ICONS = {
   countries: 'ai_faction_texticon.png', 'country-editor': 'political_power_texticon.png', research: 'research_speed_texticon.png',
   construction: 'construction_speed_texticon.png', doctrines: 'divisions_texticon.png', 'state-editor': 'infrastructure_building_texticon.png',
   focus: 'decision_modifier_texticon.png', equipment: 'ai_military_equipment_texticon.png', tools: 'repairing.png',
-  logs: 'decryption_texticon.png',
+  logs: 'decryption_texticon.png', options: '../options.svg',
 };
 
 // The sidebar in the user's order (lib/nav-order.js): drag a tab, or Alt+Up / Alt+Down on a focused one.
@@ -167,6 +171,7 @@ function buildNav() {
     }), ...(custom ? [h('button', { class: 'nav-reset', title: 'Back to the default order of the tabs',
       onclick: () => apply(ids) }, 'Reset tab order')] : []));
   }
+  ctx.resetNavOrder = () => apply(ids);
   render();
 }
 
@@ -217,6 +222,8 @@ function syncToggles() {
 async function init() {
   buildNav();
   mountEye(document.querySelector('.main'));
+  ctx.views = VIEWS;
+  applyOptions(loadOptions(), api);
   applyCompact();
   document.getElementById('toggle-compact').addEventListener('change', (e) => ctx.setState({ compact: e.target.checked }));
   document.getElementById('toggle-ontop').addEventListener('change', (e) => ctx.setAlwaysOnTop(e.target.checked));

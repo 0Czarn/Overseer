@@ -21,6 +21,7 @@ from . import mio as mio_mod
 from . import divisions as divisions_mod
 from . import ic_history as ic_history_mod
 from .ic_history import IcHistory
+from .backgrounds import BackgroundError, Backgrounds
 from . import focus as focus_mod
 from . import techtree
 from .applog import RingBufferHandler
@@ -270,6 +271,7 @@ class DebuggerService:
         self.data_dir = data_dir
         self._last_detected: bool | None = None
         self.ic_history = IcHistory(Path(data_dir or ".") / "ic-history")   # recorded campaigns (Game summary)
+        self.backgrounds = Backgrounds(Path(data_dir or ".") / "backgrounds")   # the user's images (Options)
         self.ic_recorder = None   # ic_history.IcRecorder when live access is on (started in __main__)
 
     # -- status ---------------------------------------------------------------------------
@@ -2080,6 +2082,33 @@ class DebuggerService:
 
     def tools(self) -> dict:
         return envelope(LIVE, TOOLS)
+
+    # -- Options: the user's background images (backgrounds.py) ----------------------------------------
+    def backgrounds_list(self) -> dict:
+        return {"data": self.backgrounds.list()}
+
+    def background_add(self, data) -> dict:
+        data = data if isinstance(data, dict) else {}
+        try:
+            item = self.backgrounds.add(data.get("name"), data.get("data"), time.strftime("%Y-%m-%d %H:%M:%S"))
+        except BackgroundError as exc:
+            raise ReportError(str(exc)) from None
+        self.log.info("Options: background %s added (%s, %d bytes)", item["id"], item["name"], item["size"])
+        return {"data": item}
+
+    def background(self, bid: str) -> dict:
+        try:
+            return {"data": {"id": bid, "uri": self.backgrounds.get(bid)}}
+        except (FileNotFoundError, BackgroundError):
+            raise NotFound(f"No background {bid}") from None
+
+    def background_delete(self, bid: str) -> dict:
+        try:
+            self.backgrounds.delete(bid)
+        except (FileNotFoundError, BackgroundError):
+            raise NotFound(f"No background {bid}") from None
+        self.log.info("Options: background %s deleted", bid)
+        return self.backgrounds_list()
 
     # -- logs & reports -------------------------------------------------------------------
     def app_log(self, limit: int, level: str, after: int) -> dict:

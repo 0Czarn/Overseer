@@ -72,6 +72,17 @@ class ServerTests(TempDirMixin, unittest.TestCase):
         self.assertEqual(self.call(f"/api/reports/{rid}")[1]["data"]["title"], "Roundtrip")
         self.assertEqual(self.call("/api/reports")[1]["data"][0]["id"], rid)
 
+    def test_background_image_roundtrip_with_a_large_body(self):   # Options: images above the usual 256 KB
+        import base64
+        png = b"\x89PNG\r\n\x1a\n" + bytes(600_000)
+        uri = "data:image/png;base64," + base64.b64encode(png).decode()
+        status, added = self.call("/api/backgrounds", method="POST", body={"name": "map.png", "data": uri})
+        self.assertEqual(status, 200, added)
+        bid = added["data"]["id"]
+        self.assertEqual(self.call(f"/api/backgrounds/{bid}")[1]["data"]["uri"], uri)
+        self.assertEqual(self.call(f"/api/backgrounds/{bid}/delete", method="POST", body={})[1]["data"], [])
+        self.assertEqual(self.call("/api/reports", method="POST", body={"title": "x" * 300_000})[0], 413)
+
     def test_invalid_json_body(self):
         req = urllib.request.Request(self.base + "/api/reports", data=b"{not json", method="POST")
         req.add_header(TOKEN_HEADER, TOKEN)

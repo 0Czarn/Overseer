@@ -2,6 +2,15 @@
 // then. Decoration only (aria-hidden, no pointer events); no blinking with "reduce motion".
 const NS = 'http://www.w3.org/2000/svg';
 const MAX_SHIFT = 46;   // how far the iris moves from the centre (viewBox units)
+const settings = { track: true, blink: true };   // from the Options tab (lib/options.js)
+let resetIris = null;
+
+/** Follow the cursor / blink on or off (Options). */
+export function setEyeOptions({ track = true, blink = true } = {}) {
+  settings.track = track;
+  settings.blink = blink;
+  if (!track) resetIris?.();
+}
 
 function el(tag, attrs, ...children) {
   const node = document.createElementNS(NS, tag);
@@ -62,14 +71,16 @@ export function mountEye(host) {
     const s = irisShift((pointer.x - (r.left + r.width / 2)) * scale, (pointer.y - (r.top + r.height * 0.5)) * scale, 600);
     iris.setAttribute('transform', `translate(${s.x.toFixed(1)} ${s.y.toFixed(1)})`);
   };
+  resetIris = () => iris.setAttribute('transform', 'translate(0 0)');
   window.addEventListener('mousemove', (e) => {
+    if (!settings.track || layer.hidden) return;
     pointer = { x: e.clientX, y: e.clientY };
     if (!frame) frame = requestAnimationFrame(update);
   }, { passive: true });
 
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     const blink = () => {
-      lid.classList.add('eye-blink');
+      if (settings.blink && !layer.hidden) lid.classList.add('eye-blink');
       setTimeout(() => lid.classList.remove('eye-blink'), 260);
       setTimeout(blink, 7000 + Math.random() * 9000);
     };

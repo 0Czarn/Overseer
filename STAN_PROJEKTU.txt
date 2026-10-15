@@ -557,6 +557,14 @@ DO ZROBIENIA (w tej kolejności)
             napis THE OVERSEER IS WATCHING), tęczówka śledzi kursor (irisShift, requestAnimationFrame), mrugnięcie co
             7-16 s (bez animacji przy "reduce motion"). Paleta: czerń, karmin #d41f2c, stal, kolor papieru; nagłówki
             Bahnschrift SemiCondensed wersalikami; karty lekko przezroczyste; czerwony pasek aktywnej zakładki.
+[x] ZAKŁADKA OPTIONS (2026-10-15, prośba użytkownika): views/options.js + lib/options.js (localStorage
+            hoi4dbg.options). Appearance: styl Overseer (1984) / Classic (wygląd sprzed 1984, body.theme-classic), oko
+            (pokaż, przezroczystość, śledzi kursor, mruga), własne tła JPG/PNG (do 12 MB, max 30; backend
+            hoi4dbg/backgrounds.py -> <dane>/backgrounds, /api/backgrounds; sprawdzane po bajtach pliku; limit treści
+            tylko dla tej trasy), przezroczystość tła, ułożenie (Fill/Fit/Tile/Centre), rozmycie. Window and tabs:
+            zakładka startowa, compact, always on top, reset kolejności. Lista propozycji na później (powiadomienia,
+            częstotliwość odczytu, język, dane/eksport ustawień, rozmiar tekstu i skróty).
+            [ ] sprawdzić u użytkownika: dodanie własnego obrazka, styl Classic
 [ ] Krok G  Game Tools (narzędzia lokalne)
             (zakładka Intelligence Lab USUNIĘTA 2026-10-13 na prośbę użytkownika - była tylko na danych DEMO)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)

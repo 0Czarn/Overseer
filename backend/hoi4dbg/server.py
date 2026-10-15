@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable
 from urllib.parse import parse_qs, urlsplit
 
+from .backgrounds import UPLOAD_BODY
 from .equipment_changes import ChangeError, EquipmentChanges
 from .live.service import LiveError
 from .reports import ReportError
@@ -144,6 +145,10 @@ def build_routes(svc: DebuggerService) -> list[Route]:
             tag, str(b.get("archetype", "")), b.get("amount"), str(b.get("variant", "")))),
         r("GET", r"/api/equipment/changes/(?P<op>eq-[0-9]{1,9})", lambda q, b, op: changes.poll(op)),
         r("GET", "/api/tools", lambda q, b: svc.tools()),
+        r("GET", "/api/backgrounds", lambda q, b: svc.backgrounds_list()),
+        r("POST", "/api/backgrounds", lambda q, b: svc.background_add(b)),
+        r("GET", r"/api/backgrounds/(?P<bid>[0-9a-f]{16})", lambda q, b, bid: svc.background(bid)),
+        r("POST", r"/api/backgrounds/(?P<bid>[0-9a-f]{16})/delete", lambda q, b, bid: svc.background_delete(bid)),
         r("GET", "/api/saves", lambda q, b: svc.saves_list()),
         r("GET", "/api/saves/analysis", lambda q, b: svc.save_analysis(_str(q, "name") or None)),
         r("GET", "/api/saves/fields", lambda q, b: svc.save_fields()),
@@ -210,7 +215,7 @@ def make_handler(svc: DebuggerService, token: str) -> type[BaseHTTPRequestHandle
             body: dict = {}
             if method == "POST":
                 length = int(self.headers.get("Content-Length") or 0)
-                if length > MAX_BODY:
+                if length > (UPLOAD_BODY if parts.path == "/api/backgrounds" else MAX_BODY):   # images: Options
                     self._send(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "body too large"})
                     return
                 try:

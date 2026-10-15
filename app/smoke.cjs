@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const TABS = ['dashboard', 'summary', 'actions', 'countries', 'country-editor', 'research', 'construction', 'doctrines', 'state-editor', 'focus', 'equipment', 'tools',
-  'logs'];
+  'logs', 'options'];
 // HOI4DBG_SMOKE_TABS=focus,construction checks only these tabs
 const ONLY = (process.env.HOI4DBG_SMOKE_TABS || '').split(',').filter(Boolean);
 const SIZES = [{ name: 'wide', width: 1320, height: 860 }, { name: 'narrow', width: 480, height: 820 }];
@@ -127,6 +127,13 @@ function runSmoke(win, outDir, quit) {
               await waitFor(wc, `${count} === ${before}`, 10000);
               if (info.focusQueueAdd !== 1) result.failures.push(`${size.name}/focus: clicking a focus does not add it to the plan`);
             }
+          }
+          if (tab === 'options') {   // style, eye, background images; no stray "null" text
+            info.options = await wc.executeJavaScript(`({ rows: document.querySelectorAll('.opt-row').length,
+              gallery: !!document.querySelector('.opt-gallery .opt-thumb-add'),
+              nulls: /null/.test(document.querySelector('#view').innerText) })`);
+            if (!info.options.rows || !info.options.gallery) result.failures.push(`${size.name}/options: settings missing`);
+            if (info.options.nulls) result.failures.push(`${size.name}/options: shows "null"`);
           }
           if (tab === 'actions') {   // the log, its filters and the watched countries
             await waitFor(wc, `!!document.querySelector('.pa-kinds, .pa-list .notice')`, 20000);
