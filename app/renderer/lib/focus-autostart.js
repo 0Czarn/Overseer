@@ -17,6 +17,10 @@ export function setAutostartEnabled(on) {
 export function autostartMessage(res, seen = new Set()) {
   if (!res) return null;
   if (res.state === 'started') return { text: `Focus started: ${res.name} (${res.days} days)`, kind: 'ok' };
+  if (res.state === 'waiting' && !seen.has(`w:${res.focus}`)) {
+    seen.add(`w:${res.focus}`);
+    return { text: `Next in your plan: ${res.name} - ${res.reason}, it starts when they are`, kind: 'info' };
+  }
   if (res.state === 'manual' && !seen.has(res.focus)) {
     seen.add(res.focus);
     return { text: `Next in your plan: ${res.name} - ${res.reason}`, kind: 'warn' };

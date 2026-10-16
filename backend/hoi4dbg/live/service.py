@@ -22,7 +22,8 @@ from ..integration.code_write import ProcessCodePatcher
 from ..integration.memory_write import ProcessMemoryWriter
 from .. import construction as construction_mod
 from .. import ic_history
-from . import code_patch, console, layout, pointers
+from .. import triggers
+from . import code_patch, console, layout, pointers, world
 from .calibration import SCAN_LIMIT, CalibrationError, FieldCalibration, holds, scan_many, tolerance_for
 
 TOLERANCE = 0.0005           # values are fixed point with 3 decimals
@@ -54,6 +55,7 @@ class LiveService:
         self._open_patcher = open_patcher
         self._patch_file = store_dir / "combat_log_patch.json"   # the user's choice, re-applied after a game restart
         self._patch_failed: tuple | None = None   # process key the automatic re-apply failed for (logged once)
+        self._mp_file = store_dir / "multiplayer_writes.json"   # user's opt-in: local writes also in multiplayer
         self._clock = clock
         self.log = logger
         self.store = store_dir / "calibrations.json"
@@ -635,6 +637,19 @@ class LiveService:
         self.log.warning("LOCAL memory write %s: focus %s started (0 days)", tag, focus_id)
         return {"tag": tag, "started": focus_id, "scope": "local", "written_at": self._clock()}
 
+    def check_conditions(self, tag: str, blocks: dict[str, list], ideologies: list[str], dlcs: set[str] | None,
+                         scripted: dict[str, list]) -> dict[str, tuple]:
+        """{id: (True / False / None, [triggers the app could not evaluate])} of trigger blocks (focus `available`)
+        for `tag`, evaluated on the running game's memory (triggers.evaluate, world.py)."""
+        def run(mem, base, order, _p):
+            w = world.LiveWorld(mem, base, order, ideologies, dlcs)
+            out = {}
+            for fid, block in blocks.items():
+                ctx = triggers.Context(w, tag, scripted)
+                out[fid] = (triggers.evaluate(block, ctx), sorted(ctx.unknown))
+            return out
+        return self._game_memory(run)
+
     def factories(self, tag: str) -> dict:
         """Live factories of `tag` by type with where they come from, and energy (game memory)."""
         process = self._process()
@@ -1035,7 +1050,8 @@ class LiveService:
 
     def ic_snapshot(self, with_factions: bool = False) -> dict:
         """{"t", "player", "countries": {tag: [mil, nav, civ, civilian factories, military factories, dockyards,
-        wasted mil, wasted nav, wasted civ]}, "factions": {tag: faction name} or None, "losses": combat logs} - IC a
+        wasted mil, wasted nav, wasted civ]}, "factions": {tag: faction name} or None, "players": {tag: {"n": player
+        name, "s": [subject tags]}} of every human player or None, "losses": combat logs} - IC a
         day (pointers.read_ic), factories as the game shows them (pointers.read_factories), IC a day of the factories
         without a line (ic_history.wasted_ic) of every existing country and the combat logs
         (pointers.read_combat_log)."""
@@ -1071,6 +1087,20 @@ class LiveService:
                     if f and f.get("name"):
                         factions[tag] = f["name"]
             player = pointers.player_country(mem, base, tags) or self.player_tag(process)
+            players = {}
+            try:   # every human player of the session (multiplayer too) and the subjects of their countries
+                for p in pointers.read_players(mem, base, tags):
+                    if not p["tag"] or p["tag"] not in countries:
+                        continue
+                    try:
+                        links = pointers.read_links(mem, countries[p["tag"]], base)
+                    except pointers.PointerError:
+                        links = []
+                    own = tags.index(p["tag"]) + 1
+                    subjects = sorted({tags[b - 1] for k, a, b in links if k == "subject" and a == own and 0 < b <= len(tags)})
+                    players[p["tag"]] = {"n": p["name"], "s": subjects}
+            except pointers.PointerError as exc:
+                self.log.info("Player list not readable: %s", exc)
             try:
                 losses = pointers.read_combat_log(mem, base, tags)
             except pointers.PointerError as exc:   # the IC values are still worth recording
@@ -1083,7 +1113,7 @@ class LiveService:
                 except pointers.PointerError:
                     continue
             return {"t": t, "player": player, "campaign": pointers.campaign_id(mem, base), "countries": out,
-                    "factions": factions, "losses": losses,
+                    "factions": factions, "players": players or None, "losses": losses,
                     "designs": {k: v for k, v in designs.items() if v}}
         return self._game_memory(read)
 
@@ -1135,15 +1165,22 @@ class LiveService:
             if raw is None or raw[0] > 1:
                 raise pointers.PointerError("implausible", "Fog of war flag not readable - layout does not match")
             return raw[0] == 0
-        return {"fog": self._game_memory(read), "mode": self.game_mode()}
+        mode = self.game_mode()
+        allowed = mode == "SINGLEPLAYER" or (mode is not None and self.multiplayer_writes()["fog"])
+        return {"fog": self._game_memory(read), "mode": mode, "allowed": allowed}
 
     def set_fog_of_war(self, fog: bool) -> dict:
-        """LOCAL: fog of war on / off as the console command `fow` does (pointers.FOG_OFF). Single player only - in
-        multiplayer it would show this player what the others cannot see."""
+        """LOCAL: fog of war on / off as the console command `fow` does (pointers.FOG_OFF). Single player, or
+        multiplayer when the user allowed it in Options: it changes only what this client shows (no shared game
+        state, so no desync), but shows this player what the others cannot see."""
         process = self._process()
         if not pointers.supported(process.get("version")):
             raise LiveError("unsupported_version", "Fog of war switching is only verified for 1.19.3.0.c01a")
-        self._require_single_player()
+        mode = self.game_mode()
+        if mode == "MULTIPLAYER" and self.multiplayer_writes()["fog"]:
+            self.log.warning("Fog of war switch in a multiplayer game (allowed in Options)")
+        else:
+            self._require_single_player()
         key = (process["pid"], process.get("started"))
         try:
             with self._open_writer(process["pid"]) as mem:
@@ -1160,8 +1197,42 @@ class LiveService:
         self.log.warning("LOCAL memory write: fog of war %s", "on" if fog else "off")
         return self.fog_of_war()
 
+    def _mp_settings(self) -> dict:
+        try:
+            data = json.loads(self._mp_file.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def multiplayer_writes(self) -> dict:
+        """{"enabled": the user allowed local memory writes in multiplayer (Options), "fog": the fog of war switch
+        allowed in multiplayer (Options, on its own: it changes only what this client shows), "mode": game mode}."""
+        s = self._mp_settings()
+        return {"enabled": bool(s.get("enabled")), "fog": bool(s.get("fog")), "mode": self.game_mode()}
+
+    def set_multiplayer_writes(self, enabled: bool | None = None, fog: bool | None = None) -> dict:
+        s = self._mp_settings()
+        if enabled is not None:
+            s["enabled"] = enabled
+            self.log.warning("Local memory writes in multiplayer %s by the user", "ALLOWED" if enabled else "refused")
+        if fog is not None:
+            s["fog"] = fog
+            self.log.warning("Fog of war switch in multiplayer %s by the user", "ALLOWED" if fog else "refused")
+        self._mp_file.parent.mkdir(parents=True, exist_ok=True)
+        self._mp_file.write_text(json.dumps(s), encoding="utf-8")
+        return self.multiplayer_writes()
+
     def _require_single_player(self) -> None:
+        """Refuses a local memory write unless single player is confirmed - or the user allowed writes in
+        multiplayer (Options; the change exists on this client only and may desynchronise the game)."""
         mode = self.game_mode()
+        if mode != "SINGLEPLAYER" and self.multiplayer_writes()["enabled"]:
+            process = self._process_or_none() or {}
+            key = (process.get("pid"), process.get("started"), mode)
+            if getattr(self, "_mp_logged", None) != key:   # once per game run, not on every auto-sort tick
+                self._mp_logged = key
+                self.log.warning("LOCAL memory writes in %s game (allowed in Options - may desync)", mode or "unknown")
+            return
         if mode != "SINGLEPLAYER":
             raise LiveError("multiplayer" if mode else "mode_unknown",
                             (f"The running game is {mode}" if mode else "Single player could not be confirmed from "

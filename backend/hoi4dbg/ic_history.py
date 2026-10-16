@@ -8,7 +8,8 @@ on, live/code_patch.py; a country without one gets as combat losses its equipmen
 
 One file per campaign in <data dir>/ic-history/<id>.jsonl: a "meta" line, then one line per recorded day
 {"t": day number (365-day years), "d": "1941.11.02", "c": {tag: [STORED values]}, "f": {tag: faction} (every
-FACTION_EVERY days)}; rows recorded before a value existed are shorter (the value is None). Days skipped at high game speed are filled when graphing (the value holds until the next sample).
+FACTION_EVERY days), "p": {tag: {"n": player name, "s": [subject tags]}} (the human players, every day; rows recorded
+before 2026-10-16 have none)}; rows recorded before a value existed are shorter (the value is None). Days skipped at high game speed are filled when graphing (the value holds until the next sample).
 A campaign continues while the player's country stays the same and the date moves on (also in a later session, up to a
 month after its last day); loading an earlier save during the session cuts the days after that date (the timeline was
 replayed); another country or a jump back of more than a month starts a new file, and files of earlier sessions are
@@ -126,10 +127,17 @@ def check_groups(data) -> dict:
     return {"custom": names, "assign": out}
 
 
-def view(game: dict, metric: str, tags: list[str] | None, by_faction: bool, groups: dict | None = None) -> dict:
+def player_key(tag: str, info: dict) -> str:
+    """A player's series name: the account name, else the country (campaigns recorded before player names)."""
+    return info.get("n") or tag
+
+
+def view(game: dict, metric: str, tags: list[str] | None, by_faction: bool, groups: dict | None = None,
+         by_player: bool = False, subjects: bool = True) -> dict:
     """What the Game summary tab draws: the country list (latest IC a day, faction) and the day series of `metric`
-    for the chosen countries, or one summed series per faction (current factions; others under NO_FACTION).
-    `groups` (check_groups) moves countries between factions and adds the user's own groups."""
+    for the chosen countries, or one summed series per faction (current factions; others under NO_FACTION), or with
+    `by_player` one series per human player: the player's country of that day, plus its subjects of that day when
+    `subjects`. `groups` (check_groups) moves countries between factions and adds the user's own groups."""
     if metric not in METRICS:
         raise ValueError(f"metric must be one of {', '.join(METRICS)}")
     countries = game["countries"]
@@ -146,7 +154,29 @@ def view(game: dict, metric: str, tags: list[str] | None, by_faction: bool, grou
                       for t, v in countries.items() if any(last(v, k) for k in METRICS)),
                      key=lambda c: -(c[metric] or 0))
     series = []
-    if by_faction:
+    days = game.get("players") or [{} for _ in game["t"]]
+    latest = days[-1] if days else {}
+    players = [{"name": player_key(t, p), "tag": t, "subjects": p.get("s") or [],
+                "value": last(countries.get(t, {}), metric)} for t, p in latest.items()]
+    if by_player:
+        skip_unknown = metric in LOSS_METRICS
+        sums: dict[str, list] = {}
+        for i, day in enumerate(days):
+            for t, p in day.items():
+                acc = sums.setdefault(player_key(t, p), [None if skip_unknown else 0.0] * len(game["t"]))
+                for member in [t, *(p.get("s") or [] if subjects else [])]:
+                    x = countries.get(member, {}).get(metric, [None] * len(game["t"]))[i]
+                    if skip_unknown:
+                        acc[i] = acc[i] if x is None else (acc[i] or 0.0) + x
+                    else:
+                        acc[i] = None if x is None or acc[i] is None else acc[i] + x
+        order = sorted(sums, key=lambda n: -(sums[n][-1] or 0))
+        series = [{"key": n, "values": [None if x is None else round(x, 3) for x in sums[n]]} for n in order]
+        if subjects:   # the subjects' own value counts in the listing too
+            for p in players:
+                vals = [last(countries.get(m, {}), metric) for m in [p["tag"], *p["subjects"]]]
+                p["value"] = None if all(v is None for v in vals) else round(sum(v or 0 for v in vals), 3)
+    elif by_faction:
         sums: dict[str, list[float]] = {}
         skip_unknown = metric in LOSS_METRICS   # most countries have no combat log: sum the known ones
         for t, v in countries.items():
@@ -169,7 +199,7 @@ def view(game: dict, metric: str, tags: list[str] | None, by_faction: bool, grou
         c["game_faction"] = game_factions.get(c["tag"])
     return {"t": game["t"], "dates": game["dates"], "countries": listing, "series": series,
             "factions": sorted({f for f in factions.values() if f} | set(groups["custom"])),
-            "custom": groups["custom"]}
+            "custom": groups["custom"], "players": players}
 
 
 class IcHistory:
@@ -214,8 +244,10 @@ class IcHistory:
         return sorted(out, key=lambda g: g["created"] or "", reverse=True)
 
     def game(self, gid: str) -> dict:
-        """{"id", "player", "t": [...], "dates": [...], "countries": {tag: {metric: [...]}}, "factions": {tag: faction}}
-        - a missing country on a day is 0 (it did not exist); a value not recorded yet is None."""
+        """{"id", "player", "t": [...], "dates": [...], "countries": {tag: {metric: [...]}}, "factions": {tag: faction},
+        "players": [{tag: {"n", "s"}} per day]} - a missing country on a day is 0 (it did not exist); a value not
+        recorded yet is None. Days without a player list take the next known one (the first days of a campaign) or the
+        last one; a campaign recorded without any is the campaign's player alone."""
         rows = self._lines(gid)
         if not rows:
             raise FileNotFoundError(gid)
@@ -235,8 +267,15 @@ class IcHistory:
                     series[tag][k].append(None if None in vals else round(sum(vals), 3))
             if "f" in r:
                 factions = r["f"]
+        known = [r.get("p") for r in days]
+        first = next((p for p in known if p), None) or (
+            {meta["player"]: {"n": None, "s": []}} if meta.get("player") else {})
+        players, current = [], first
+        for p in known:
+            current = p or current
+            players.append(current)
         return {"id": gid, "player": meta.get("player"), "t": [r["t"] for r in days], "dates": [r["d"] for r in days],
-                "countries": series, "factions": factions}
+                "countries": series, "factions": factions, "players": players}
 
     def groups(self, gid: str) -> dict:
         """The user's grouping of a campaign (check_groups), empty when none was saved."""
@@ -428,6 +467,8 @@ class IcHistory:
             row = {"t": sample["t"], "d": date_text(sample["t"]), "c": sample["countries"]}
             if sample.get("factions") is not None:
                 row["f"] = sample["factions"]
+            if sample.get("players"):
+                row["p"] = sample["players"]
             with self._path(self.active).open("a", encoding="utf-8") as f:
                 f.write(json.dumps(row, separators=(",", ":")) + "\n")
             self._last_t, self._player, self._campaign = sample["t"], sample["player"], campaign

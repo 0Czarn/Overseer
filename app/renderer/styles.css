@@ -975,6 +975,8 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
 .gs-group-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .gs-del { padding: 0 6px; line-height: 1.4; }
 .gs-member { display: grid; grid-template-columns: 52px 44px minmax(0, 1fr); gap: 6px; align-items: center; padding: 1px 0 1px 18px; }
+.gs-player .gs-country { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+.gs-player .gs-member { display: block; padding: 0 0 2px 24px; font-size: 0.85em; }
 .gs-move { min-width: 0; width: 100%; font-size: 11.5px; }
 .gs-patch { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 8px 12px; font-size: 13px;
   background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; }

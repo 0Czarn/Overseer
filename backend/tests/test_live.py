@@ -716,6 +716,31 @@ class CountryTableTests(TempDirMixin, unittest.TestCase):
         self.assertEqual(ctx.exception.code, "mode_unknown")
         self.assertEqual(self.writes, [])
 
+    def test_local_write_in_multiplayer_when_the_user_allowed_it(self):
+        self.writer()
+        self.game_log("MULTIPLAYER")
+        self.assertEqual(self.svc.multiplayer_writes(), {"enabled": False, "fog": False, "mode": "MULTIPLAYER"})
+        self.assertTrue(self.svc.set_multiplayer_writes(True)["enabled"])
+        self.assertEqual(LiveService(self.detect, self.save_values, self.tmp / "live", logging.getLogger("test")).multiplayer_writes()["enabled"], True)       # remembered
+        self.assertEqual(self.svc.write_value("stability", 0.5)["after"], 0.5)
+        self.svc.set_multiplayer_writes(False)
+        with self.assertRaises(LiveError) as ctx:
+            self.svc.write_value("stability", 0.6)
+        self.assertEqual(ctx.exception.code, "multiplayer")
+
+    def test_fog_of_war_in_multiplayer_has_its_own_permission(self):
+        self.writer()
+        self.game_log("MULTIPLAYER")
+        with self.assertRaises(LiveError) as ctx:
+            self.svc.set_fog_of_war(False)
+        self.assertEqual(ctx.exception.code, "multiplayer")
+        res = self.svc.set_multiplayer_writes(fog=True)
+        self.assertEqual((res["enabled"], res["fog"]), (False, True))      # the fog alone, not every write
+        with self.assertRaises(LiveError) as ctx:
+            self.svc.write_value("stability", 0.5)
+        self.assertEqual(ctx.exception.code, "multiplayer")
+        self.assertTrue(self.svc.set_multiplayer_writes(enabled=True)["fog"])  # one setting kept when the other changes
+
     def test_combat_log_patch_is_single_player_only_remembered_and_undone(self):
         region, at = self.mem.regions_data[self.MODULE], code_patch.GATE_RVA
         region[at:at + 5] = code_patch.ORIGINAL

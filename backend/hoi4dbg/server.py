@@ -74,6 +74,15 @@ def build_routes(svc: DebuggerService) -> list[Route]:
             raise LiveError("not_confirmed", "The combat log patch must be enabled explicitly (local only)")
         return {"data": live().set_combat_log_patch(enabled)}
 
+    def multiplayer_writes(body: dict) -> dict:
+        enabled = body["enabled"] is True if "enabled" in body else None
+        fog = body["fog"] is True if "fog" in body else None
+        if enabled and body.get("confirm_desync") is not True:
+            raise LiveError("not_confirmed", "Memory writes in multiplayer must be allowed explicitly (may desync)")
+        if fog and body.get("confirm_fog") is not True:
+            raise LiveError("not_confirmed", "The fog of war switch in multiplayer must be allowed explicitly")
+        return {"data": live().set_multiplayer_writes(enabled, fog)}
+
     def fog_of_war(body: dict) -> dict:
         if body.get("confirm_local") is not True or not isinstance(body.get("fog"), bool):
             raise LiveError("not_confirmed", "Fog of war switching must be confirmed explicitly (local only)")
@@ -121,7 +130,8 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("POST", "/api/summary/recording", lambda q, b: svc.summary_recording(b)),
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})", lambda q, b, gid: svc.summary_game(
             gid, (q.get("metric") or ["mil"])[0], [t for t in (q.get("tags") or [""])[0].upper().split(",") if t],
-            (q.get("factions") or [""])[0] == "1", (q.get("groups_from") or [""])[0] or None)),
+            (q.get("factions") or [""])[0] == "1", (q.get("groups_from") or [""])[0] or None,
+            (q.get("players") or [""])[0] == "1", (q.get("subjects") or ["1"])[0] != "0")),
         r("GET", "/api/actions", lambda q, b: svc.players_actions((q.get("game") or [""])[0] or None)),
         r("POST", "/api/actions/watch", lambda q, b: svc.players_actions_watch(b)),
         r("GET", "/api/live/combat-log-patch", lambda q, b: {"data": live().combat_log_patch()}),
@@ -164,6 +174,8 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("POST", "/api/live/write", lambda q, b: live_write(b)),
         r("GET", "/api/live/focus/autostart", lambda q, b: svc.focus_autostart(apply=False)),
         r("POST", "/api/live/focus/autostart", lambda q, b: focus_autostart(b)),
+        r("GET", "/api/live/multiplayer-writes", lambda q, b: {"data": live().multiplayer_writes()}),
+        r("POST", "/api/live/multiplayer-writes", lambda q, b: multiplayer_writes(b)),
         r("GET", "/api/live/fog-of-war", lambda q, b: {"data": live().fog_of_war()}),
         r("POST", "/api/live/fog-of-war", lambda q, b: fog_of_war(b)),
         r("GET", "/api/live/construction/sort", lambda q, b: svc.construction_sort(apply=False, kind=_str(q, "kind") or "civ")),

@@ -1,5 +1,5 @@
 HOI4 DEBUGGER - STAN PROJEKTU
-Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-15 (Game summary: straty, UI listy państw)
+Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-16 (edycja w multiplayerze; warunki focusów sprawdzane z pamięci)
 Szczegóły i dowody: docs/PROGRESS.md, plan: docs/STATUS-AND-PLAN.md
 
 ======================================================================
@@ -15,6 +15,46 @@ ZROBIONE
       PP, stabilność, poparcie wojny, CP, paliwo - sprawdzone w grze
 [x] Bezpośredni zapis do pamięci (LOKALNY, tylko singleplayer, włączany przełącznikiem):
       stabilność / poparcie wojny w %, PP, CP, paliwo, XP - dowolne państwo
+[x] EDYCJA W MULTIPLAYERZE (2026-10-16, prośba użytkownika, testowa sesja MP GER + ICE): Options > Multiplayer >
+            "Edits in multiplayer" (domyślnie wył., potwierdzenie o desyncu, zapamiętane w <data>/live/multiplayer_writes.json,
+            /api/live/multiplayer-writes). Włączone = bramka "tylko singleplayer" przepuszcza wszystkie zapisy lokalne:
+            wartości, magazyn, auto-start celów, auto-sort fabryk, mgła wojny, łatka logu walk; każdy zapis w MP w logu.
+            Odczyt w MP działa bez zmian (gracz lokalny GER z pamięci). Zapisy są TYLKO na tym komputerze - możliwy desync.
+            [ ] test w grze MP przez użytkownika (zapis wartości, kolejka celów, sortowanie, mgła)
+            [x] sortowanie fabryk w MP działa (log aplikacji: "2 slots moved", GER).
+            WARUNKI FOCUSÓW (2026-10-16, zgłoszenie użytkownika: "kolejkowanie focusów nadal nie działa"): przyczyna nie MP -
+            auto-start pomijał KAŻDY focus z blokiem available (w GER prawie wszystkie, np. Rhineland, Führerprinzip).
+            Teraz hoi4dbg/triggers.py: parser skryptu z < > (saves.text ich nie trzyma), ocena trójwartościowa (tak / nie /
+            nie wiadomo), NOT = NOR jak w grze, if/else_if/else, zakresy (TAG, numer stanu, ROOT/THIS/PREV, owner/controller/
+            overlord), any_/all_ (country, other_country, owned/controlled/core_state, allied, enemy, subject), skrypty z
+            common/scripted_triggers. Dane z pamięci (live/world.py, leniwie): rząd, popularność partii (fascism > 0.5),
+            marionetki/gwarancje/pakty (nowe pointers.read_links: wszystkie obiekty relacji państwa), wojny, frakcja (lider =
+            pierwszy członek: SOV w Kominternie), ukończone focusy, idee, modyfikatory dynamiczne, technologie, właściciel/
+            kontroler/rdzenie stanów, PP, fabryki, ludzie w polu (has_army_manpower), gracze (is_ai), DLC.
+            Auto-start: spełnione -> start; niespełnione -> "waiting" (czeka, komunikat raz); nieznany wyzwalacz -> "manual" z
+            nazwą wyzwalacza. Plan kolejki: plakietka START IN GAME tylko przy nieznanych warunkach / select_effect,
+            CONDITIONS NOT MET przy niespełnionych. GER 1936 (sesja MP): Rhineland i Führerprinzip = spełnione -> "ready".
+            Nieobsługiwane (None): flagi państwa/globalne, has_civil_war, has_capitulated, threat, is_major, has_war_with_major,
+            kontynenty, capital_scope, zmienne (check_variable), has_country_leader, has_wargoal_against, is_demilitarized_zone.
+            Czas: 0,14 s na sprawdzenie planu. Ostrzeżenie "zapis w MP" w logu raz na uruchomienie gry (wcześniej co 3 s).
+            [ ] test w grze: auto-start Rhineland w MP; czy gra wstrzymuje focus, którego warunki przestały być spełnione
+            [!] TEST UŻYTKOWNIKA (2026-10-16): focus wybrany przez aplikację w MP = DESYNC (zapis pamięci jest tylko lokalny;
+                gra synchronizuje komendy). Wysyłanie komendy gry przez wstrzyknięcie kodu - zatwierdzone, będzie robione.
+                W MP zostają powiadomienia + sprawdzanie warunków; to samo dotyczy badań.
+            MGŁA WOJNY W MP (2026-10-16, prośba użytkownika): osobna zgoda w Options > Multiplayer > "Fog of war in multiplayer"
+                (potwierdzenie: widzisz to, czego inni nie widzą), niezależna od "Edits in multiplayer"; zapis w
+                multiplayer_writes.json {"enabled", "fog"}. /api/live/fog-of-war zwraca "allowed"; Game Tools blokował przełącznik
+                przy każdej grze innej niż SP - teraz według "allowed". Mgła to tylko widok klienta - bez desyncu (niesprawdzone w MP).
+                Odczyt 2026-10-16: w sesji MP mgła już wyłączona (bajt FOG_OFF = 1).
+[x] GAME SUMMARY - TRYB PLAYERS (2026-10-16, prośba użytkownika, zrzut panelu Groups): przełącznik Countries | Factions |
+            Players; w Players jedna linia na gracza (nazwa konta), państwo gracza + jego marionetki z danego dnia, włącznik
+            "Include subjects" (zapamiętany), pokazywanie/ukrywanie graczy, kolory jak w innych trybach, tabela "Player".
+            Rejestrator zapisuje co dzień "p": {tag: {"n": nick, "s": [marionetki]}} (pointers.read_players + read_links
+            tylko dla państw graczy, 0,026 s). Dni bez listy graczy: najbliższa znana; kampanie nagrane wcześniej - gracz
+            z nagłówka kampanii (nazwą jest tag, bez marionetek). API: /api/summary/games/<id>?players=1&subjects=0|1.
+            Sesja MP 2026-10-16: 6 graczy (POR Luqer, GER Rodan, SOV Czarny, ITA kofrek.SKINS, FRA J.Donald.Trump + D07,
+            AUS Strzelson) odczytane z pamięci.
+            [ ] sprawdzić w aplikacji na nowo nagranych dniach (wcześniejsze dni kampanii nie mają graczy)
 [x] Krok A  Countries & Players: lista państw, nazwy z gry, partia, liczba stanów, gracze
             + zakładki: "Save files" (Players (from save file) / Countries) i "Live"
             + Live: państwa biorące udział (liczba stanów z pamięci, co 3 s), tryb gry, gracz lokalny
@@ -73,7 +113,7 @@ ZROBIONE
             Combat Casualties = heroes_dying_war_support_penalty - z zapisu tekstowego (tokeny binarne nieznane).
             KARY NA ŻYWO (2026-10-11, przed/po tydzień wojny): country+0x14C8 bombardowania, +0x14D0 straty, fixed64
             /32768; zgodne z 2 zapisami użytkownika (ZSRR i Polska) do 5. cyfry, 0 dla państw w pokoju.
-            WOJNY NA ŻYWO (2026-10-11) - NIE ZROBIONE, uwaga użytkownika: "może to średnio działać". Ustalone:
+            WOJNY NA ŻYWO (2026-10-11) - BĘDZIE ZROBIONE, uwaga użytkownika: "może to średnio działać". Ustalone:
             klasa CWarRelation (+0x10 = sloty obu stron, np. 3/10 = SOV/POL), rekord relacji państwa (po 0xA10,
             klucz = slot drugiego państwa, +0x298 wskaźnik na wojnę, +0x2B0 opinia = cached_sum zapisu). Brak stałej
             ścieżki: u ZSRR rekordy leżą od country+0x16D0, u innych państw gdzie indziej; nic nie wskazuje na tablicę;
@@ -633,4 +673,4 @@ ZNANE OGRANICZENIA
 - Pierwsze otwarcie widoku po nowym zapisie binarnym trwa 2-4 s (do poprawy: wspólny indeks zapisu).
 - Sprzętu nie da się usuwać (komenda gry tylko dodaje).
 - Mody dodające nowe tagi państw: nieprzetestowane.
-- Multiplayer: nieprzetestowany. Zapis do pamięci w MP jest celowo zablokowany.
+- Multiplayer: nieprzetestowany. Zapis do pamięci w MP nie jest zablokowany.

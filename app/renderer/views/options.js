@@ -92,6 +92,8 @@ export default {
     const layout = h('div');
     const notes = h('div');
     const reading = h('div');
+    const mpBox = h('div');
+    let mp = null;        // backend: local memory writes allowed in multiplayer (live/service.multiplayer_writes)
     const language = h('div');
     const data = h('div');
     const keyboard = h('div');
@@ -260,6 +262,53 @@ export default {
       ]);
     }
 
+    async function loadMp() {
+      try { mp = (await ctx.api.get('/api/live/multiplayer-writes')).data; } catch (err) { mp = { error: err.message }; }
+      drawMp();
+    }
+
+    async function setMp(enabled) {
+      if (enabled && !window.confirm(tt('Edits in multiplayer change the game memory of THIS computer only. The other players '
+        + 'do not get them - the game may desync (out of sync / rehost). Allow?', 'Edycje w multiplayerze zmieniają pamięć gry '
+        + 'tylko na TYM komputerze. Inni gracze ich nie dostaną - gra może się rozsynchronizować (desync / rehost). Zezwolić?'))) {
+        drawMp();
+        return;
+      }
+      try { mp = (await ctx.api.post('/api/live/multiplayer-writes', { enabled, confirm_desync: enabled })).data; }
+      catch (err) { toast(err.message, 'error'); }
+      drawMp();
+    }
+
+    async function setMpFog(fog) {
+      if (fog && !window.confirm(tt('Without fog you see the other players\' units and moves, they do not see yours. '
+        + 'It changes only what this computer shows (no desync). Use it only if the other players agree. Allow?',
+        'Bez mgły widzisz wojska i ruchy innych graczy, a oni Twoich nie. Zmienia to tylko widok na tym komputerze '
+        + '(bez desyncu). Używaj tylko za zgodą pozostałych graczy. Zezwolić?'))) {
+        drawMp();
+        return;
+      }
+      try { mp = (await ctx.api.post('/api/live/multiplayer-writes', { fog, confirm_fog: fog })).data; }
+      catch (err) { toast(err.message, 'error'); }
+      drawMp();
+    }
+
+    function drawMp() {
+      fill(mpBox, [
+        mp?.error ? notice('warn', mp.error) : null,
+        row(tt('Edits in multiplayer', 'Edycja w multiplayerze'),
+          tt('Value edits, stockpile, focus queue auto-start, factory auto-sort and fog of war also in a multiplayer game. '
+            + 'Local to this computer - may cause a desync.', 'Edycja wartości, magazynu, auto-start celów z kolejki, sortowanie '
+            + 'fabryk i mgła wojny także w grze multiplayer. Tylko na tym komputerze - może spowodować desync.'),
+          check(mp?.enabled, setMp, tt('Allow (may desync)', 'Zezwól (możliwy desync)')),
+          mp?.mode ? h('span', { class: 'muted' }, tt(`Game now: ${mp.mode}`, `Gra teraz: ${mp.mode}`)) : null),
+        row(tt('Fog of war in multiplayer', 'Mgła wojny w multiplayerze'),
+          tt('The "Map without fog" switch (Game Tools) also in a multiplayer game. Only this computer\'s view - '
+            + 'no desync, but you see what the others cannot.', 'Przełącznik "Map without fog" (Game Tools) także w grze '
+            + 'multiplayer. Tylko widok na tym komputerze - bez desyncu, ale widzisz to, czego inni nie widzą.'),
+          check(mp?.fog, setMpFog, tt('Allow', 'Zezwól'))),
+      ]);
+    }
+
     function draw() {
       fill(tabs, [
         row(tt('Shown tabs', 'Widoczne zakładki'), tt('Hide the tabs you do not use (Options always stays).', 'Ukryj nieużywane zakładki (Ustawienia zostają zawsze).'),
@@ -364,6 +413,8 @@ export default {
     }
 
     draw();
+    drawMp();
+    loadMp();
     drawGallery();
     drawData();
     root.append(
@@ -375,6 +426,7 @@ export default {
       card('Overlay', overlayBox),
       card('Notifications', notes),
       card('Live reading', reading),
+      card('Multiplayer', mpBox),
       card('Language and numbers', language),
       card('Text and keyboard', keyboard),
       card('Data', data),

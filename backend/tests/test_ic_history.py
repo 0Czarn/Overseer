@@ -35,6 +35,16 @@ class IcHistoryTest(unittest.TestCase):
         [g] = self.history.games()
         self.assertEqual((g["first"], g["last"], g["days"], g["active"]), ("1941.11.01", "1941.11.02", 2, True))
 
+    def test_players_are_kept_per_day_and_filled_where_missing(self):
+        t = day(1941, 11, 1)
+        gid = self.history.add(self.sample(t, SOV=[10, 1, 5]))                       # recorded before player lists
+        self.history.add({**self.sample(t + 1, SOV=[12, 1, 5]), "players": {"SOV": {"n": "Czarny", "s": ["MON"]}}})
+        self.history.add(self.sample(t + 2, SOV=[12, 1, 5]))
+        players = self.history.game(gid)["players"]
+        self.assertEqual(players, [{"SOV": {"n": "Czarny", "s": ["MON"]}}] * 3)
+        old = self.history.add(self.sample(day(1950, 1, 1), player="GER", GER=[1, 1, 1]))
+        self.assertEqual(self.history.game(old)["players"], [{"GER": {"n": None, "s": []}}])   # the campaign's player
+
     def test_reload_cuts_replayed_days_and_other_country_starts_a_new_campaign(self):
         t = day(1941, 11, 1)
         gid = self.history.add(self.sample(t))
@@ -177,6 +187,18 @@ class ViewTest(unittest.TestCase):
         self.assertEqual(f["factions"], ["Axis", "Comintern"])
         with self.assertRaises(ValueError):
             ic_history.view(self.GAME, "gold", None, False)
+
+
+    def test_players_with_and_without_their_subjects_of_each_day(self):
+        game = {**self.GAME, "players": [{"GER": {"n": "Czarny", "s": []}, "SOV": {"n": "Frytek", "s": []}},
+                                         {"GER": {"n": "Czarny", "s": ["ITA"]}, "SOV": {"n": "Frytek", "s": []}}]}
+        v = ic_history.view(game, "mil", None, False, by_player=True)
+        self.assertEqual([(s["key"], s["values"]) for s in v["series"]], [("Frytek", [90, 160]), ("Czarny", [100, 150])])
+        self.assertEqual({p["name"]: (p["tag"], p["subjects"], p["value"]) for p in v["players"]},
+                         {"Czarny": ("GER", ["ITA"], 150), "Frytek": ("SOV", [], 160)})
+        own = ic_history.view(game, "mil", None, False, by_player=True, subjects=False)
+        self.assertEqual([(s["key"], s["values"]) for s in own["series"]], [("Frytek", [90, 160]), ("Czarny", [100, 120])])
+        self.assertEqual(ic_history.view(self.GAME, "mil", None, False, by_player=True)["series"], [])   # none recorded
 
 
 class RecorderLockTest(unittest.TestCase):

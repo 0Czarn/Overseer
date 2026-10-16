@@ -1126,6 +1126,26 @@ def read_relation(memory, country: int, other_slot: int, module_base: int) -> di
     return {"opinion": opinion, "links": links}
 
 
+def read_links(memory, country: int, module_base: int) -> list[tuple[str, int, int]]:
+    """[(kind, first slot, second slot)] of every relation object (subject, guarantee, pact, ...) in the country's
+    relations, as read_relation tells them apart; first = overlord / guarantor / attacker."""
+    dip = _ptr(memory, country + DIPLOMACY)
+    if dip is None:
+        raise PointerError("unreadable", "The country's diplomacy object is not readable")
+    out = []
+    for rel in read_array(memory, dip + RELATIONS, 2000):
+        body = memory.read(rel + RELATION_LINKS.start, RELATION_LINKS.stop - RELATION_LINKS.start) if rel else None
+        if body is None:
+            continue
+        for k in range(0, len(body), 8):
+            obj = struct.unpack_from("<Q", body, k)[0]
+            head = memory.read(obj, 0x18) if 0x10000 <= obj < 0x7FFF_FFFF_FFFF else None
+            kind = RELATION_KINDS.get(struct.unpack_from("<Q", head, 0)[0] - module_base) if head else None
+            if kind:
+                out.append((kind, *struct.unpack_from("<ii", head, 0x10)))
+    return out
+
+
 # Wargoal justifications (2026-10-13, GER justifying against USA in the game; every other country empty):
 # [country + 0xf90] CPoliticalStatus + 0x8 = array of CTimedWargoalActivity* (read_array); activity + 0x10 / + 0x14 =
 # slots of the justifying country and of its target (1 GER -> 68 USA).

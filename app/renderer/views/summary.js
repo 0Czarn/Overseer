@@ -1,5 +1,5 @@
 // Game summary: IC history of a campaign, like HOI4-IC-Graphs - IC a day on military production, naval production or
-// construction per country or summed per faction, daily and cumulative, the number of factories, the IC idle factories
+// construction per country, summed per faction or per player (with or without the player's subjects), daily and cumulative, the number of factories, the IC idle factories
 // waste and the IC of equipment lost in combat and to attrition, optionally against a second campaign. The backend
 // records every country once per game day while the app runs (ic_history.py).
 import { h, notice, viewHeader } from '../lib/dom.js';
@@ -106,11 +106,15 @@ export default {
   title: 'Game summary',
   short: 'GS',
   async render(root, ctx) {
-    const prefs = { metric: 'mil', factions: false, tags: [], colors: {}, groupColors: {}, hiddenGroups: [],
-      customColors: { countries: {}, groups: {} }, openGroups: {}, ...loadPrefs() };
-    const persist = () => savePrefs({ metric: prefs.metric, factions: prefs.factions, tags: prefs.tags, colors: prefs.colors,
-      game: prefs.game, compare: prefs.compare, groupColors: prefs.groupColors, hiddenGroups: prefs.hiddenGroups,
-      customColors: prefs.customColors, openGroups: prefs.openGroups });
+    const prefs = { metric: 'mil', factions: false, players: false, subjects: true, tags: [], colors: {}, groupColors: {},
+      playerColors: {}, hiddenGroups: [], hiddenPlayers: [], openGroups: {}, ...loadPrefs() };
+    prefs.customColors = { countries: {}, groups: {}, players: {}, ...(prefs.customColors ?? {}) };
+    const persist = () => savePrefs({ metric: prefs.metric, factions: prefs.factions, players: prefs.players,
+      subjects: prefs.subjects, tags: prefs.tags, colors: prefs.colors, game: prefs.game, compare: prefs.compare,
+      groupColors: prefs.groupColors, playerColors: prefs.playerColors, hiddenGroups: prefs.hiddenGroups,
+      hiddenPlayers: prefs.hiddenPlayers, customColors: prefs.customColors, openGroups: prefs.openGroups });
+    // what one line of the chart is: a country, a group (faction) or a human player
+    const mode = () => (prefs.players ? 'players' : prefs.factions ? 'factions' : 'countries');
     const status = h('div', { class: 'gs-rec' });
     const controls = h('div', { class: 'gs-controls' });
     let search = '';
@@ -146,7 +150,8 @@ export default {
 
     const query = (groupsFrom) => {
       const p = new URLSearchParams({ metric: prefs.metric });
-      if (prefs.factions) p.set('factions', '1'); else p.set('tags', prefs.tags.join(','));
+      if (mode() === 'players') { p.set('players', '1'); p.set('subjects', prefs.subjects ? '1' : '0'); }
+      else if (prefs.factions) p.set('factions', '1'); else p.set('tags', prefs.tags.join(','));
       if (groupsFrom) p.set('groups_from', groupsFrom);   // a compared campaign uses the grouping of the first one
       return p.toString();
     };
@@ -164,8 +169,9 @@ export default {
     }
 
     // colour of a series: the user's own, else its slot of the validated palette
-    const colorMap = () => (prefs.factions ? prefs.customColors.groups : prefs.customColors.countries);
-    const seriesColor = (k) => colorMap()[k] ?? SERIES_COLORS[(prefs.factions ? prefs.groupColors : prefs.colors)[k]];
+    const colorMap = () => prefs.customColors[{ players: 'players', factions: 'groups', countries: 'countries' }[mode()]];
+    const colorSlots = () => ({ players: prefs.playerColors, factions: prefs.groupColors, countries: prefs.colors }[mode()]);
+    const seriesColor = (k) => colorMap()[k] ?? SERIES_COLORS[colorSlots()[k]];
     function colorInput(key) {
       return h('input', { type: 'color', class: 'gs-color', value: seriesColor(key), title: 'Change the colour (right-click: default)',
         onclick: (e) => e.stopPropagation(),
@@ -187,6 +193,40 @@ export default {
 
     function visibleGroups() {
       return main.series.map((s) => s.key).filter((k) => !prefs.hiddenGroups.includes(k)).slice(0, MAX_SERIES);
+    }
+
+    function visiblePlayers() {
+      return main.series.map((s) => s.key).filter((k) => !prefs.hiddenPlayers.includes(k)).slice(0, MAX_SERIES);
+    }
+
+    // Players: one line per human player (the player's country, plus its subjects when "Include subjects" is on)
+    function renderPlayers() {
+      const visible = visiblePlayers();
+      pickerHead.replaceChildren(`Players (${visible.length}/${main.players.length} shown)`);
+      const toggle = (k, shown) => {
+        prefs.hiddenPlayers = shown ? [...prefs.hiddenPlayers, k] : prefs.hiddenPlayers.filter((x) => x !== k);
+        load();
+      };
+      const subjectsSwitch = h('label', { class: 'gs-country', title: 'Count the IC of each player\'s subjects (puppets, '
+        + 'dominions...) with the player - the subjects of each day, as recorded' },
+        h('input', { type: 'checkbox', checked: prefs.subjects || null,
+          onchange: (e) => { prefs.subjects = e.target.checked; load(); } }),
+        h('span', null, 'Include subjects'));
+      const list = main.players.filter((p) => matches({ tag: p.tag, name: `${p.name} ${p.country}` }, search));
+      pickerList.replaceChildren(subjectsSwitch,
+        ...(list.length ? list.map((p) => {
+          const shown = visible.includes(p.name);
+          return h('div', { class: 'gs-player' },
+            h('label', { class: `gs-country ${shown ? 'gs-country-on' : ''}`, title: `${p.name} - ${p.country}` },
+              h('input', { type: 'checkbox', checked: shown || null, disabled: (!shown && visible.length >= MAX_SERIES) || null,
+                onchange: () => toggle(p.name, shown) }),
+              h('span', { class: 'gs-country-tag' }, p.name, shown ? colorInput(p.name) : null),
+              h('span', { class: 'gs-country-tag muted' }, p.tag),
+              h('span', { class: 'gs-country-value' }, p.value == null ? '-' : compact(p.value))),
+            prefs.subjects && p.subjects.length ? h('div', { class: 'gs-member muted', title: 'Subjects counted with the player' },
+              `+ ${p.subjects.join(', ')}`) : null);
+        }) : [h('p', { class: 'muted' }, main.players.length ? 'No player matches.'
+          : 'No players recorded for this campaign.')]));
     }
 
     function renderGroupEditor() {
@@ -357,12 +397,14 @@ export default {
             .map(([label, list]) => h('div', { class: 'gs-field' }, h('span', { class: 'gs-seg-label' }, label),
               seg(list.map(([k, , b]) => [k, b]), prefs.metric, pick((v) => { prefs.metric = v; })))),
           h('div', { class: 'gs-field' }, h('span', { class: 'gs-seg-label' }, 'Show'),
-            seg([[false, 'Countries'], [true, 'Factions']], prefs.factions, pick((v) => { prefs.factions = v; })))));
+            seg([['countries', 'Countries'], ['factions', 'Factions'], ['players', 'Players']], mode(),
+              pick((v) => { prefs.players = v === 'players'; prefs.factions = v === 'factions'; })))));
     }
 
     function renderPicker() {
       if (!main) { picker.hidden = true; return; }
       picker.hidden = false;
+      if (mode() === 'players') { renderPlayers(); return; }
       if (prefs.factions) { renderGroupEditor(); return; }
       const groups = new Map();
       for (const c of main.countries) {
@@ -439,10 +481,12 @@ export default {
         charts.replaceChildren(notice('info', games.length ? 'Choose a campaign.' : 'No campaign recorded yet - keep the app open while you play; one point is recorded per game day.'));
         return;
       }
-      const keys = prefs.factions ? visibleGroups() : main.series.map((s) => s.key).slice(0, MAX_SERIES);
-      if (prefs.factions) prefs.groupColors = assignColors(keys, prefs.groupColors);
+      const keys = mode() === 'players' ? visiblePlayers() : prefs.factions ? visibleGroups()
+        : main.series.map((s) => s.key).slice(0, MAX_SERIES);
+      if (mode() === 'players') prefs.playerColors = assignColors(keys, prefs.playerColors);
+      else if (prefs.factions) prefs.groupColors = assignColors(keys, prefs.groupColors);
       else prefs.colors = assignColors(keys, prefs.colors);
-      const slots = prefs.factions ? prefs.groupColors : prefs.colors;
+      const slots = colorSlots();
       const colorOf = (k) => (keys.includes(k) ? (colorMap()[k] ?? SERIES_COLORS[slots[k]]) : null);
       const build = (game, cum, dash, suffix) => game.series
         .filter((s) => colorOf(s.key))
@@ -451,14 +495,16 @@ export default {
       const metric = METRICS.find(([k]) => k === prefs.metric)[1];
       const sets = (cum) => [...build(main, cum, false, other ? ' (1)' : ''), ...(other ? build(other, cum, true, ' (2)') : [])];
       if (!keys.length) {
-        charts.replaceChildren(notice('info', prefs.factions ? 'Tick the groups to show on the left.' : 'Pick up to 8 countries on the left.'));
+        charts.replaceChildren(notice('info', mode() === 'players' ? (main.players.length ? 'Tick the players to show on the left.'
+          : 'No players recorded for this campaign yet - the recorder notes them once a game day from now on.')
+          : prefs.factions ? 'Tick the groups to show on the left.' : 'Pick up to 8 countries on the left.'));
         return;
       }
       const last = main.t.length - 1;
       const table = h('details', { class: 'gs-table', open: tableOpen || null, ontoggle: (e) => { tableOpen = e.target.open; } },
         h('summary', null, 'Table'),
         h('table', { class: 'table' },
-          h('thead', null, h('tr', null, h('th', null, prefs.factions ? 'Faction' : 'Country'),
+          h('thead', null, h('tr', null, h('th', null, { players: 'Player', factions: 'Faction', countries: 'Country' }[mode()]),
             h('th', null, `${isFactoryMetric(prefs.metric) ? metric : 'IC a day'} (${dayText(main.t[last])})`),
             isFactoryMetric(prefs.metric) ? null : h('th', null, 'Cumulative IC'))),
           h('tbody', null, main.series.filter((s) => keys.includes(s.key)).map((s) => h('tr', null, h('td', null, s.key),
@@ -492,7 +538,7 @@ export default {
         const focused = document.activeElement;   // do not close an open <select> (a focused button is fine)
         if (!(controls.contains(focused) && focused.tagName === 'SELECT')) renderControls();
         main = prefs.game ? await fetchGame(prefs.game) : null;
-        if (main && !prefs.factions && !prefs.tags.length) {   // first visit: the player and the biggest producers
+        if (main && mode() === 'countries' && !prefs.tags.length) {   // first visit: the player and the biggest producers
           prefs.tags = [...new Set([main.player, ...main.countries.map((c) => c.tag)].filter((t) => main.countries.some((c) => c.tag === t)))].slice(0, 5);
           main = await fetchGame(prefs.game);
         }

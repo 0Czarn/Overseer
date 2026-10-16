@@ -24,6 +24,7 @@ from .ic_history import IcHistory
 from .backgrounds import BackgroundError, Backgrounds
 from . import focus as focus_mod
 from . import techtree
+from . import triggers as triggers_mod
 from .applog import RingBufferHandler
 from .integration import GameIntegration, NullIntegration
 from .reports import ReportError, ReportStore
@@ -71,8 +72,8 @@ TOOLS: list[dict] = [
     {"id": "save_inspector", "name": "Save inspector", "scope": "local", "status": "available",
      "description": "Reads a copy of any save file (header, players, mods, structure check). Never modifies saves."},
     {"id": "fog_of_war", "name": "Fog of war", "scope": "local", "status": "available",
-     "description": "Turns the fog of war of your own client off and on, like the console command fow. Single player "
-                    "only - in multiplayer it would show you what the other players cannot see."},
+     "description": "Turns the fog of war of your own client off and on, like the console command fow. In "
+                    "multiplayer only when allowed in Options - it shows you what the other players cannot see."},
     {"id": "value_edit", "name": "Shared value change", "scope": "shared", "status": "planned",
      "description": "Changing country/state/equipment values. Requires a game-compatible sync method, "
                     "verified on two clients before it is offered in multiplayer."},
@@ -493,7 +494,8 @@ class DebuggerService:
         data = {
             "tag": tag, "tree": state["tree"], "current": state["current"], "progress_days": state["progress"],
             "paused": state["paused"], "completed": len(state["completed"]), "focuses": focuses,
-            "queue": focus_mod.validate_queue(focuses, state, queue), "queue_supported": False,
+            "queue": self._with_conditions(tag, focus_mod.validate_queue(focuses, state, queue), focuses, state),
+            "queue_supported": False,
             "focus_source": state["source"], "game_date": state.get("date"), "layout": focus_mod.layout(focuses),
             **self._focus_graphics(focuses)}
         if state["source"] == "live":
@@ -518,6 +520,7 @@ class DebuggerService:
             return envelope(UNAVAILABLE, None, "Needs the running game or a save")
         state, focuses = ctx
         queue = focus_mod.validate_queue(focuses, state, self._focus_queues().get(f"{tag}:{state['tree']}", []))
+        queue = self._with_conditions(tag, queue, focuses, state)
         by_id = {f["id"]: f for f in focuses}
         nxt = next((q for q in queue if q["ok"]), None)
         return envelope(LIVE if state["source"] == "live" else SAVE, {
@@ -529,9 +532,10 @@ class DebuggerService:
 
     def focus_autostart(self, apply: bool) -> dict:
         """Next focus of the PLAYER's plan, started in game memory when no focus is selected (apply=True; LOCAL write,
-        single player). Focuses with start conditions the app cannot check or with effects on picking are left to
-        the player ("manual"). state: busy (a focus runs), empty (no valid focus in the plan), manual, ready
-        (preview), started."""
+        single player, or multiplayer when allowed). The focus's `available` conditions are checked on game memory
+        (triggers.py): not met -> "waiting"; ones the app cannot check and effects on picking are left to the player
+        ("manual"). state: busy (a focus runs), empty (no valid focus in the plan), waiting, manual, ready (preview),
+        started."""
         if self.live is None:
             raise NotFound("Live game access is disabled")
         live = self.live.focus(None)
@@ -550,14 +554,48 @@ class DebuggerService:
             return {**base, "state": "empty"}
         f = by_id[nxt["id"]]
         out = {**base, "focus": f["id"], "name": f["name"], "days": f["days"]}
-        if f.get("start_conditions") or f.get("select_effect"):
-            why = " and ".join(w for w, on in (("conditions the app cannot check", f.get("start_conditions")),
-                                               ("effects when it is picked", f.get("select_effect"))) if on)
-            return {**out, "state": "manual", "reason": f"has {why} - start it in the game"}
+        if f.get("select_effect"):
+            return {**out, "state": "manual", "reason": "has effects when it is picked - start it in the game"}
+        if f.get("start_conditions"):
+            met, unknown = self._focus_available(tag, [f["id"]])[f["id"]]
+            if met is False:
+                return {**out, "state": "waiting", "reason": "its conditions (available) are not met yet"}
+            if met is None:
+                return {**out, "state": "manual", "reason": "has conditions the app cannot check"
+                        + (f" ({', '.join(unknown[:4])})" if unknown else "") + " - start it in the game"}
         if not apply:
             return {**out, "state": "ready"}
         self.live.start_focus(f["id"])
         return {**out, "state": "started"}
+
+    def _with_conditions(self, tag: str, queue: list[dict], focuses: list[dict], state: dict) -> list[dict]:
+        """Queue entries with "conditions": True / False / None (`available` of the focus in the running game; None =
+        the app cannot tell, "unknown" names the triggers) - only with live state, only for focuses that have one."""
+        by_id = {f["id"]: f for f in focuses}
+        ids = [q["id"] for q in queue if q["ok"] and by_id.get(q["id"], {}).get("start_conditions")]
+        if state.get("source") != "live" or not ids:
+            return queue
+        try:
+            found = self._focus_available(tag, ids)
+        except Exception as exc:   # game closed meanwhile, unreadable memory: the plan is shown without them
+            self.log.debug("Focus conditions not checked: %s", exc)
+            return queue
+        return [{**q, "conditions": found[q["id"]][0], "unknown": found[q["id"]][1]} if q["id"] in found else q
+                for q in queue]
+
+    def _focus_available(self, tag: str, focus_ids: list[str]) -> dict[str, tuple]:
+        """{id: (True / False / None, [unknown triggers])} of the focuses' `available` blocks in the running game."""
+        install = self._install_path()
+        if install is None:
+            return {fid: (None, []) for fid in focus_ids}
+        roots = self._game_roots(install)
+        userdata = (self.detect().get("userdata") or {}).get("path")
+        folders = focus_mod.focus_folders(install, gamefiles.enabled_mods(Path(userdata)) if userdata else [])
+        conditions = triggers_mod.focus_conditions(folders)
+        blocks = {fid: conditions.get(fid) or [] for fid in focus_ids}
+        dlcs = techtree.owned_dlcs(install, Path(userdata) if userdata else None)
+        return self.live.check_conditions(tag, blocks, list(government_mod.ideologies(roots)["colors"]),
+                                          dlcs, triggers_mod.scripted_triggers(roots))
 
     def _focus_context_cached(self, tag: str, wait: bool = True):
         """_focus_context() cached per newest save (parsing a binary save takes seconds). With wait=False a
@@ -1428,13 +1466,15 @@ class DebuggerService:
         return self.summary_games()
 
     def summary_game(self, gid: str, metric: str = "mil", tags: list[str] | None = None, by_faction: bool = False,
-                     groups_from: str | None = None) -> dict:
+                     groups_from: str | None = None, by_player: bool = False, subjects: bool = True) -> dict:
         """IC history of one campaign for the Game summary tab: the countries (latest MIL / NAV / CIV IC a day,
-        faction, name) and the day series of `metric` for `tags` or per faction (ic_history.view), with the user's
-        grouping of this campaign - or of `groups_from` (the campaign it is compared with)."""
+        faction, name) and the day series of `metric` for `tags`, per faction or per player with or without the
+        player's subjects (ic_history.view), with the user's grouping of this campaign - or of `groups_from` (the
+        campaign it is compared with)."""
         try:
             game = self.ic_history.game(gid)
-            out = ic_history_mod.view(game, metric, tags, by_faction, self.ic_history.groups(groups_from or gid))
+            out = ic_history_mod.view(game, metric, tags, by_faction, self.ic_history.groups(groups_from or gid),
+                                      by_player, subjects)
         except FileNotFoundError:
             raise NotFound(f"No recorded campaign {gid}") from None
         except ValueError as exc:
@@ -1443,7 +1483,10 @@ class DebuggerService:
         names = gamefiles.country_names(install) if install else {}
         for c in out["countries"]:
             c["name"] = names.get(c["tag"], c["tag"])
-        return {"data": {"id": gid, "player": game["player"], "metric": metric, "by_faction": by_faction, **out}}
+        for p in out["players"]:
+            p["country"] = names.get(p["tag"], p["tag"])
+        return {"data": {"id": gid, "player": game["player"], "metric": metric, "by_faction": by_faction,
+                         "by_player": by_player, "subjects": subjects, **out}}
 
     # -- Players actions (actions.py) ---------------------------------------------------------------
     def action_snapshot(self, tags: list[str]) -> dict[str, dict]:

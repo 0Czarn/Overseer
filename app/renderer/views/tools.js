@@ -1,15 +1,17 @@
 import { h, card, notice, scopeBadge, toast, viewHeader } from '../lib/dom.js';
 import { techDataSection } from './tech-data.js';
 
-/** Fog of war switch (LOCAL memory write, single player only - backend live/service.set_fog_of_war). */
+/** Fog of war switch (LOCAL memory write, single player or multiplayer when allowed in Options - backend
+ *  live/service.set_fog_of_war, `allowed`). */
 function fogToggle(ctx) {
   const input = h('input', { type: 'checkbox', disabled: true });
   const state = h('span', { class: 'muted', style: { marginLeft: '8px' } }, 'Reading…');
   const show = (d) => {
     input.checked = d.fog === false;
-    input.disabled = d.mode !== 'SINGLEPLAYER';
-    state.textContent = d.mode !== 'SINGLEPLAYER' ? `Off limits: ${d.mode ? 'multiplayer game' : 'single player not confirmed'}`
-      : d.fog ? 'Fog of war on' : 'Fog of war OFF - the whole map is visible';
+    input.disabled = !d.allowed;
+    state.textContent = !d.allowed
+      ? `Off limits: ${d.mode ? 'multiplayer game - allow it in Options > Multiplayer' : 'single player not confirmed'}`
+      : `${d.fog ? 'Fog of war on' : 'Fog of war OFF - the whole map is visible'}${d.mode === 'MULTIPLAYER' ? ' (multiplayer, this client only)' : ''}`;
   };
   const fail = (err) => { input.disabled = true; state.textContent = `Not available: ${err.message}`; };
   ctx.api.get('/api/live/fog-of-war').then((r) => show(r.data), fail);

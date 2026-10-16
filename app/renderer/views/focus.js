@@ -123,7 +123,10 @@ export function planTimeline(queue, byId, current, progressDays) {
     const f = byId.get(q.id);
     if (!q.ok || !f) return { ...q, n: i + 1, focus: f, start: null, end: null, next: false, manual: false };
     const item = { ...q, n: i + 1, focus: f, start: at, end: at + f.days, next: !nextFound,
-      manual: Boolean(f.start_conditions || f.select_effect) };
+      // conditions: the focus's `available` checked on game memory (true / false / null = the app cannot tell;
+      // undefined = not checked, e.g. from a save)
+      manual: Boolean(f.select_effect || (f.start_conditions && (q.conditions === null || q.conditions === undefined))),
+      waiting: q.conditions === false };
     nextFound = true;
     at += f.days;
     return item;
@@ -154,8 +157,11 @@ function queueList(d, byId, queue, move, remove) {
       h('div', { class: 'plan-main' },
         h('div', { class: 'plan-name' }, f?.name ?? x.id,
           x.next ? h('span', { class: 'plan-badge plan-badge-next' }, 'NEXT') : null,
-          x.manual ? h('span', { class: 'plan-badge plan-badge-manual', title: 'Has conditions the app cannot check or effects '
-            + 'when picked: start it yourself in the game (auto-start leaves it to you)' }, 'START IN GAME') : null),
+          x.manual ? h('span', { class: 'plan-badge plan-badge-manual', title: 'Has conditions the app cannot check'
+            + (x.unknown?.length ? ` (${x.unknown.join(', ')})` : '') + ' or effects when picked: start it yourself in the game '
+            + '(auto-start leaves it to you)' }, 'START IN GAME') : null,
+          x.waiting ? h('span', { class: 'plan-badge plan-badge-manual', title: 'Its conditions (available) are not met in '
+            + 'the game now - auto-start waits until they are' }, 'CONDITIONS NOT MET') : null),
         h('div', { class: 'plan-when' }, when)),
       h('span', { class: 'plan-btns' },
         h('button', { class: 'btn btn-small btn-ghost', disabled: i === 0, onClick: () => move(i, -1), 'aria-label': 'Move up', title: 'Move up' }, '↑'),
@@ -167,6 +173,7 @@ function queueList(d, byId, queue, move, remove) {
 
 const AUTO_STATE = { busy: 'a focus is in progress - the next one starts when it ends',
   empty: 'no valid focus in your plan', ready: 'would start now', manual: 'next one must be started in the game',
+  waiting: 'its conditions are not met yet - waiting',
   started: 'started' };
 
 /** "Auto-start the next focus" switch with what it would do now (your country only, single player). */
@@ -184,10 +191,10 @@ function autostartSwitch(ctx) {
   box.addEventListener('change', () => { setAutostartEnabled(box.checked); preview(); });
   preview();
   return h('div', { class: 'cons-sort' },
-    h('label', { class: 'cons-sort-label', title: 'Your country only, single player. When no focus is selected, the app '
-      + 'starts the next valid focus of this plan by writing game memory on this computer (0 days: saved days are '
-      + 'dropped, no political power is taken). Focuses with conditions the app cannot check or with effects on '
-      + 'picking are left to you - you get a notice.' },
+    h('label', { class: 'cons-sort-label', title: 'Your country only; single player, or multiplayer when allowed in Options. '
+      + 'When no focus is selected, the app starts the next valid focus of this plan by writing game memory on this computer '
+      + '(0 days: saved days are dropped, no political power is taken). Its conditions (available) are checked on game '
+      + 'memory first; focuses with conditions the app cannot check or with effects on picking are left to you - you get a notice.' },
     box, h('span', null, 'Auto-start the next focus of the plan')), info);
 }
 
