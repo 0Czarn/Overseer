@@ -11,7 +11,7 @@ from __future__ import annotations
 import bisect
 import re
 
-from . import binary, binvalues
+from . import binary, binvalues, text
 
 STATES, OWNER, RULING_PARTY = 0x2E3B, 0x283E, 0x3008
 BRACE_OR_STRING = re.compile(rb'"(?:[^"\\]|\\.)*"|[{}]')
@@ -92,12 +92,34 @@ def summary_binary(data: bytes, float_width: int, version: str | None) -> dict:
     return {"owners": owners, "ruling": ruling}
 
 
+def game_rules(data: bytes, float_width: int | None) -> dict[str, str]:
+    """{rule: option} of the top-level game_rules block (only the rules changed from their default)."""
+    if data.startswith(b"HOI4bin"):
+        p = binary.Parser(data, float_width or 8)
+        while p.peek() is not None:
+            key = p._u16()
+            if p._u16() != binary.EQUALS:
+                raise binary.SaveFormatError("corrupt", "Expected '=' after a top-level field", p.pos - 2)
+            if key == binvalues.TOKENS["game_rules"] and p.peek() == binary.OPEN:
+                block = binvalues._named(p.value([1_000_000]))
+                return {k: v for k, v in block if isinstance(k, str) and isinstance(v, str)}
+            p.skip_value()
+        return {}
+    start = data.find(b"\ngame_rules={")
+    if start < 0:
+        return {}
+    end = data.find(b"\n}", start + 1)
+    block = text.parse(data[start + 1:end + 2].decode("utf-8", "replace"))
+    rules = text.get(block, "game_rules") or []
+    return {k: v for k, v in rules if isinstance(k, str) and isinstance(v, str)} if isinstance(rules, list) else {}
+
+
 def focus_states_binary(data: bytes, float_width: int, version: str | None) -> dict[str, list]:
     """{tag: [("focus_tree", id), ("focus", [...])]} for every country, in one pass (other keys skipped)."""
     if not binvalues.VERIFIED_VERSION.search(version or "") or float_width != 8:
         raise binary.SaveFormatError("binary_values_unmapped", f"Binary focus state is only mapped for 1.19.3 "
                                      f"(this save: {version or 'unknown'}). Use a text save (-force_text_save).")
-    wanted = {binvalues.TOKENS["focus_tree"], binvalues.TOKENS["focus"]}
+    wanted = {binvalues.TOKENS["focus_tree"], binvalues.TOKENS["focus"], binvalues.TOKENS["flags"]}
     out: dict[str, list] = {}
     p = binary.Parser(data, float_width)
     while p.peek() is not None:

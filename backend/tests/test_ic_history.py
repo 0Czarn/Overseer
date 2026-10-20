@@ -228,6 +228,41 @@ class FactoryCountTest(unittest.TestCase):
         self.assertEqual(v["countries"][0]["fdock"], 5)
 
 
+class PerFactoryTest(unittest.TestCase):
+    def test_ic_per_assigned_factory_older_days_and_groups(self):
+        history = IcHistory(Path(tempfile.mkdtemp()))
+        t = day(1936, 1, 2)
+        # an older row: no assigned factories - military / naval from the wasted IC (34 factories, 2 idle)
+        gid = history.add({"t": t, "player": "SOV", "factions": {"SOV": "Comintern", "MON": "Comintern"},
+                           "countries": {"SOV": [60.0, 12.0, 50.0, 46, 34, 6, 3.75, 0.0, 4.0, None, None, None]}})
+        history.add({"t": t + 1, "player": "SOV", "countries": {
+            "SOV": [64.0, 12.0, 50.0, 46, 34, 6, 0.0, 0.0, 0.0, None, None, None, 32, 6, 10],
+            "MON": [2.0, 0.0, 5.0, 2, 2, 0, 0.0, 0.0, 0.0, None, None, None, 2, 0, 2]}})
+        game = history.game(gid)
+        sov = game["countries"]["SOV"]
+        self.assertEqual(sov["pmil"], [round(63.75 / 34, 3), 2.0])     # (IC + wasted) / factories, then IC / 32
+        self.assertEqual(sov["pnav"], [2.0, 2.0])
+        self.assertEqual(sov["pciv"], [None, 5.0])                     # civilian: only days with assigned factories
+        self.assertIsNone(game["countries"]["MON"]["pnav"][1])          # no dockyard on a line
+        f = ic_history.view(game, "pmil", None, True)
+        self.assertEqual(f["series"][0]["key"], "Comintern")
+        self.assertEqual(f["series"][0]["values"][1], round(66 / 34, 3))   # its IC / its factories, not a mean
+        self.assertEqual(f["countries"][0]["pmil"], 2.0)
+
+    def test_the_recorder_stores_assigned_factories_after_the_losses(self):
+        live = FakeLive()
+        live.ic_snapshot = lambda f: {"t": live.t, "player": "SOV", "factions": None,
+                                      "countries": {"SOV": [9.0, 0.0, 5.0, 1, 2, 0, 0, 0, 0]}, "assigned": {"SOV": [2, 0, 1]}}
+        history = IcHistory(Path(tempfile.mkdtemp()))
+        rec = IcRecorder(live, history, logging.getLogger("test"))
+        rec.step()
+        live.t += 1
+        self.assertTrue(rec.step())
+        game = history.game(history.active)
+        self.assertEqual((game["countries"]["SOV"]["amil"], game["countries"]["SOV"]["pmil"]), ([2], [4.5]))
+        self.assertEqual(game["countries"]["SOV"]["lcom"], [None])
+
+
 class GroupsTest(unittest.TestCase):
     GAME = ViewTest.GAME
 

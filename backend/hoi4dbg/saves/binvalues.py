@@ -28,6 +28,11 @@ TOKENS = {
     "navy_experience": 0x3393, "manpower": 0x283C, "current": 0x2B75,
     # national focus (aligned with the text save 11.hoi4): focus_tree id, focus = { completed progress current paused }
     "focus_tree": 0x33B8, "focus": 0x33B7, "completed": 0x3127, "progress": 0x2B05, "paused": 0x3691,
+    # country flags (2026-10-20, Po zmianach.hoi4 GER: flags = { GER_end_game_diplo_flag = { value=1 date=... } })
+    "flags": 0x29C9, "value": 0x0308,
+    # top-level game_rules = { rule = option } - only rules changed from the default (text save GER_1936_01_01_12:
+    # difficulty_settings, game_rules, id; binary Po zmianach.hoi4: 0x36AF, 0x3B62, id = GER_focus_tree_selection ...)
+    "game_rules": 0x3B62,
 }
 NAMES = {v: k for k, v in TOKENS.items()}
 

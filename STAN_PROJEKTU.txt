@@ -1,5 +1,5 @@
 HOI4 DEBUGGER - STAN PROJEKTU
-Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-16 (edycja w multiplayerze; warunki focusów sprawdzane z pamięci)
+Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-20 (drzewka focusów z modów jak w grze; kolejność tagów z modami)
 Szczegóły i dowody: docs/PROGRESS.md, plan: docs/STATUS-AND-PLAN.md
 
 ======================================================================
@@ -55,6 +55,19 @@ ZROBIONE
             Sesja MP 2026-10-16: 6 graczy (POR Luqer, GER Rodan, SOV Czarny, ITA kofrek.SKINS, FRA J.Donald.Trump + D07,
             AUS Strzelson) odczytane z pamięci.
             [ ] sprawdzić w aplikacji na nowo nagranych dniach (wcześniejsze dni kampanii nie mają graczy)
+            KONTROLA W MP (2026-10-16, prośba użytkownika): nagrywanie działa (kampania SOV_1936-01-02_20261016-182312).
+            POPRAWKA: log walk w MP "Combat log of 513 countries - layout does not match" - w tej sesji tablica państw ma
+            513 slotów przy 439 tagach (sloty 440-512: bez tagu w plikach gry i bez stanów); limit był tagi + 1. Teraz do
+            5000 slotów, sloty bez tagu pominięte. Odczyt na żywo: 53 państwa z logiem, 8 ze stratami.
+            POPRAWKA: łatka kodu (log walk dla każdego państwa) włączyła się w MP przez zgodę "Edits in multiplayer" -
+            teraz łatka kodu zawsze tylko SP (_require_single_player(strict=True)); w MP gra sama loguje państwa graczy.
+            Łatka wyłączona w bieżącej grze MP (2026-10-16 18:35, oryginalny kod przywrócony, ustawienie "enabled": false).
+            POPRAWKA: auto-start focusów rzucał błąd 500 przy modzie 3506850939 (soviet.txt: `mutually_exclusive { ... }`
+            bez "="); focus.py _pairs i parser triggers.py przyjmują teraz `klucz { ... }`. Drzewko SOV z modem: 520 celów.
+            AUTO-START FOCUSÓW W MP: wyłączony na stałe (strict) - w MP stan "manual" z komunikatem "pick it in the game"
+            (zapis focusu w MP = desync, test użytkownika).
+            [x] SPRAWDZONE PO RESTARCIE APLIKACJI (2026-10-16): kampania SOV_1936-01-16_20261016-183356 - każdy dzień ma 7
+                graczy (POR, GER, SOV, ITA, FRA + D07, LIT, SWI "Wódz") i 12 wartości (ze stratami), brak błędów w logu.
 [x] Krok A  Countries & Players: lista państw, nazwy z gry, partia, liczba stanów, gracze
             + zakładki: "Save files" (Players (from save file) / Countries) i "Live"
             + Live: państwa biorące udział (liczba stanów z pamięci, co 3 s), tryb gry, gracz lokalny
@@ -452,6 +465,52 @@ DO ZROBIENIA (w tej kolejności)
                 100%, poziom 25-200% zapamiętany per widok (lib/zoom.js); przeciąganie bez zmian.
                 Smoke: przy filtrze zakładek pierwsza zakładka była nieprzeładowana - poprawione. Zrzuty przy zasłoniętym
                 oknie (gra na pełnym ekranie) pokazują stary obraz - sprawdzać DOM, nie zrzut.
+            [~] DRZEWKA Z MODÓW JAK W GRZE (2026-10-20, prośba użytkownika, zrzuty in_game_screen.jpg / DEBUG_screen.jpg,
+                mod TFB): przyczyny złego drzewka i poprawki:
+                - lista modów: aplikacja czytała dlc_load.json; teraz najpierw logs/system.log gry ("Active Mod: ..."),
+                  kolejność z dlc_load.json (gamefiles.enabled_mods, cache po czasach plików) - dotyczy całej aplikacji.
+                - KOLEJNOŚĆ TAGÓW Z MODAMI (cała aplikacja na żywo): TFB zastępuje 00_countries.txt (140 tagów, inna
+                  kolejność) - slot SOV był czytany jako inne państwo (SOV -> japan_wtt_focus, ITA -> danish_focus).
+                  Teraz tag_order z plików gry + modów; LiveService czyści listę tagów, gdy gra ma inne mody.
+                - pliki jak w grze (gamefiles.merged_files): plik moda o tej samej nazwie zastępuje plik gry, replace_path.
+                - tłumaczenia z modów (cała aplikacja, service._loc_names): *_l_english.yml w localisation/**, plik o tej
+                  samej nazwie zastępuje, folder replace nadpisuje. Nazwy skryptowe: "[GetAutobahnName]" -> "Autobahn".
+                - joint_focus = { } (TFB abdacom_shared_branch.txt) jak shared_focus.
+                - allow_branch (ukrywanie gałęzi, z dziećmi bez innej drogi), offset = { x y trigger } (przesunięcia),
+                  has_game_rule (reguły: domyślne z common/game_rules - TFB obsolete_focus_branches_visibility = HIDE).
+                  Warunki na żywo z pamięci, bez gry z save'a (triggers.SavedWorld: ukończone focusy, DLC, reguły).
+                  Ukończone i bieżący focus nigdy nie są ukryte.
+                - lista focusów drzewka Z PAMIĘCI: [CNationalFocusTree+0x30] (pointers.read_tree_focuses, cache na proces);
+                  ostrzeżenie, gdy gra ma focusy, których nie ma w plikach. TFB: GER 461, SOV 280, ITA 137, ENG 171,
+                  USA 146, FRA 119, JAP 448 - wszystkie zgodne z plikami (0 brakujących).
+                - przełącznik "Show hidden branches" (ukryte wyblakłe, zapamiętany), ukrytego focusa nie da się dodać do
+                  planu; zmiana widoczności/pozycji w grze (pole "shape") przeładowuje drzewko.
+                GER TFB 1936.01.01 na żywo: 210 widocznych, 251 ukrytych (stan 0,05 s, pełny widok 3,4 s).
+                Pamięć: CNationalFocusProgress +0x78 = focusy z spełnionymi wymaganiami (GER 9, także ukryte) - lista
+                widoczności w pamięci nieznaleziona (gra liczy ją przy wyświetlaniu). Reguły gry w pamięci: tylko tablica
+                symboli, wybranej opcji nie znaleziono - używane domyślne.
+                [ ] porównanie z grą przez użytkownika (zrzut z gry chyba nie GER: jeden focus startowy na środku)
+                [ ] reguły gry z pamięci lub z save'a (gry MP ze zmienioną regułą SHOW)
+                POPRAWKA R56 (2026-10-20, zgłoszenie użytkownika: "drzewko Niemiec się rozjechało, oppose hitler nie
+                istnieje in game"): parser warunków (triggers.py) brał \" w napisie za koniec napisu (R56 germany.txt:
+                division = "name = \"Volkssturm 'Berlin'\" ...") i gubił resztę pliku - 72 z 909 focusów GER miało
+                allow_branch/offset. Teraz napisy z \" i # w napisie (także focus.py). GER R56: 83 allow_branch,
+                Oppose Hitler ukryty, 575 widocznych / 334 ukrytych.
+                [x] FLAGI PAŃSTWA (has_country_flag, 29 warunków GER R56, np. GER_spd_banned): z save'a zapisanego przez
+                    bieżący proces gry (starszy save = nieznane); save tekstowy i binarny (token flags 0x29C9, value 0x0308,
+                    Po zmianach.hoi4: 14 flag GER). Zapis użytkownika GER_1936_01_01_12.hoi4: 3 flagi GER, game_rules={}
+                    (gra zapisuje tylko zmienione reguły - domyślne R56_TREE = jak w aplikacji). GER R56: 83/83 allow_branch
+                    rozstrzygnięte, 499 widocznych, 0 nakładających się focusów (wcześniej 7 par).
+                    Pamięć: rejestr nazw flag globalny (GER_end_game_diplo_flag = 0x131bf); trafienia id|wartość
+                    (0x1000131bf) to definicje skryptów (obok CHasGovernmentTrigger), magazynu flag państwa nie znaleziono.
+                [x] REGUŁY GRY Z SAVE'A (2026-10-20, pytanie użytkownika o przełącznik R56/vanilla w opcjach save'a):
+                    R56 ma wszystkie 3 wersje drzewka GER w jednym pliku (GER_focus_tree_selection: STANDARD_TREE /
+                    R56_TREE domyślna / R56_TREE_OLD, 168 warunków) - stąd wcześniej "drzewko vanilla i R56 naraz".
+                    Save trzyma tylko zmienione reguły: tekstowy game_rules={...}, binarny token 0x3B62 (Po zmianach.hoi4,
+                    sesja MP: GER/POR STANDARD_TREE, allow_guarantees, ideology_join_faction). Reguły = domyślne z plików +
+                    zmienione z save'a (na żywo: tylko save zapisany przez bieżący proces gry). GER R56: R56_TREE 499
+                    widocznych, STANDARD_TREE 431.
+                [ ] flagi i reguły z pamięci (teraz z save'a - zmiana po zapisie widoczna po następnym zapisie/autozapisie)
 [~] ZAKŁADKA "GAME SUMMARY" (2026-10-13, prośba użytkownika; wzór: github.com/otti086-Org/HOI4-IC-Graphs - tamto
             narzędzie wstrzykuje DLL do gry; u nas odczyt pamięci: bez ryzyka crasha, jedno miejsce na offsety)
             REJESTRATOR (backend, wątek w tle, ic_history.py): raz na dzień gry dla KAŻDEGO państwa IC/dzień: MIL (produkcja
@@ -484,6 +543,18 @@ DO ZROBIENIA (w tej kolejności)
             i nazwie w obu trybach, wspólny kursor: najechanie na jeden wykres pokazuje dzień i wartości widocznych serii w
             obu. POPRAWKI: podpowiedź pokazywała "[object HTMLDivElement]" (replaceChildren z tablicą); kliknięte pole
             wyboru blokowało odświeżenie panelu grup.
+            IC NA FABRYKĘ (2026-10-20, prośba użytkownika): grupa "IC per factory" - Military IC / fabrykę wojskową,
+            Naval IC / stocznię, Construction IC / fabrykę cywilną; liczone na fabryki PRACUJĄCE na liniach (wydajność,
+            factory/dockyard output, szybkość budowy, braki surowców), grupy/frakcje/gracze = suma IC / suma fabryk.
+            Tylko wykres dzienny (to stan dnia). Rejestrator zapisuje teraz przypisane fabryki (amil/anav/aciv, za
+            stratami w wierszu). Starsze dni: wojsko i stocznie z zapisanego wasted IC (przypisane = fabryki x IC /
+            (IC + wasted)), cywilne - brak (nie zapisywano wolnych fabryk cywilnych).
+            Test produkcji (2026-10-20, użytkownik dał ZSRR +10% production cap 2 focusami, 1 dzień gry): IC każdej linii
+            wojskowej +0,13% (zwykły dzienny wzrost wydajności), stocznie bez zmian - cap to sufit wydajności, nie
+            mnożnik; postęp linii rośnie dokładnie o odczytane IC dnia. Na żywo 1936.01.03: SOV 1,82 / 2,08 / -
+            (brak budowy), GER 2,09 / 2,50 / 10,8, USA 2,31 / 3,25 / 5,63.
+            [ ] kampania SOV z 16.10 (sesja MP): 2,9 -> 7,5 IC/fabrykę wojskową i 5,9 -> 7,6 / stocznię - wysokie,
+                niesprawdzone (inna gra; wartości starszych dni wyliczone z wasted IC).
             ZMARNOWANE IC (2026-10-15, prośba użytkownika, osobno wojskowe / stocznie / cywilne): linie produkcji i budowy
             +0x18 = przydzielone fabryki (SOV 1936: 33/33, 6/6, 23/23 wolnych cywilnych = gra). Bezczynne = fabryki
             (read_factories; cywilne: "free" po dobrach konsumpcyjnych/handlu) - przydzielone; IC = bezczynne x własne IC na

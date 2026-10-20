@@ -11,8 +11,11 @@ from . import pointers
 
 
 class LiveWorld:
-    def __init__(self, mem, module_base: int, order: list[str], ideologies: list[str], dlcs: set[str] | None) -> None:
+    def __init__(self, mem, module_base: int, order: list[str], ideologies: list[str], dlcs: set[str] | None,
+                 rules: dict[str, str] | None = None) -> None:
         self.mem, self.base, self.order, self.ideologies, self._dlcs = mem, module_base, order, ideologies, dlcs
+        self.rules = rules or {}   # game rules {rule: option} (has_game_rule)
+        self.flags: dict[str, dict] = {}   # {tag: {flag: value}} from the newest save of this game (not in memory yet)
         self.objects = pointers.country_objects(mem, module_base, order)
         owned = pointers.owned_states(mem, module_base, order)
         self._countries = [t for t in order if t in self.objects and owned.get(t, 0) > 0]
@@ -39,6 +42,12 @@ class LiveWorld:
 
     def dlcs(self) -> set[str] | None:
         return self._dlcs
+
+    def game_rule(self, rule: str) -> str | None:
+        return self.rules.get(rule)
+
+    def country_flags(self, tag: str) -> dict | None:
+        return self.flags.get(tag)
 
     def government(self, tag: str) -> str | None:
         c = self.objects.get(tag)

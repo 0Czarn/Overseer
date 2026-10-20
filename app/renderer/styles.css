@@ -776,6 +776,7 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .fnode-blocked .fnode-icon, .fnode-excluded .fnode-icon { filter: grayscale(0.85) brightness(0.7); }
 .fnode-excluded { opacity: 0.55; }
+.fnode-hidden { opacity: 0.3; outline: 1px dashed rgba(255, 255, 255, 0.35); outline-offset: -2px; }
 .fnode-in_progress .fnode-icon { animation: fnode-pulse 1.6s ease-in-out infinite; }
 @keyframes fnode-pulse { 50% { filter: drop-shadow(0 0 10px #f3d36b) brightness(1.15); } }
 .fnode-progress { position: absolute; left: 4px; right: 4px; bottom: -2px; height: 5px; background: #0e100c; border: 1px solid #4a4430; }

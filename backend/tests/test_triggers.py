@@ -45,6 +45,12 @@ class TriggerTests(unittest.TestCase):
         self.assertEqual(triggers.parse("has_political_power > 50 CZE = { fascism < 0.5 } # x"),
                          [("has_political_power", ">", "50"), ("CZE", "=", [("fascism", "<", "0.5")])])
 
+    def test_key_and_block_without_equals(self):
+        self.assertEqual(triggers.parse("mutually_exclusive { focus = A }"), [("mutually_exclusive", "=", [("focus", "=", "A")])])
+        from hoi4dbg import focus
+        f = focus._focus([("id", "X"), "mutually_exclusive", [("focus", "A")], ("cost", "5")])
+        self.assertEqual((f["id"], f["exclusive"], f["days"]), ("X", ["A"], 35))
+
     def test_rhineland_like_block(self):
         src = "is_subject = no has_government = fascism 42 = { is_fully_controlled_by = ROOT }"
         self.assertEqual(ev(src), (True, []))

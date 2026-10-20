@@ -246,6 +246,8 @@ def research_progress(slot: dict, tech: dict | None, defines: dict, today: float
 
 
 LOC_REF = re.compile(r"\$([A-Za-z0-9_.]+)(?:\|[^$]*)?\$")
+SCRIPTED_LOC = re.compile(r"\[(?:[A-Za-z]+\.)*Get([A-Z][A-Za-z]*?)(?:Names?)?\]")   # [GetAutobahnName] -> Autobahn
+SCRIPTED_KEEP = {"Name", "NameDef", "NameDefCap", "Adjective", "AdjectiveCap", "Leader", "RulingParty"}  # country texts
 
 
 def clean_loc(value: str, names: dict[str, str], depth: int = 3) -> str:
@@ -318,7 +320,7 @@ class DebuggerService:
         """Tags from the game files, names from its localisation; existence, ideology and players from the
         newest save (countries owning at least one state). DEMO only when neither is available."""
         install = self._install_path()
-        tags = gamefiles.tag_order(install) if install else []
+        tags = gamefiles.tag_order(install, self._game_roots(install)[1:]) if install else []
         names = gamefiles.country_names(install) if install else {}
         summary, note = None, None
         picked = self._pick_save(None)
@@ -434,7 +436,7 @@ class DebuggerService:
                 if live.get("tree"):
                     state = {"tree": live["tree"], "completed": live["completed"], "current": live["current"],
                              "progress": live["progress_days"], "paused": False, "analysis": None, "source": "live",
-                             "date": live.get("date")}
+                             "date": live.get("date"), "members": live.get("members")}
             except Exception:  # game not running, main menu, other version: the save is the fallback
                 state = None
         if state is None:
@@ -442,15 +444,106 @@ class DebuggerService:
             if picked is None:
                 return None
             state = {**self.saves.focus_state(picked[0], tag), "source": "save"}
-        userdata = (self.detect().get("userdata") or {}).get("path")
-        folders = focus_mod.focus_folders(install, gamefiles.enabled_mods(Path(userdata)) if userdata else [])
-        focuses = focus_mod.statuses(focus_mod.tree(folders, state["tree"]), state) if state["tree"] else []
-        names = focus_mod.loc_names(install, {f["id"] for f in focuses})
+        roots = self._game_roots(install)
+        files = focus_mod.focus_files(install, [Path(r) for r in roots[1:]])
+        focuses = focus_mod.statuses(self._focus_shape(tag, state, files, roots), state) if state["tree"] else []
+        names = self._loc_names(install, {f["id"] for f in focuses})
         for f in focuses:
-            name = names.get(f["id"])
-            # scripted names ([GetSomething]) are resolved by the game at runtime - show a readable id instead
+            # scripted names ([GetAutobahnName]) are resolved by the game at runtime: "Autobahn", else a readable id
+            name = SCRIPTED_LOC.sub(lambda m: m.group(0) if m.group(1) in SCRIPTED_KEEP
+                                    else re.sub(r"(?<=[a-z])(?=[A-Z])", " ", m.group(1)), names.get(f["id"]) or "")
             f["name"] = name if name and "[" not in name else f["id"].split("_", 1)[-1].replace("_", " ").capitalize()
         return state, focuses
+
+    def _focus_shape(self, tag: str, state: dict, files: tuple[str, ...], roots: tuple[str, ...]) -> list[dict]:
+        """The tree as the game shows it to the country: its focuses (the game's list from memory when it runs),
+        moved by the offsets whose trigger holds; "hidden" = allow_branch false or reachable only through hidden
+        focuses. Triggers are checked on game memory, else on the save (completed focuses, DLCs, game rules)."""
+        base = focus_mod.tree(files, state["tree"], members=state.get("members"))
+        scripts = triggers_mod.focus_scripts(files)
+        blocks = {}
+        for f in base:
+            sc = scripts.get(f["id"]) or {}
+            if sc.get("allow_branch") is not None:
+                blocks[("branch", f["id"], 0)] = sc["allow_branch"]
+            for i, (_dx, _dy, trig) in enumerate(sc.get("offsets") or []):
+                blocks[("offset", f["id"], i)] = trig
+        found = self._evaluate_blocks(tag, blocks, state, roots) if blocks else {}
+        shifts: dict[str, tuple[float, float]] = {}
+        for (kind, fid, i), (ok, _unknown) in found.items():
+            if kind == "offset" and ok is True:
+                dx, dy, _t = scripts[fid]["offsets"][i]
+                x, y = shifts.get(fid, (0, 0))
+                shifts[fid] = (x + dx, y + dy)
+        focuses = focus_mod.tree(files, state["tree"], shifts, state.get("members")) if shifts else base
+        branch = {fid: ok for (kind, fid, _i), (ok, _u) in found.items() if kind == "branch"}
+        gone = focus_mod.hidden(focuses, branch, set(state.get("completed") or []) | {state.get("current")})
+        for f in focuses:
+            f["hidden"] = f["id"] in gone
+        return focuses
+
+    def _evaluate_blocks(self, tag: str, blocks: dict, state: dict, roots: tuple[str, ...]) -> dict:
+        """{key: (True / False / None, [unknown triggers])} of trigger blocks for `tag`: on game memory with live
+        state, else on what the save gives (triggers.SavedWorld)."""
+        install = Path(roots[0])
+        userdata = (self.detect().get("userdata") or {}).get("path")
+        dlcs = techtree.owned_dlcs(install, Path(userdata) if userdata else None)
+        rules = self._game_rules(roots, live=state.get("source") == "live")
+        scripted = triggers_mod.scripted_triggers(roots)
+        if state.get("source") == "live" and self.live is not None:
+            flags = self._live_save_flags(tag)
+            try:
+                return self.live.check_conditions(tag, blocks, list(government_mod.ideologies(roots)["colors"]),
+                                                  dlcs, scripted, rules, {tag: flags} if flags is not None else None)
+            except Exception as exc:   # game closed meanwhile: decided on the save's facts below
+                self.log.debug("Focus tree triggers not checked in memory: %s", exc)
+        world = triggers_mod.SavedWorld(tag, state.get("completed") or [], dlcs, rules,
+                                        gamefiles.tag_order(install, roots[1:]), state.get("flags"))
+        out = {}
+        for key, block in blocks.items():
+            ctx = triggers_mod.Context(world, tag, scripted)
+            out[key] = (triggers_mod.evaluate(block, ctx), sorted(ctx.unknown))
+        return out
+
+    def _this_game_save(self) -> Path | None:
+        """The newest save when the running game process wrote it (a save of an earlier game may belong to another
+        campaign), else None."""
+        started = ((self.detect().get("process") or {}).get("started"))
+        picked = self._pick_save(None)
+        try:
+            if started and picked and picked[0].stat().st_mtime >= dt.datetime.fromisoformat(started).timestamp():
+                return picked[0]
+        except (OSError, ValueError):
+            pass
+        return None
+
+    def _live_save_flags(self, tag: str) -> dict | None:
+        """Country flags of `tag` for the running game: from the save this game process wrote (flags are not read
+        from memory yet - 2026-10-20: the game's flag name registry is global, the country's own flag store was not
+        found). None = not known (has_country_flag stays undecided)."""
+        path = self._this_game_save()
+        try:
+            return self.saves.focus_state(path, tag).get("flags") if path else None
+        except SaveFormatError as exc:
+            self.log.debug("Country flags not read from the save: %s", exc)
+            return None
+
+    def _game_rules(self, roots: tuple[str, ...], live: bool = True) -> dict[str, str]:
+        """Game rules {rule: option} for has_game_rule: the defaults of common/game_rules (game + mods) with the
+        rules changed in the save (the save keeps only those; 2026-10-20 Po zmianach.hoi4: GER_focus_tree_selection
+        = STANDARD_TREE). `live`: the save this game process wrote, else the newest save."""
+        rules = dict(triggers_mod.game_rule_defaults(tuple(str(f) for f in gamefiles.merged_files(roots, "common/game_rules"))))
+        path = self._this_game_save() if live else (self._pick_save(None) or [None])[0]
+        if path is not None and self.saves is not None:
+            try:
+                rules.update(self.saves.game_rules(path))
+            except SaveFormatError as exc:
+                self.log.debug("Game rules not read from the save: %s", exc)
+        return rules
+
+    def _loc_names(self, install: Path, ids: set[str]) -> dict[str, str]:
+        """Localised texts of the game and the mods it runs with."""
+        return focus_mod.loc_names(install, ids, mods=self._game_roots(install)[1:])
 
     def _focus_graphics(self, focuses: list[dict]) -> dict:
         """Icons (by sprite), name plate backgrounds (by status) and the exclusive link of the game's focus screen,
@@ -464,7 +557,7 @@ class DebuggerService:
             if sprite not in icons and sprite in sprites:
                 icons[sprite] = gfx.icon_data_uri(sprites[sprite])
             f["icon_key"] = sprite if icons.get(sprite) else None
-        descs = focus_mod.loc_names(install, {f"{f['id']}_desc" for f in focuses})
+        descs = self._loc_names(install, {f"{f['id']}_desc" for f in focuses})
         for f in focuses:
             d = descs.get(f"{f['id']}_desc")
             f["desc"] = clean_loc(d, descs) if d and "[" not in d else None
@@ -476,9 +569,20 @@ class DebuggerService:
                 "plates": {k: gfx.icon_data_uri(sprites[v]) if sprites.get(v) else None for k, v in plate.items()},
                 "exclusive_icon": gfx.frame_data_uri(link, 1, 3) if link else None}
 
-    def focus(self, tag: str) -> dict:
+    @staticmethod
+    def _focus_shown(state: dict, focuses: list[dict], show_hidden: bool) -> tuple[list[dict], dict]:
+        """(focuses to draw, {"hidden": count, "shape": key of positions and visibility, "missing": focuses of the
+        game's tree not found in the files}) - hidden branches only with `show_hidden`."""
+        shown = focuses if show_hidden else [f for f in focuses if not f.get("hidden")]
+        known = {f["id"] for f in focuses}
+        shape = "|".join(f"{f['id']}:{f['x']:g}:{f['y']:g}:{int(bool(f.get('hidden')))}" for f in shown)
+        return shown, {"hidden": sum(1 for f in focuses if f.get("hidden")), "shape": str(hash((state["tree"], shape))),
+                       "missing": [m for m in state.get("members") or [] if m not in known]}
+
+    def focus(self, tag: str, show_hidden: bool = False) -> dict:
         """Focus tree of `tag` (game/mod files) laid out like the game's focus screen, with statuses from game
-        memory while the game runs (else the newest save); the queue is a plan."""
+        memory while the game runs (else the newest save); the queue is a plan. Hidden branches (allow_branch) only
+        with `show_hidden`."""
         tag = tag.upper()
         try:
             ctx = self._focus_context(tag, live_first=True)
@@ -491,13 +595,16 @@ class DebuggerService:
                             f"{note} {DEMO_NOTE}" if note else DEMO_NOTE)
         state, focuses = ctx
         queue = self._focus_queues().get(f"{tag}:{state['tree']}", [])
+        shown, info = self._focus_shown(state, focuses, show_hidden)
         data = {
             "tag": tag, "tree": state["tree"], "current": state["current"], "progress_days": state["progress"],
-            "paused": state["paused"], "completed": len(state["completed"]), "focuses": focuses,
+            "paused": state["paused"], "completed": len(state["completed"]), "focuses": shown,
             "queue": self._with_conditions(tag, focus_mod.validate_queue(focuses, state, queue), focuses, state),
-            "queue_supported": False,
-            "focus_source": state["source"], "game_date": state.get("date"), "layout": focus_mod.layout(focuses),
-            **self._focus_graphics(focuses)}
+            "queue_supported": False, "hidden_count": info["hidden"], "shape": info["shape"],
+            "show_hidden": show_hidden, "missing_in_files": info["missing"][:20], "missing_count": len(info["missing"]),
+            "tree_source": "memory" if state.get("members") else "files",
+            "focus_source": state["source"], "game_date": state.get("date"), "layout": focus_mod.layout(shown),
+            **self._focus_graphics(shown)}
         if state["source"] == "live":
             return envelope(LIVE, data, f"Focus tree {state['tree']} from the game files; state of {tag} from game memory.")
         analysis = state["analysis"]
@@ -508,7 +615,7 @@ class DebuggerService:
                                     f"{analysis['file']['name']} ({(header.get('date') or {}).get('text') or '?'}). "
                                     "Snapshot - not live.")
 
-    def focus_state(self, tag: str) -> dict:
+    def focus_state(self, tag: str, show_hidden: bool = False) -> dict:
         """State of `tag`'s focus tree without the graphics (for Live / On refresh updates of the tree): tree id,
         current focus and progress, each focus's status and progress, the checked plan and its next focus."""
         tag = tag.upper()
@@ -523,10 +630,11 @@ class DebuggerService:
         queue = self._with_conditions(tag, queue, focuses, state)
         by_id = {f["id"]: f for f in focuses}
         nxt = next((q for q in queue if q["ok"]), None)
+        shown, info = self._focus_shown(state, focuses, show_hidden)
         return envelope(LIVE if state["source"] == "live" else SAVE, {
             "tag": tag, "tree": state["tree"], "current": state["current"], "progress_days": state["progress"],
-            "focus_source": state["source"], "queue": queue, "game_date": state.get("date"),
-            "statuses": {f["id"]: {"status": f["status"], "progress": f["progress"], "missing": f["missing"]} for f in focuses},
+            "focus_source": state["source"], "queue": queue, "game_date": state.get("date"), "shape": info["shape"],
+            "statuses": {f["id"]: {"status": f["status"], "progress": f["progress"], "missing": f["missing"]} for f in shown},
             "next": {"id": nxt["id"], "name": by_id[nxt["id"]]["name"], "days": by_id[nxt["id"]]["days"]} if nxt else None,
         }, "Focus state from game memory." if state["source"] == "live" else "Focus state from the newest save.")
 
@@ -565,6 +673,10 @@ class DebuggerService:
                         + (f" ({', '.join(unknown[:4])})" if unknown else "") + " - start it in the game"}
         if not apply:
             return {**out, "state": "ready"}
+        if self.live.game_mode() != "SINGLEPLAYER":
+            # a focus written into memory is not sent to the other players: tested 2026-10-16, it desyncs the game
+            return {**out, "state": "manual", "reason": "multiplayer - pick it in the game (a focus started by the app "
+                                                        "desyncs a multiplayer game)"}
         self.live.start_focus(f["id"])
         return {**out, "state": "started"}
 
@@ -590,12 +702,11 @@ class DebuggerService:
             return {fid: (None, []) for fid in focus_ids}
         roots = self._game_roots(install)
         userdata = (self.detect().get("userdata") or {}).get("path")
-        folders = focus_mod.focus_folders(install, gamefiles.enabled_mods(Path(userdata)) if userdata else [])
-        conditions = triggers_mod.focus_conditions(folders)
+        conditions = triggers_mod.focus_conditions(focus_mod.focus_files(install, [Path(r) for r in roots[1:]]))
         blocks = {fid: conditions.get(fid) or [] for fid in focus_ids}
         dlcs = techtree.owned_dlcs(install, Path(userdata) if userdata else None)
         return self.live.check_conditions(tag, blocks, list(government_mod.ideologies(roots)["colors"]),
-                                          dlcs, triggers_mod.scripted_triggers(roots))
+                                          dlcs, triggers_mod.scripted_triggers(roots), self._game_rules(roots))
 
     def _focus_context_cached(self, tag: str, wait: bool = True):
         """_focus_context() cached per newest save (parsing a binary save takes seconds). With wait=False a
@@ -944,7 +1055,7 @@ class DebuggerService:
                     if deal["receiver"] == tag and deal["amount"]:
                         sellers.setdefault(deal["resource"], []).append({"country": other, "amount": deal["amount"]})
         keys = set(order) | set().union(*[set(v) for k, v in res.items() if isinstance(v, dict)])
-        names = focus_mod.loc_names(install, {f"PRODUCTION_MATERIALS_{k.upper()}" for k in keys})
+        names = self._loc_names(install, {f"PRODUCTION_MATERIALS_{k.upper()}" for k in keys})
         rows = []
         for k in sorted(keys, key=lambda k: (order.get(k, {}).get("frame", 99), k)):
             get = lambda part: round(res[part].get(k, 0.0), 3)  # noqa: E731
@@ -1058,8 +1169,8 @@ class DebuggerService:
         """{technology id: name as the game shows it}: its own text, else the text of its first equipment
         (infantry_weapons1 -> infantry_equipment_1 "Infantry Equipment I"), else the id made readable."""
         keys = set(ids) | {techs[t]["equipment"] for t in ids if techs.get(t, {}).get("equipment")}
-        names = focus_mod.loc_names(install, keys)
-        names.update(focus_mod.loc_names(install, {r for v in names.values() for r in LOC_REF.findall(v)} - set(names)))
+        names = self._loc_names(install, keys)
+        names.update(self._loc_names(install, {r for v in names.values() for r in LOC_REF.findall(v)} - set(names)))
         out = {}
         for t in ids:
             key = t if names.get(t) else techs.get(t, {}).get("equipment")
@@ -1085,7 +1196,7 @@ class DebuggerService:
         strip = construction_mod.icon_strip(roots)
         lines = found["lines"]
         ends = {p for line in lines for p in (line["path"][:1] + line["path"][-1:])}
-        names = focus_mod.loc_names(install, {line["building"] for line in lines} | {f"VICTORY_POINTS_{p}" for p in ends})
+        names = self._loc_names(install, {line["building"] for line in lines} | {f"VICTORY_POINTS_{p}" for p in ends})
         provinces = {p: sid for sid, d in gamefiles.state_definitions(install).items() for p in d["provinces"]}
         out = construction_mod.rows(lines, {k: clean_loc(v, names) for k, v in names.items()},
                                     gamefiles.state_names(install), construction_mod.max_factories(roots),
@@ -1146,7 +1257,7 @@ class DebuggerService:
             advice["unchecked"].insert(0, geo_note)
         tags = {d["seller"] for row in advice["resources"] for d in row["buy"] + row["cancel"] + row["candidates"]}
         names = gamefiles.country_names(install)
-        loc = focus_mod.loc_names(install, {f"PRODUCTION_MATERIALS_{r.upper()}" for r in trade_mod.RESOURCES})
+        loc = self._loc_names(install, {f"PRODUCTION_MATERIALS_{r.upper()}" for r in trade_mod.RESOURCES})
         for row in advice["resources"]:
             row["name"] = loc.get(f"PRODUCTION_MATERIALS_{row['resource'].upper()}", row["resource"].capitalize())
             row["frame"] = order.get(row["resource"], {}).get("frame")
@@ -1242,7 +1353,7 @@ class DebuggerService:
             keys.add(t["name"] or "")
         for d in list(defs["grand"].values()) + list(defs["subs"].values()):
             want(d)
-        names = focus_mod.loc_names(install, keys)
+        names = self._loc_names(install, keys)
         loc = lambda k: (clean_loc(names[k], names) if k and names.get(k) else None)  # noqa: E731
         sprites = gfx.sprites(roots)
         icon = lambda sprite: gfx.icon_data_uri(sprites[sprite]) if sprite and sprites.get(sprite) else None  # noqa: E731
@@ -1320,7 +1431,7 @@ class DebuggerService:
         planes = found.get("plane_designs") or []
         ids |= {d["type"] for d in planes} | {s["module"] for d in planes for s in d.get("slots", []) if s["module"]}
         stat_keys = {k for g in air + reserve for k in (g["stats"] or {})}
-        names = focus_mod.loc_names(install, ids | {f"{i}_short" for i in ids} | {f"STAT_{k.upper()}" for k in stat_keys}
+        names = self._loc_names(install, ids | {f"{i}_short" for i in ids} | {f"STAT_{k.upper()}" for k in stat_keys}
                                     | {f"EQUIPMENT_STAT_{k.upper()}" for k in stat_keys} | set(stat_keys))
         loc = lambda k: clean_loc(names[k], names) if names.get(k) else None  # noqa: E731
         label = lambda i: loc(i) or i.replace("_", " ").capitalize()  # noqa: E731
@@ -1507,7 +1618,7 @@ class DebuggerService:
         install = self._install_path()
         keys = {e["id"] for e in events if e["kind"] in ("focus", "research", "researched", "ideas") and e.get("id")}
         keys |= {str(e.get("detail") or "").split("@")[0] for e in events if e["kind"] == "construction"}
-        names = focus_mod.loc_names(install, keys) if install else {}
+        names = self._loc_names(install, keys) if install else {}
         names.update({k: clean_loc(v, names) for k, v in names.items()})
         countries = gamefiles.country_names(install) if install else {}
         chars = self._character_names(install, {e["tag"] for e in events if e["kind"] in ("advisors", "leader")})
@@ -1539,7 +1650,7 @@ class DebuggerService:
                 chars = (self.saves.politics(picked[0], tag).get("characters") or {})
             except Exception:  # an old or broken save: ids stay
                 continue
-            loc = focus_mod.loc_names(install, {c["name"] or c["token"] for c in chars.values() if c.get("name") or c.get("token")})
+            loc = self._loc_names(install, {c["name"] or c["token"] for c in chars.values() if c.get("name") or c.get("token")})
             out[tag] = {cid: loc.get(c["name"] or "") or loc.get(c["token"] or "") or c["token"] or cid for cid, c in chars.items()}
         return out
 
@@ -1601,8 +1712,8 @@ class DebuggerService:
             for folder in t.get("folders") or []:
                 counts[folder] = counts.get(folder, 0) + 1
         tabs = techtree.research_tabs(roots, dlcs, counts)
-        names = focus_mod.loc_names(install, {t["id"] for t in tabs})
-        names.update(focus_mod.loc_names(install, {r for v in names.values() for r in LOC_REF.findall(v)} - set(names)))
+        names = self._loc_names(install, {t["id"] for t in tabs})
+        names.update(self._loc_names(install, {r for v in names.values() for r in LOC_REF.findall(v)} - set(names)))
         sprites = gfx.sprites(roots)
         for t in tabs:
             t["name"] = clean_loc(names[t["id"]], names) if names.get(t["id"]) else t["id"]
@@ -1636,7 +1747,7 @@ class DebuggerService:
         slots = {s["technology"]: s for s in rdata.get("slots") or [] if s.get("technology")}
         year = rdata.get("game_year")
         in_tab = {tid: t for tid, t in techs.items() if folder in (t.get("positions") or {})}
-        names = focus_mod.loc_names(install, {lb["text"] for lb in layout["labels"]})
+        names = self._loc_names(install, {lb["text"] for lb in layout["labels"]})
         loc = lambda key: (clean_loc(names[key], names) if names.get(key) else None) or key  # noqa: E731
         tech_names = self._tech_names(install, set(in_tab), techs)
         sprites = gfx.sprites(roots)
@@ -1760,7 +1871,7 @@ class DebuggerService:
         country_speed = max(plain) if plain else None
         # used up (0 uses left) bonuses stay in game memory and the save - the game no longer offers them
         bonuses = [b for b in bonuses or [] if (b.get("uses") or 0) > 0]
-        names = focus_mod.loc_names(install, ids | {b["name"] for b in bonuses if b["name"]}
+        names = self._loc_names(install, ids | {b["name"] for b in bonuses if b["name"]}
                                     | {k for b in bonuses for c in b["categories"] for k in (c, f"{c}_research")})
         sprites = gfx.sprites(roots)
         usable = {b["id"]: usable_for(b, techs, set(researched or []), ids) for b in bonuses} if researched else {}
@@ -1930,9 +2041,9 @@ class DebuggerService:
         leader = (state.get("characters") or {}).get(state.get("leader") or "")
         names_needed.update(filter(None, [leader and leader["name"], leader and leader["token"],
                                           *((leader or {}).get("leader_traits") or [])]))
-        names = focus_mod.loc_names(install, names_needed)
+        names = self._loc_names(install, names_needed)
         refs = {r for v in names.values() for r in LOC_REF.findall(v)}
-        names.update(focus_mod.loc_names(install, refs - set(names)))
+        names.update(self._loc_names(install, refs - set(names)))
         loc = lambda *keys: next((clean_loc(names[k], names) for k in keys if k and names.get(k)), None)  # noqa: E731
         sprites = gfx.sprites(roots)
         icon = lambda sprite: gfx.icon_data_uri(sprites[sprite]) if sprite and sprite in sprites else None  # noqa: E731
@@ -1956,7 +2067,7 @@ class DebuggerService:
                     {"key": k, "label": k.replace("_", " ").capitalize(), "value": v}
                     for k, v in defs["traits"].get(t, {}).items()]} for t in leader["leader_traits"]]}
             # proper modifier labels
-            labels = focus_mod.loc_names(install, {f"MODIFIER_{m['key'].upper()}" for t in leader_out["traits"]
+            labels = self._loc_names(install, {f"MODIFIER_{m['key'].upper()}" for t in leader_out["traits"]
                                                    for m in t["modifiers"]})
             for t in leader_out["traits"]:
                 for m in t["modifiers"]:
@@ -1993,9 +2104,9 @@ class DebuggerService:
             keys.update(k for t in it["traits"] + ([it["initial_trait"]] if it["initial_trait"] else []) for k in trait_keys(it, t))
             keys.add(it["policy"] or "")
             keys.update(k for kind, stats in it["bonuses"].items() for s in stats for k in stat_keys(kind, s))
-        names = focus_mod.loc_names(install, keys)
+        names = self._loc_names(install, keys)
         refs = {r for v in names.values() for r in LOC_REF.findall(v)}
-        names.update(focus_mod.loc_names(install, refs - set(names)))
+        names.update(self._loc_names(install, refs - set(names)))
         def loc(cands, fallback):
             for k in cands:
                 v = clean_loc(names[k], names).rstrip(": ").strip() if k in names else ""
@@ -2029,9 +2140,9 @@ class DebuggerService:
             keys.update(filter(None, [it["name_key"], it.get("alt_name_key"), it.get("slot"),
                                       f"{it['name_key']}_desc", f"{it['id']}_desc", *it["tooltips"], *it.get("traits", [])]))
             keys.update(k for m in it["modifiers"] for k in (f"MODIFIER_{m.upper()}", m))
-        names = focus_mod.loc_names(install, keys)
+        names = self._loc_names(install, keys)
         refs = {r for v in names.values() for r in LOC_REF.findall(v)}
-        names.update(focus_mod.loc_names(install, refs - set(names)))
+        names.update(self._loc_names(install, refs - set(names)))
         clean = lambda value: clean_loc(value, names) if value else value  # noqa: E731
         sprites = gfx.sprites(roots)
         out = []
@@ -2082,7 +2193,7 @@ class DebuggerService:
         live_penalties = self._live_penalties(tag, state)
         live_wars = self._live_wars(tag, state)
         self._live_war_stability(tag, state)
-        names =focus_mod.loc_names(install, modifiers.loc_keys(state, defs))
+        names =self._loc_names(install, modifiers.loc_keys(state, defs))
         base_source = {}
         for field in modifiers.KEYS:
             base_source[field] = "save"

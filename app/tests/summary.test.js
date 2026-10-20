@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assignColors, cumulative, gameLabel, isFactoryMetric, MAX_SERIES, startedText } from '../renderer/views/summary.js';
+import { assignColors, cumulative, gameLabel, isFactoryMetric, isLevelMetric, isPerFactoryMetric, MAX_SERIES, startedText } from '../renderer/views/summary.js';
 import { dayText, dayTicks, niceTicks } from '../renderer/lib/linechart.js';
 
 test('cumulative IC counts skipped days at the last value (high game speed)', () => {
@@ -25,6 +25,14 @@ test('factory counts are a level: no cumulative chart', () => {
   assert.equal(isFactoryMetric('fmil'), true);
   assert.equal(isFactoryMetric('fall'), true);
   assert.equal(isFactoryMetric('mil'), false);
+});
+
+test('IC per factory is a level too (no cumulative chart), but not a factory count', () => {
+  assert.equal(isPerFactoryMetric('pmil'), true);
+  assert.equal(isFactoryMetric('pmil'), false);
+  assert.equal(isLevelMetric('pciv'), true);
+  assert.equal(isLevelMetric('fdock'), true);
+  assert.equal(isLevelMetric('mil'), false);
 });
 
 test('groups: moves keep only changes against the game, deleted groups send countries home', async () => {

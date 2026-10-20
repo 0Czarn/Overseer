@@ -4,7 +4,7 @@ Script syntax with comparison operators (`has_political_power > 50`), which save
 gives [(key, op, value)], value a string or a nested list. evaluate() walks the block like the game: the block and
 AND are all-of, OR any-of, NOT none-of (the game's NOT is a NOR of its contents); if / else_if / else; scopes (TAG,
 state number, ROOT / THIS / PREV, owner / controller / overlord) and the usual any_ / all_ iterators; scripted
-triggers of common/scripted_triggers are expanded. A trigger the app has no data for (flags, civil war, variables,
+triggers of common/scripted_triggers are expanded; has_game_rule asks world.game_rule(). A trigger the app has no data for (flags, civil war, variables,
 continents, ...) is None and named in Context.unknown, so the caller can say why it did not decide.
 
 The data comes from a world object (live/world.py: game memory) - see the methods used below.
@@ -16,13 +16,16 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-TOKEN = re.compile(r'"[^"]*"|[<>!]?=|[<>]|[{}]|[^\s{}=<>!]+')
+# a quoted string may hold escaped quotes (2026-10-20, Road to 56 germany.txt: division = "name = \"Volkssturm ...\""):
+# read as one string, else its braces and the rest of the file were misread (837 of 909 German focuses lost)
+TOKEN = re.compile(r'"(?:[^"\\]|\\.)*"|[<>!]?=|[<>]|[{}]|[^\s{}=<>!]+')
+COMMENT = re.compile(r'("(?:[^"\\\n]|\\.)*")|#[^\n]*')   # a # inside a quoted string is not a comment
 OPS = ("=", "<", ">", "<=", ">=", "!=")
 TAG_RE = re.compile(r"[A-Z][A-Z0-9]{2}")
 
 
 def parse(source: str) -> list:
-    tokens = TOKEN.findall(re.sub(r"#[^\n]*", "", source))
+    tokens = TOKEN.findall(COMMENT.sub(lambda m: m.group(1) or "", source))
     out, _ = _parse(tokens, 0)
     return out
 
@@ -41,6 +44,9 @@ def _parse(t: list[str], i: int) -> tuple[list, int]:
                 value = t[i + 2].strip('"') if i + 2 < len(t) else None
                 i += 3
             out.append((x, op, value))
+        elif i + 1 < len(t) and t[i + 1] == "{" and x not in OPS:   # `key { ... }` without "=" (the game takes it)
+            value, i = _parse(t, i + 2)
+            out.append((x, "=", value))
         elif x == "{":
             value, i = _parse(t, i + 1)
             out.append((None, "", value))
@@ -51,26 +57,97 @@ def _parse(t: list[str], i: int) -> tuple[list, int]:
 
 
 @lru_cache(maxsize=4)
-def focus_conditions(folders: tuple[str, ...]) -> dict[str, list]:
-    """{focus id: its `available` block} of every focus in the folders (later folders override)."""
-    out: dict[str, list] = {}
-    for folder in folders:
-        for path in sorted(Path(folder).glob("*.txt")):
-            try:
-                items = parse(path.read_text(encoding="utf-8-sig", errors="replace"))
-            except Exception:
+def focus_scripts(files: tuple[str, ...]) -> dict[str, dict]:
+    """{focus id: {"available": block, "allow_branch": block or None, "offsets": [(x, y, trigger block)]}} of every
+    focus in the files (focus.focus_files; later files override)."""
+    out: dict[str, dict] = {}
+    for path in files:
+        try:
+            items = parse(Path(path).read_text(encoding="utf-8-sig", errors="replace"))
+        except Exception:
+            continue
+        blocks = []
+        for key, _op, value in items:
+            if key == "focus_tree" and isinstance(value, list):
+                blocks += [v for k, _o, v in value if k == "focus" and isinstance(v, list)]
+            elif key in ("shared_focus", "joint_focus") and isinstance(value, list):
+                blocks.append(value)
+        for block in blocks:
+            fid = next((v for k, _o, v in block if k == "id" and isinstance(v, str)), None)
+            if not fid:
                 continue
-            blocks = []
-            for key, _op, value in items:
-                if key == "focus_tree" and isinstance(value, list):
-                    blocks += [v for k, _o, v in value if k == "focus" and isinstance(v, list)]
-                elif key == "shared_focus" and isinstance(value, list):
-                    blocks.append(value)
-            for block in blocks:
-                fid = next((v for k, _o, v in block if k == "id" and isinstance(v, str)), None)
-                if fid:
-                    out[fid] = next((v for k, _o, v in block if k == "available" and isinstance(v, list)), [])
+            offsets = []
+            for k, _o, v in block:
+                if k == "offset" and isinstance(v, list):
+                    try:
+                        dx, dy = (float(next((x for kk, _oo, x in v if kk == axis), 0) or 0) for axis in ("x", "y"))
+                    except (TypeError, ValueError):
+                        continue
+                    offsets.append((dx, dy, next((x for kk, _oo, x in v if kk == "trigger" and isinstance(x, list)), [])))
+            out[fid] = {"available": next((v for k, _o, v in block if k == "available" and isinstance(v, list)), []),
+                        "allow_branch": next((v for k, _o, v in block if k == "allow_branch" and isinstance(v, list)), None),
+                        "offsets": offsets}
     return out
+
+
+def focus_conditions(files: tuple[str, ...]) -> dict[str, list]:
+    """{focus id: its `available` block}."""
+    return {fid: s["available"] for fid, s in focus_scripts(files).items()}
+
+
+@lru_cache(maxsize=4)
+def game_rule_defaults(files: tuple[str, ...]) -> dict[str, str]:
+    """{rule: default option} of common/game_rules (gamefiles.merged_files) - the rules of a game started without
+    changing them."""
+    out: dict[str, str] = {}
+    for path in files:
+        try:
+            items = parse(Path(path).read_text(encoding="utf-8-sig", errors="replace"))
+        except Exception:
+            continue
+        for key, _op, value in items:
+            if key and isinstance(value, list):
+                default = next((v for k, _o, v in value if k == "default" and isinstance(v, list)), None)
+                name = next((v for k, _o, v in default or [] if k == "name" and isinstance(v, str)), None)
+                if name:
+                    out[key] = name
+    return out
+
+
+class Unknown(Exception):
+    """Raised by a world that has no data for a trigger (SavedWorld) - the trigger is None."""
+
+
+class SavedWorld:
+    """A world from a save / the app's files only: the country's completed focuses and flags, owned DLCs and game
+    rules. Everything else is unknown - enough for allow_branch and offsets, which mostly ask for those."""
+
+    def __init__(self, tag: str, completed: list[str], dlcs: set[str] | None, rules: dict[str, str],
+                 countries: list[str], flags: dict | None = None) -> None:
+        self.tag, self._completed, self._dlcs, self.rules, self._countries = tag, set(completed), dlcs, rules, countries
+        self._flags = flags
+
+    def country_flags(self, tag: str) -> dict | None:
+        return self._flags if tag == self.tag else None
+
+    def countries(self) -> list[str]:
+        return self._countries
+
+    def dlcs(self) -> set[str] | None:
+        return self._dlcs
+
+    def game_rule(self, rule: str) -> str | None:
+        return self.rules.get(rule)
+
+    def completed(self, tag: str) -> set[str]:
+        if tag != self.tag:
+            raise Unknown(tag)
+        return self._completed
+
+    def __getattr__(self, name):
+        def unknown(*_args, **_kwargs):
+            raise Unknown(name)
+        return unknown
 
 
 @lru_cache(maxsize=4)
@@ -153,7 +230,11 @@ def _all(block: list, ctx: Context, stack: list) -> bool | None:
                 results.append(_all(value, ctx, stack))
             chain_done = True
             continue
-        results.append(_one(key, op, value, ctx, stack))
+        try:
+            results.append(_one(key, op, value, ctx, stack))
+        except Unknown:
+            ctx.unknown.add(key)
+            results.append(None)
         if results[-1] is False:
             return False
     return _and(results)
@@ -246,6 +327,14 @@ def _one(key: str, op: str, value, ctx: Context, stack: list) -> bool | None:
         return _not(_or(_all([x], ctx, stack) for x in value if x[0])) if isinstance(value, list) else None
     if key == "always":
         return _yes(value)
+    if key == "has_game_rule" and isinstance(value, list):
+        rule = next((v for k, _o, v in value if k == "rule"), None)
+        option = next((v for k, _o, v in value if k == "option"), None)
+        have = w.game_rule(rule) if isinstance(rule, str) else None
+        if have is None or not isinstance(option, str):
+            ctx.unknown.add(key)
+            return None
+        return have.upper() == option.upper()
     if key in ITERATORS and isinstance(value, list):
         kind, mode, other = ITERATORS[key]
         if any(k == "count" for k, _o, _v in value):
@@ -351,6 +440,23 @@ def _country_trigger(key, op, value, ctx: Context, stack: list, tag: str) -> boo
         return t in w.wars(tag) if t else None
     if key == "has_completed_focus":
         return value in w.completed(tag)
+    if key == "has_country_flag":
+        flags = w.country_flags(tag) if hasattr(w, "country_flags") else None   # {flag: value}, None = not known
+        if flags is None:
+            return None
+        if isinstance(value, str):
+            return value in flags
+        name = next((v for k, _o, v in value if k == "flag"), None) if isinstance(value, list) else None
+        cmp = next(((o, v) for k, o, v in value if k == "value"), None) if isinstance(value, list) else None
+        if not isinstance(name, str) or any(k in ("days", "date") for k, _o, _v in value):
+            return None
+        if name not in flags:
+            return False
+        try:
+            have = float(flags[name])
+        except (TypeError, ValueError):
+            return None
+        return True if cmp is None else _num(cmp[0], have, cmp[1])
     if key == "has_idea":
         return value in w.ideas(tag)
     if key == "has_dynamic_modifier":

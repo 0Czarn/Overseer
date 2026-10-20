@@ -765,6 +765,11 @@ class CountryTableTests(TempDirMixin, unittest.TestCase):
             self.svc.set_combat_log_patch(True)
         self.assertEqual(ctx.exception.code, "multiplayer")
         self.assertEqual((bytes(region[at:at + 5]), self.svc.combat_log_patch()["enabled"]), (code_patch.ORIGINAL, False))
+        self.svc.set_multiplayer_writes(True)                                   # memory writes allowed: code still not
+        with self.assertRaises(LiveError) as ctx:
+            self.svc.set_combat_log_patch(True)
+        self.assertEqual(ctx.exception.code, "multiplayer")
+        self.svc.set_multiplayer_writes(False)
         self.game_log("SINGLEPLAYER")
         region[at:at + 5] = bytes(5)                                                # another build or tool: left alone
         with self.assertRaises(LiveError) as ctx:

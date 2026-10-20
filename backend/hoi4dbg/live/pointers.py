@@ -951,6 +951,10 @@ def read_ic(memory, country: int) -> dict[str, float]:
 # The game shows the army groups still existing; a disbanded group's losses (here 136 SVT) are counted too.
 COMBAT_LOG = 0x880
 COMBAT_LOG_MAX = 1000
+# The array has a slot for every slot of the country table - usually tags + 1, but 2026-10-16 (multiplayer session,
+# 1936) the game held 513 slots for 439 tags: slots 440-512 are countries without a tag in the game files and without
+# any state. Their logs are skipped (no tag to name them).
+COMBAT_LOG_SLOTS_MAX = 5000
 CLOG_MANAGER = {"groups": 0x8, "slot": 0x20}
 CLOG_GROUP_ID = 0xE4
 CLOG_ARRAYS = {0x8: "enemy", 0x38: "combat", 0x50: "attrition", 0x68: "attrition"}
@@ -974,7 +978,7 @@ def read_combat_log(memory, module_base: int, tags: list[str]) -> dict[str, dict
     if head is None:
         raise PointerError("unreadable", "The combat log is not readable")
     array, _cap, size = struct.unpack("<Qii", head)
-    if not 0 < size <= len(tags) + 1 or not array:
+    if not 0 < size <= COMBAT_LOG_SLOTS_MAX or not array:
         raise PointerError("implausible", f"Combat log of {size} countries - layout does not match")
     managers = memory.read(array, 8 * size)
     if managers is None:
@@ -982,7 +986,7 @@ def read_combat_log(memory, module_base: int, tags: list[str]) -> dict[str, dict
     costs: dict[int, tuple[int, float, str | None]] = {}
     out: dict[str, dict] = {}
     logs = other = items_ok = items_bad = 0
-    for slot in range(1, size):
+    for slot in range(1, min(size, len(tags) + 1)):
         manager = struct.unpack_from("<Q", managers, 8 * slot)[0]
         raw = memory.read(manager, 0x28) if manager else None
         if raw is None or struct.unpack_from("<i", raw, CLOG_MANAGER["groups"] + 12)[0] == 0:
@@ -1187,6 +1191,20 @@ def focus_definition(memory, country: int, focus_id: str) -> int | None:
         if definition and _msvc_string(memory, definition + FOCUS["id"]) == focus_id:
             return definition
     return None
+
+
+def read_tree_focuses(memory, country: int) -> list[str]:
+    """Ids of the focuses the game loaded into the country's focus tree (its own and shared ones, in the game's
+    order) - which focuses a tree has with the mods the game runs with."""
+    tree = _ptr(memory, country + FOCUS["tree"])
+    if tree is None:
+        raise PointerError("unreadable", "The country's focus tree is not readable")
+    out = []
+    for definition in read_array(memory, tree + TREE_FOCUSES, 5000):
+        fid = _msvc_string(memory, definition + FOCUS["id"]) if definition else None
+        if fid and re.fullmatch(r"[A-Za-z0-9_.\-]{1,200}", fid):
+            out.append(fid)
+    return out
 
 
 def write_focus_start(writer, country: int, definition: int) -> None:

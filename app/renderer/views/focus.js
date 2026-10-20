@@ -6,6 +6,15 @@ import { dataKey, refreshControl } from '../lib/refresh.js';
 import { autostartEnabled, setAutostartEnabled } from '../lib/focus-autostart.js';
 import { readZoom, zoomable } from '../lib/zoom.js';
 
+// "Show hidden branches" (allow_branch false in the game) - remembered per viewer
+const HIDDEN_KEY = 'hoi4dbg.focus.showHidden';
+function showHiddenPref() {
+  try { return localStorage.getItem(HIDDEN_KEY) === '1'; } catch { return false; }
+}
+function setShowHiddenPref(on) {
+  try { localStorage.setItem(HIDDEN_KEY, on ? '1' : '0'); } catch { /* storage blocked: only this view */ }
+}
+
 const CELL_W = 118;
 const CELL_H = 74;
 const STATUS_LABEL = { completed: 'Completed', in_progress: 'In progress', available: 'Available', blocked: 'Blocked',
@@ -29,7 +38,7 @@ function demoView(res) {
 export function focusTitle(f, q, byId = new Map()) {
   const name = (id) => byId.get(id)?.name ?? id;
   return [
-    `${f.name} (${STATUS_LABEL[f.status] ?? f.status})`,
+    `${f.name} (${STATUS_LABEL[f.status] ?? f.status})${f.hidden ? ' - hidden in the game' : ''}`,
     f.desc,
     `${f.days} days`,
     f.missing?.length ? `Needs: ${f.missing.map((g) => g.map(name).join(' or ')).join(' and ')}` : '',
@@ -77,7 +86,7 @@ function treeView(d, queue, onToggle) {
     const plate = d.plates?.[f.status];
     return h('button', {
       type: 'button',
-      class: `fnode fnode-${f.status}${q ? (q.ok ? ' fnode-queued' : ' fnode-queued-bad') : ''}`,
+      class: `fnode fnode-${f.status}${f.hidden ? ' fnode-hidden' : ''}${q ? (q.ok ? ' fnode-queued' : ' fnode-queued-bad') : ''}`,
       'data-focus': f.id,
       style: { left: `${it.left}px`, top: `${it.top}px`, width: `${N.w}px`, height: `${N.h}px` },
       title: focusTitle(f, q, byId),
@@ -204,7 +213,8 @@ export default {
   short: 'NF',
   async render(root, ctx) {
     const tag = ctx.state.selectedCountry;
-    const [res, picker] = await Promise.all([ctx.api.get(`/api/focus/${encodeURIComponent(tag)}`), countryPicker(ctx)]);
+    const hiddenQ = showHiddenPref() ? '?hidden=1' : '';
+    const [res, picker] = await Promise.all([ctx.api.get(`/api/focus/${encodeURIComponent(tag)}${hiddenQ}`), countryPicker(ctx)]);
     const header = viewHeader('National Focus Manager', 'Focus tree of the selected country, its state and your planned order.',
       picker, sourceBadge(res.source, res.note));
     if (res.source !== 'save' && res.source !== 'live') {
@@ -251,10 +261,11 @@ export default {
     const sourceText = h('span', { class: 'hoi-status' });
     async function refreshState(force) {
       try {
-        const r = await ctx.api.get(`/api/focus/${encodeURIComponent(tag)}/state`);
+        const r = await ctx.api.get(`/api/focus/${encodeURIComponent(tag)}/state${hiddenQ}`);
         const st = r.data;
         if (!st) { sourceText.textContent = r.note ?? ''; return; }
-        if (st.tree !== d.tree) { ctx.rerender(); return; }
+        // another tree, or branches shown / hidden / moved in the game (allow_branch, offset): new layout
+        if (st.tree !== d.tree || (st.shape && d.shape && st.shape !== d.shape)) { ctx.rerender(); return; }
         sourceText.textContent = `${st.focus_source === 'live' ? 'game memory' : 'save'} · read ${new Date().toLocaleTimeString()}`;
         sourceText.className = `hoi-status ${st.focus_source === 'live' ? 'hoi-status-on' : ''}`.trim();
         showCurrent(st.focus_source === 'live' ? st : null);
@@ -277,8 +288,18 @@ export default {
     const countsHost = h('span');
     const treeTitle = () => {
       const c = groupFocuses(d.focuses);
-      return `Tree ${d.tree} - ${d.focuses.length} focuses (${c.completed?.length ?? 0} completed, ${c.available?.length ?? 0} available)`;
+      return `Tree ${d.tree} - ${d.focuses.length} focuses (${c.completed?.length ?? 0} completed, ${c.available?.length ?? 0} available`
+        + `${d.hidden_count ? `, ${d.hidden_count} hidden in the game${d.show_hidden ? ' - shown faded' : ''}` : ''})`;
     };
+    const hiddenBox = h('input', { type: 'checkbox', checked: Boolean(d.show_hidden) });
+    hiddenBox.addEventListener('change', () => { setShowHiddenPref(hiddenBox.checked); ctx.rerender(); });
+    const hiddenSwitch = h('label', { class: 'cons-sort-label', title: 'Branches the game does not show this country now '
+      + '(allow_branch of the tree, e.g. paths closed by an earlier choice with the game rule "obsolete focus branches: hide"). '
+      + 'Shown faded; they cannot be taken.' }, hiddenBox, h('span', null, 'Show hidden branches'));
+    const treeNote = d.missing_count
+      ? notice('warn', `${d.missing_count} focuses of the game's tree are not in the files the app reads (${d.missing_in_files.join(', ')}`
+        + `${d.missing_count > d.missing_in_files.length ? ', ...' : ''}) - a mod the app does not see?`)
+      : null;
     // first view: the focus in progress (else the first available one) in the middle, like the game opens
     function centreOnCurrent(el) {
       const f = d.focuses.find((x) => x.status === 'in_progress') ?? d.focuses.find((x) => x.status === 'available');
@@ -320,7 +341,10 @@ export default {
         h('p', { class: 'hint' }, 'Laid out like the game. Gold name plate: completed · pulsing: in progress · silver-blue plate: can be '
           + 'taken next · dark plate, grey icon: not yet possible (faded: excluded by an earlier choice). Red link: mutually exclusive '
           + 'focuses. Dashed lines: one of several prerequisites. Drag to move around; click a focus to add it to the plan or '
-          + 'remove it; hover for its description. The game may still require conditions the app cannot check.'),
+          + 'remove it; hover for its description. The game may still require conditions the app cannot check. '
+          + `Tree from ${d.tree_source === 'memory' ? 'game memory (the focuses the game loaded)' : 'the game and mod files'}; `
+          + 'hidden branches and moved focuses follow the conditions of the tree.'),
+        h('div', { class: 'cons-sort' }, hiddenSwitch), treeNote,
         treeHost], { extra: h('span', { class: 'hoi-head-right' }, sourceText, control.el) }),
     );
     refreshState(true);

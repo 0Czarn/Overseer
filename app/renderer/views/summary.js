@@ -19,10 +19,16 @@ const WASTED_METRICS = [['wmil', 'IC wasted by idle military factories', 'Milita
   ['wall', 'IC wasted by idle factories', 'All']];
 const LOSS_METRICS = [['lcom', 'IC of equipment lost in combat', 'Combat'], ['latt', 'IC of equipment lost to attrition', 'Attrition'],
   ['lall', 'IC of equipment lost', 'All'], ['lenemy', 'IC of enemy equipment destroyed', 'Enemy']];
-const METRICS = [...IC_METRICS, ...FACTORY_METRICS, ...WASTED_METRICS, ...LOSS_METRICS];
+// IC a day per factory working on a line (efficiency, output and construction bonuses); groups: their IC / their factories
+const PER_FACTORY_METRICS = [['pmil', 'Military IC per military factory', 'Military'],
+  ['pnav', 'Naval IC per dockyard', 'Naval'], ['pciv', 'Construction IC per civilian factory', 'Civilian']];
+const METRICS = [...IC_METRICS, ...FACTORY_METRICS, ...PER_FACTORY_METRICS, ...WASTED_METRICS, ...LOSS_METRICS];
 export const isLossMetric = (m) => LOSS_METRICS.some(([k]) => k === m);
 /** Factory counts are a level, not a flow: no cumulative chart, whole numbers. */
 export const isFactoryMetric = (m) => FACTORY_METRICS.some(([k]) => k === m);
+export const isPerFactoryMetric = (m) => PER_FACTORY_METRICS.some(([k]) => k === m);
+/** A state of the day (factories, IC per factory), not a flow: no cumulative chart. */
+export const isLevelMetric = (m) => isFactoryMetric(m) || isPerFactoryMetric(m);
 const PREFS_KEY = 'hoi4dbg.summary';
 const REFRESH_MS = 5000;
 
@@ -393,7 +399,8 @@ export default {
           h('label', { class: 'gs-field' }, h('span', { class: 'gs-seg-label' }, 'Compare with'),
             select(opts.filter(([v]) => v !== prefs.game), prefs.compare, pick((v) => { prefs.compare = v || null; }), '-'))),
         h('div', { class: 'gs-row' },
-          ...[['IC a day', IC_METRICS], ['Factories', FACTORY_METRICS], ['Wasted IC', WASTED_METRICS], ['IC lost', LOSS_METRICS]]
+          ...[['IC a day', IC_METRICS], ['Factories', FACTORY_METRICS], ['IC per factory', PER_FACTORY_METRICS],
+            ['Wasted IC', WASTED_METRICS], ['IC lost', LOSS_METRICS]]
             .map(([label, list]) => h('div', { class: 'gs-field' }, h('span', { class: 'gs-seg-label' }, label),
               seg(list.map(([k, , b]) => [k, b]), prefs.metric, pick((v) => { prefs.metric = v; })))),
           h('div', { class: 'gs-field' }, h('span', { class: 'gs-seg-label' }, 'Show'),
@@ -505,22 +512,28 @@ export default {
         h('summary', null, 'Table'),
         h('table', { class: 'table' },
           h('thead', null, h('tr', null, h('th', null, { players: 'Player', factions: 'Faction', countries: 'Country' }[mode()]),
-            h('th', null, `${isFactoryMetric(prefs.metric) ? metric : 'IC a day'} (${dayText(main.t[last])})`),
-            isFactoryMetric(prefs.metric) ? null : h('th', null, 'Cumulative IC'))),
+            h('th', null, `${isLevelMetric(prefs.metric) ? metric : 'IC a day'} (${dayText(main.t[last])})`),
+            isLevelMetric(prefs.metric) ? null : h('th', null, 'Cumulative IC'))),
           h('tbody', null, main.series.filter((s) => keys.includes(s.key)).map((s) => h('tr', null, h('td', null, s.key),
-            h('td', { class: 'num' }, s.values[last] == null ? '—' : s.values[last].toLocaleString(numberLocale(), { maximumFractionDigits: 1 })),
-            isFactoryMetric(prefs.metric) ? null
+            h('td', { class: 'num' }, s.values[last] == null ? '—' : s.values[last].toLocaleString(numberLocale(),
+              { maximumFractionDigits: isPerFactoryMetric(prefs.metric) ? 2 : 1 })),
+            isLevelMetric(prefs.metric) ? null
               : h('td', { class: 'num' }, cumulative(main.t, s.values)[last]?.toLocaleString(numberLocale(), { maximumFractionDigits: 0 }) ?? '—'))))));
       const factories = isFactoryMetric(prefs.metric);
+      const level = isLevelMetric(prefs.metric);
       const sync = hoverSync();   // the hovered day shows in both charts
       charts.replaceChildren(...[   // replaceChildren would print a null
         isLossMetric(prefs.metric) ? patchBar() : null,
         isLossMetric(prefs.metric) ? lossNotice(keys) : null,
         prefs.metric.startsWith('w') ? notice('info', 'Factories without a production or construction line, at the '
           + 'country\'s own IC per assigned factory that day (a construction line takes at most 15 factories).') : null,
-        lineChart({ title: factories ? metric : `Daily ${metric}`, series: sets(false), sync,
-          format: factories ? (v) => String(Math.round(v)) : compact }),
-        factories ? null : lineChart({ title: `Cumulative ${metric}`, series: sets(true), sync }),
+        isPerFactoryMetric(prefs.metric) ? notice('info', 'IC a day the game produced per factory working on a line - '
+          + 'production efficiency, factory / dockyard output and construction speed bonuses, resource shortages. Idle '
+          + 'factories do not count; a group is its IC divided by its factories. Civilian: construction only (not consumer '
+          + 'goods or trade), on days recorded from 2026-10-20.') : null,
+        lineChart({ title: level ? metric : `Daily ${metric}`, series: sets(false), sync,
+          format: factories ? (v) => String(Math.round(v)) : isPerFactoryMetric(prefs.metric) ? (v) => v.toFixed(2) : compact }),
+        level ? null : lineChart({ title: `Cumulative ${metric}`, series: sets(true), sync }),
         table].filter(Boolean));
     }
 

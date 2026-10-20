@@ -115,6 +115,7 @@ class SaveAnalyzer:
         self._states: dict[str, dict] = {}         # copy path -> states.read() result
         self._equipment: dict[tuple, dict] = {}    # (copy path, tag) -> equipment.read() result
         self._focus: dict[str, dict] = {}          # copy path -> {tag: focus block} (one pass for all countries)
+        self._rules: dict[str, dict] = {}          # copy path -> changed game rules
 
     def analyse(self, path: Path) -> dict:
         stat = path.stat()
@@ -264,6 +265,19 @@ class SaveAnalyzer:
         if block is None:
             raise binary.SaveFormatError("country_missing", f"Country {tag} does not exist in this save")
         return {"analysis": result, **focus.save_state(block)}
+
+    def game_rules(self, path: Path) -> dict[str, str]:
+        """Game rules changed from their default in this save ({rule: option}; cached per save copy)."""
+        result = self.analyse(path)
+        if result["error"]:
+            raise binary.SaveFormatError(result["error"]["code"], result["error"]["message"])
+        with self._lock:
+            cached = self._rules.get(result["copy"])
+        if cached is None:
+            cached = countries.game_rules(Path(result["copy"]).read_bytes(), result.get("float_width"))
+            with self._lock:
+                self._rules = {result["copy"]: cached}
+        return dict(cached)
 
     def politics(self, path: Path, tag: str) -> dict:
         """Ideas, party popularity, leader, advisors and dynamic modifiers of `tag` (all existing countries are

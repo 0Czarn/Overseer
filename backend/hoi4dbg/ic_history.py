@@ -51,9 +51,17 @@ def date_text(t: int) -> str:
 
 STORED = ("mil", "nav", "civ", "fciv", "fmil", "fdock",   # order of the values in a file row
           "wmil", "wnav", "wciv",                        # IC a day wasted by idle military / naval / civilian factories
-          "lcom", "latt", "lenemy")                      # IC of equipment lost in combat / to attrition / of the enemy
+          "lcom", "latt", "lenemy",                      # IC of equipment lost in combat / to attrition / of the enemy
+          "amil", "anav", "aciv")                        # factories on military / naval production lines, construction
 SUMS = {"fall": ("fciv", "fmil", "fdock"), "wall": ("wmil", "wnav", "wciv"), "lall": ("lcom", "latt")}
-METRICS = STORED + tuple(SUMS)
+# IC a day per factory working on a line (2026-10-20, user's request): IC / assigned factories - the line's efficiency,
+# factory / dockyard output and construction speed bonuses, resource shortages. Groups: their IC / their factories.
+# Days recorded before the assigned factories were stored (before 2026-10-20): military and naval from the wasted IC
+# (wasted = idle x IC / assigned and idle = factories - assigned, so assigned = factories x IC / (IC + wasted));
+# civilian ones stay unknown (free civilian factories were not stored).
+RATIOS = {"pmil": ("mil", "amil", "fmil", "wmil"), "pnav": ("nav", "anav", "fdock", "wnav"), "pciv": ("civ", "aciv", None, None)}
+METRICS = STORED + tuple(SUMS) + tuple(RATIOS)
+LEVEL_METRICS = ("fciv", "fmil", "fdock", "fall", *RATIOS)   # states of a day, not flows: no cumulative chart
 LOSS_METRICS = ("lcom", "latt", "lenemy", "lall")   # only countries with a combat log have them
 NO_FACTION = "Non-aligned"
 
@@ -132,6 +140,11 @@ def player_key(tag: str, info: dict) -> str:
     return info.get("n") or tag
 
 
+def per_factory(ic, factories) -> float | None:
+    """IC a day per factory on a line; None when unknown or no factory works on one."""
+    return None if ic is None or not factories else round(ic / factories, 3)
+
+
 def view(game: dict, metric: str, tags: list[str] | None, by_faction: bool, groups: dict | None = None,
          by_player: bool = False, subjects: bool = True) -> dict:
     """What the Game summary tab draws: the country list (latest IC a day, faction) and the day series of `metric`
@@ -140,6 +153,19 @@ def view(game: dict, metric: str, tags: list[str] | None, by_faction: bool, grou
     `subjects`. `groups` (check_groups) moves countries between factions and adds the user's own groups."""
     if metric not in METRICS:
         raise ValueError(f"metric must be one of {', '.join(METRICS)}")
+    if metric in RATIOS and (by_player or by_faction):   # a group's IC per factory: its IC / its factories
+        ic, assigned, _t, _w = RATIOS[metric]
+        num = view(game, ic, tags, by_faction, groups, by_player, subjects)
+        den = view(game, assigned, tags, by_faction, groups, by_player, subjects)
+        dens = {s["key"]: s["values"] for s in den["series"]}
+        for s in num["series"]:
+            s["values"] = [per_factory(a, b) for a, b in zip(s["values"], dens.get(s["key"], []))]
+        dvals = {p["name"]: p["value"] for p in den["players"]}
+        for p in num["players"]:
+            p["value"] = per_factory(p["value"], dvals.get(p["name"]))
+        listing = view(game, metric, tags, False, groups)["countries"]
+        num["series"].sort(key=lambda s: -(s["values"][-1] or 0) if s["values"] else 0)
+        return {**num, "countries": listing}
     countries = game["countries"]
     game_factions = game.get("factions") or {}
     groups = groups or {"custom": [], "assign": {}}
@@ -265,6 +291,12 @@ class IcHistory:
                 for k, parts in SUMS.items():
                     vals = [series[tag][p][-1] for p in parts]
                     series[tag][k].append(None if None in vals else round(sum(vals), 3))
+                for k, (ic, assigned, total, wasted) in RATIOS.items():
+                    s = series[tag]
+                    older = s[assigned][-1] is None and total and None not in (s[ic][-1], s[total][-1], s[wasted][-1])
+                    if older and s[ic][-1] + s[wasted][-1] > 0:   # an older day: assigned factories from the wasted IC
+                        s[assigned][-1] = round(s[total][-1] * s[ic][-1] / (s[ic][-1] + s[wasted][-1]), 3)
+                    s[k].append(per_factory(s[ic][-1], s[assigned][-1]))
             if "f" in r:
                 factions = r["f"]
         known = [r.get("p") for r in days]
@@ -531,6 +563,7 @@ class IcRecorder:
         if not any(any(v) for v in sample["countries"].values()):   # production not set up yet (loading)
             return False
         losses = sample.pop("losses", None)
+        assigned = sample.pop("assigned", None) or {}
         if losses is not None:
             deltas = loss_deltas(self._losses, losses)
             days = max(1, t - self.last_t) if self.last_t is not None else 1
@@ -540,6 +573,9 @@ class IcRecorder:
                 else:
                     values.extend([None, None, None])
             self._losses = losses
+        for tag, values in sample["countries"].items():   # after the losses (None when not read): assigned factories
+            values.extend([None] * (12 - len(values)))
+            values.extend(assigned.get(tag) or [None, None, None])
         designs = sample.pop("designs", None)
         gid = self.history.add(sample)
         if (gid, self.history.how) != self._chosen:

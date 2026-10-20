@@ -21,6 +21,7 @@ from ..integration.memory import ENCODINGS, MemoryAccessError, ProcessMemory, ne
 from ..integration.code_write import ProcessCodePatcher
 from ..integration.memory_write import ProcessMemoryWriter
 from .. import construction as construction_mod
+from .. import gamefiles
 from .. import ic_history
 from .. import triggers
 from . import code_patch, console, layout, pointers, world
@@ -68,6 +69,8 @@ class LiveService:
         self.invalidated: dict[str, dict] = {}  # field -> why its calibration was dropped
         self._module_base: dict[tuple, int] = {}   # (pid, started) -> hoi4.exe base
         self._tags: dict[str, list[str]] = {}      # install path -> tag order
+        self._mods: tuple = ()                     # mod folders the game runs with (gamefiles.enabled_mods)
+        self._tree_members: dict[tuple, list[str] | None] = {}   # (pid, started, tree id) -> the tree's focus ids
         self._player: tuple[float, tuple, str] | None = None  # (read at, process key, tag)
 
     # -- persistence -----------------------------------------------------------------------
@@ -103,7 +106,16 @@ class LiveService:
         if process.get("path") is None:
             raise LiveError("no_access", "Cannot query the game process (access denied?)")
         install = game.get("install") or {}
+        userdata = (game.get("userdata") or {}).get("path")
+        mods = tuple(gamefiles.enabled_mods(Path(userdata))) if userdata else ()
+        if mods != self._mods:   # the game runs with other mods: other country tags, other order
+            self._mods = mods
+            self._tags.clear()
         return {**process, "install": install.get("path"), "version": (install.get("version") or {}).get("display")}
+
+    def _tag_order(self, install: str) -> list[str]:
+        """Country tags in the game's order (slot = index + 1) with the mods the game runs with."""
+        return pointers.tag_order(Path(install), self._mods)
 
     def _history(self, process: dict) -> console.ConsoleHistory:
         return console.ConsoleHistory(Path(process["install"]) / console.HISTORY_FILE)
@@ -396,7 +408,7 @@ class LiveService:
         key = (process["pid"], process.get("started"))
         install = process.get("install") or ""
         if install not in self._tags:
-            self._tags[install] = pointers.tag_order(Path(install))
+            self._tags[install] = self._tag_order(install)
         try:
             with self._open_memory(process["pid"]) as mem:
                 if key not in self._module_base:
@@ -416,7 +428,7 @@ class LiveService:
         key = (process["pid"], process.get("started"))
         install = process.get("install") or ""
         if install not in self._tags:
-            self._tags[install] = pointers.tag_order(Path(install))
+            self._tags[install] = self._tag_order(install)
         try:
             with self._open_memory(process["pid"]) as mem:
                 if key not in self._module_base:
@@ -433,7 +445,7 @@ class LiveService:
         key = (process["pid"], process.get("started"))
         install = process.get("install") or ""
         if install not in self._tags:
-            self._tags[install] = pointers.tag_order(Path(install))
+            self._tags[install] = self._tag_order(install)
         try:
             with self._open_memory(process["pid"]) as mem:
                 if key not in self._module_base:
@@ -457,7 +469,7 @@ class LiveService:
         key = (process["pid"], process.get("started"))
         install = process.get("install") or ""
         if install not in self._tags:
-            self._tags[install] = pointers.tag_order(Path(install))
+            self._tags[install] = self._tag_order(install)
         try:
             with self._open_memory(process["pid"]) as mem:
                 if key not in self._module_base:
@@ -467,6 +479,13 @@ class LiveService:
                     self._module_base[key] = module[0]
                 country = pointers.country_object(mem, self._module_base[key], self._tags[install], tag)
                 out = pointers.read_focus(mem, country)
+                members_key = (*key, out["tree"])   # a tree's focuses do not change while the game runs
+                if out["tree"] and members_key not in self._tree_members:
+                    try:
+                        self._tree_members[members_key] = pointers.read_tree_focuses(mem, country)
+                    except pointers.PointerError:
+                        self._tree_members[members_key] = None
+                out["members"] = self._tree_members.get(members_key)
                 try:
                     out["date"] = pointers.read_date(mem, self._module_base[key])
                 except pointers.PointerError:
@@ -622,7 +641,7 @@ class LiveService:
         process = self._process()
         if not pointers.supported(process.get("version")):
             raise LiveError("unsupported_version", "Starting a focus is only available for the verified game version")
-        self._require_single_player()
+        self._require_single_player(strict=True)   # tested 2026-10-16: in multiplayer it desyncs the game
         tag = self.player_tag(process)
 
         def run(mem, country):
@@ -638,11 +657,14 @@ class LiveService:
         return {"tag": tag, "started": focus_id, "scope": "local", "written_at": self._clock()}
 
     def check_conditions(self, tag: str, blocks: dict[str, list], ideologies: list[str], dlcs: set[str] | None,
-                         scripted: dict[str, list]) -> dict[str, tuple]:
-        """{id: (True / False / None, [triggers the app could not evaluate])} of trigger blocks (focus `available`)
-        for `tag`, evaluated on the running game's memory (triggers.evaluate, world.py)."""
+                         scripted: dict[str, list], rules: dict[str, str] | None = None,
+                         flags: dict[str, dict] | None = None) -> dict[str, tuple]:
+        """{id: (True / False / None, [triggers the app could not evaluate])} of trigger blocks (focus `available`,
+        allow_branch, offsets) for `tag`, evaluated on the running game's memory (triggers.evaluate, world.py);
+        `rules` = game rules for has_game_rule."""
         def run(mem, base, order, _p):
-            w = world.LiveWorld(mem, base, order, ideologies, dlcs)
+            w = world.LiveWorld(mem, base, order, ideologies, dlcs, rules)
+            w.flags = flags or {}
             out = {}
             for fid, block in blocks.items():
                 ctx = triggers.Context(w, tag, scripted)
@@ -675,7 +697,7 @@ class LiveService:
         if not pointers.supported(process.get("version")):
             raise LiveError("unsupported_version", "Live military reading is only verified for 1.19.3.0.c01a")
         key = (process["pid"], process.get("started"))
-        tags = self._tags.setdefault(process.get("install") or "", pointers.tag_order(Path(process.get("install") or "")))
+        tags = self._tags.setdefault(process.get("install") or "", self._tag_order(process.get("install") or ""))
         army, navy, air, reserve, free, designs, researched, doctrine_state, planes, costs = self._with_country(
             process, tag, lambda mem, c: (
                 pointers.read_army(mem, c), pointers.read_navy(mem, c),
@@ -755,7 +777,7 @@ class LiveService:
         key = (process["pid"], process.get("started"))
         install = process.get("install") or ""
         if install not in self._tags:
-            self._tags[install] = pointers.tag_order(Path(install))
+            self._tags[install] = self._tag_order(install)
         try:
             with self._open_memory(process["pid"]) as mem:
                 if key not in self._module_base:
@@ -795,7 +817,7 @@ class LiveService:
         key = (process["pid"], process.get("started"))
         install = process.get("install") or ""
         if install not in self._tags:
-            self._tags[install] = pointers.tag_order(Path(install))
+            self._tags[install] = self._tag_order(install)
         order = self._tags[install]
         try:
             with self._open_memory(process["pid"]) as mem:
@@ -875,7 +897,7 @@ class LiveService:
         key = (process["pid"], process.get("started"))
         install = process.get("install") or ""
         if install not in self._tags:
-            self._tags[install] = pointers.tag_order(Path(install))
+            self._tags[install] = self._tag_order(install)
         try:
             with self._open_memory(process["pid"]) as mem:
                 if key not in self._module_base:
@@ -896,7 +918,7 @@ class LiveService:
         key = (process["pid"], process.get("started"))
         install = process.get("install") or ""
         if install not in self._tags:
-            self._tags[install] = pointers.tag_order(Path(install))
+            self._tags[install] = self._tag_order(install)
         try:
             with (self._open_writer if writer else self._open_memory)(process["pid"]) as mem:
                 if key not in self._module_base:
@@ -915,7 +937,7 @@ class LiveService:
         key = (process["pid"], process.get("started"))
         install = process.get("install") or ""
         if install not in self._tags:
-            self._tags[install] = pointers.tag_order(Path(install))
+            self._tags[install] = self._tag_order(install)
         try:
             with self._open_memory(process["pid"]) as mem:
                 if key not in self._module_base:
@@ -1032,8 +1054,8 @@ class LiveService:
         process = self._process()
         if not pointers.supported(process.get("version")):
             raise LiveError("unsupported_version", "The combat log patch is only verified for 1.19.3.0.c01a")
-        if on:
-            self._require_single_player()
+        if on:   # a change of the game's code: single player only, whatever Options allow for memory writes
+            self._require_single_player(strict=True)
         try:
             with self._open_patcher(process["pid"]) as mem:
                 base = mem.modules()[pointers.MODULE][0]
@@ -1060,6 +1082,7 @@ class LiveService:
             countries = pointers.country_objects(mem, base, tags)
             owned = pointers.owned_states(mem, base, tags)
             out = {}
+            assigned = {}
             for tag, c in countries.items():
                 if owned.get(tag, 0) <= 0:
                     continue
@@ -1075,6 +1098,7 @@ class LiveService:
                 out[tag] = [ic["mil"], ic["nav"], ic["civ"],
                             fac["civilian"]["total"], fac["military"]["total"], fac["dockyards"]["total"],
                             wasted["wmil"], wasted["wnav"], wasted["wciv"]]
+                assigned[tag] = [ic["amil"], ic["anav"], ic["aciv"]]
             factions = None
             if with_factions:
                 by_object = {c: t for t, c in countries.items()}
@@ -1113,7 +1137,7 @@ class LiveService:
                 except pointers.PointerError:
                     continue
             return {"t": t, "player": player, "campaign": pointers.campaign_id(mem, base), "countries": out,
-                    "factions": factions, "players": players or None, "losses": losses,
+                    "factions": factions, "players": players or None, "losses": losses, "assigned": assigned,
                     "designs": {k: v for k, v in designs.items() if v}}
         return self._game_memory(read)
 
@@ -1222,11 +1246,12 @@ class LiveService:
         self._mp_file.write_text(json.dumps(s), encoding="utf-8")
         return self.multiplayer_writes()
 
-    def _require_single_player(self) -> None:
+    def _require_single_player(self, strict: bool = False) -> None:
         """Refuses a local memory write unless single player is confirmed - or the user allowed writes in
-        multiplayer (Options; the change exists on this client only and may desynchronise the game)."""
+        multiplayer (Options; the change exists on this client only and may desynchronise the game). `strict`: no
+        multiplayer at all (patches of the game's code)."""
         mode = self.game_mode()
-        if mode != "SINGLEPLAYER" and self.multiplayer_writes()["enabled"]:
+        if mode != "SINGLEPLAYER" and not strict and self.multiplayer_writes()["enabled"]:
             process = self._process_or_none() or {}
             key = (process.get("pid"), process.get("started"), mode)
             if getattr(self, "_mp_logged", None) != key:   # once per game run, not on every auto-sort tick
@@ -1259,7 +1284,7 @@ class LiveService:
         key = (process["pid"], process.get("started"))
         install = process.get("install") or ""
         if install not in self._tags:
-            self._tags[install] = pointers.tag_order(Path(install))
+            self._tags[install] = self._tag_order(install)
         enc = ENCODINGS[pointers.FIELDS[field][1]]
         packed = enc.pack(value)
         if packed is None:

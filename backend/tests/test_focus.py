@@ -36,7 +36,7 @@ class FocusTests(TempDirMixin, unittest.TestCase):
         (loc / "focus_l_english.yml").write_text('﻿l_english:\n T_a:0 "Alpha"\n T_a_desc:0 "x"\n', encoding="utf-8")
         focus._load.cache_clear()
         focus._all_loc.cache_clear()
-        self.folders = focus.focus_folders(self.tmp)
+        self.folders = focus.focus_files(self.tmp)
         self.tree = focus.tree(self.folders, "test_focus")
 
     def test_tree_with_shared_branch_and_positions(self):
