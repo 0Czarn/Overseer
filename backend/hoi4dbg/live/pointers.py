@@ -794,9 +794,32 @@ def read_focus(memory, country: int) -> dict:
 # entries, +0x22c = entry count (int32); variant object: +0xc = equipment id as in the save, +0x28 = design name.
 # Verified 2026-10-09 (magazyn.hoi4): non-zero stockpile of all 99 countries identical to the save.
 STOCKPILE = {"production": 0xF68, "array": 0x220, "count": 0x22C, "entry": 16, "amount": 8}
-VARIANT = {"id": 0xC, "name": 0x28}
+VARIANT = {"id": 0xC, "name": 0x28, "type": 0x18}
+# Equipment types (2026-10-20, user's request: new designs recognised without a save): CEquipmentVariant + 0x18 = token
+# of its equipment type (int32; SOV: infantry_equipment_0 0x4ED2, _1 0x4ED3, both T-26 designs 0x4F57 =
+# light_tank_chassis_1, BT-7 0x4F58 = _2). [hoi4.exe + 0x332EEC0] = CEquipmentDatabase, + 0x68 = array of
+# CEquipmentType* (read_array; element 0 is a null object), type + 0x8 = token, + 0x18 = key (std::string).
+EQUIPMENT_DB = 0x332EEC0
+EQUIPMENT_TYPES = 0x68
+EQUIPMENT_TYPE = {"token": 0x8, "key": 0x18}
 MAX_STOCKPILE_ENTRIES = 5000
 STOCKPILE_RANGE = (0.0, 10_000_000.0)
+
+
+def read_equipment_types(memory, module_base: int) -> dict[int, str]:
+    """{token: equipment type key} of every equipment type the game loaded (game and mods)."""
+    db = _ptr(memory, module_base + EQUIPMENT_DB)
+    if db is None:
+        raise PointerError("unreadable", "Equipment database is not readable")
+    out = {}
+    for t in read_array(memory, db + EQUIPMENT_TYPES, 20000):
+        raw = memory.read(t + EQUIPMENT_TYPE["token"], 4) if t else None
+        key = _msvc_string(memory, t + EQUIPMENT_TYPE["key"], 120) if raw else None
+        if key and re.fullmatch(r"[A-Za-z0-9_.\-]{1,120}", key):
+            out[struct.unpack("<I", raw)[0]] = key
+    if not out:
+        raise PointerError("implausible", "No equipment types in the database - layout does not match")
+    return out
 
 
 def read_stockpile(memory, country: int) -> list[dict]:
@@ -816,7 +839,9 @@ def read_stockpile(memory, country: int) -> list[dict]:
         raw_id = memory.read(variant + VARIANT["id"], 4) if 0x10000 <= variant < 0x7FFF_FFFF_FFFF else None
         if raw_id is None:
             continue
+        raw_type = memory.read(variant + VARIANT["type"], 4)
         out.append({"id": str(struct.unpack("<i", raw_id)[0]),
+                    "type_token": struct.unpack("<I", raw_type)[0] if raw_type else None,
                     "name": _msvc_string(memory, variant + VARIANT["name"], 120),
                     "amount": amount / 100000, "address": array + STOCKPILE["entry"] * i + STOCKPILE["amount"]})
     return out
@@ -912,6 +937,58 @@ FACTORIES = {"total": 0x43C, "from_trade": 0x3C8, "consumer_goods": 0x440, "mark
 PRODUCTION_LINES = 0x58
 PRODUCTION_LINE = {"kind": 0x8, "factories": 0x18, "output": 0x30}
 LINE_KINDS = {56: "mil", 57: "nav", 71: "nav"}
+
+
+# Equipment of a country by equipment type (2026-10-20, Game summary equipment chart; user's saves SOV_1936_01_16_12:
+# SOV, GER, FRA, ITA, USA, POL, ENG, JAP - every type equal to the save): in divisions = CArmy + 0x368, array of
+# 16-byte entries {CEquipmentVariant*, fixed64 amount}; stockpile = read_stockpile; produced a day = the production
+# lines' IC of the day / cost of one unit, the line's variant at + 0x88 (CMilitaryProductionLine 56,
+# CNavalProductionLine 57 - SOV: 24 factories of infantry equipment 43.74 IC / 0.5 = 87 a day).
+DIVISION_EQUIPMENT = 0x368
+LINE_VARIANT = 0x88
+
+
+def read_equipment_status(memory, country: int, types: dict[int, str]) -> dict[str, dict[str, float]]:
+    """{"held", "stockpile", "produced"}: {equipment type: amount} of a country (types = read_equipment_types)."""
+    tokens: dict[int, str | None] = {}
+
+    def type_of(variant: int) -> str | None:
+        if variant not in tokens:
+            raw = memory.read(variant + VARIANT["type"], 4) if 0x10000 <= variant < 0x7FFF_FFFF_FFFF else None
+            tokens[variant] = types.get(struct.unpack("<I", raw)[0]) if raw else None
+        return tokens[variant]
+
+    held: dict[str, float] = {}
+    for d in read_array(memory, country + ARMY["divisions"], 20_000):
+        raw = memory.read(d + DIVISION_EQUIPMENT, 16) if d else None
+        if not raw:
+            continue
+        data, _cap, count = struct.unpack("<Qii", raw)
+        if not 0 <= count <= 500:
+            raise PointerError("implausible", f"Division equipment of {count} entries - layout does not match")
+        blob = memory.read(data, 16 * count) if count else b""
+        for i in range(len(blob or b"") // 16):
+            variant, amount = struct.unpack_from("<Qq", blob, 16 * i)
+            t = type_of(variant)
+            if t:
+                held[t] = held.get(t, 0.0) + amount / 100000
+    stock: dict[str, float] = {}
+    for e in read_stockpile(memory, country):
+        t = types.get(e["type_token"])
+        if t:
+            stock[t] = stock.get(t, 0.0) + e["amount"]
+    produced: dict[str, float] = {}
+    status = _ptr(memory, country + PRODUCTION_STATUS)
+    for line in read_array(memory, status + PRODUCTION_LINES, 5000) if status else []:
+        raw = memory.read(line, LINE_VARIANT + 8) if line else None
+        if raw is None:
+            continue
+        cost = struct.unpack_from("<q", raw, 0x28)[0] / 100000
+        output = struct.unpack_from("<q", raw, PRODUCTION_LINE["output"])[0] / 100000
+        t = type_of(struct.unpack_from("<Q", raw, LINE_VARIANT)[0])
+        if t and cost > 0 and output > 0:
+            produced[t] = produced.get(t, 0.0) + output / cost
+    return {"held": held, "stockpile": stock, "produced": produced}
 
 
 def read_ic(memory, country: int) -> dict[str, float]:

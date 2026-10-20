@@ -136,6 +136,8 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("POST", "/api/actions/watch", lambda q, b: svc.players_actions_watch(b)),
         r("GET", "/api/live/combat-log-patch", lambda q, b: {"data": live().combat_log_patch()}),
         r("POST", "/api/live/combat-log-patch", lambda q, b: combat_log_patch(b)),
+        r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/equipment", lambda q, b, gid: svc.summary_equipment(
+            gid, [t for t in _str(q, "tag").upper().split(",") if t][:50], _str(q, "archetype") or None)),
         r("POST", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/delete", lambda q, b, gid: svc.summary_delete(gid)),
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/groups", lambda q, b, gid: svc.summary_groups(gid)),
         r("POST", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/groups", lambda q, b, gid: svc.summary_groups(gid, b)),

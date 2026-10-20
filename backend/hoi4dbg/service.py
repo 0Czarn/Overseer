@@ -822,21 +822,33 @@ class DebuggerService:
         install = self._install_path()
         picked = self._pick_save(None)
         variants, names, archetypes = {}, {}, {}
-        if install and picked is not None:
-            try:
-                variants = self.saves.equipment(picked[0], live["tag"])["variants"]
-            except SaveFormatError:
-                variants = {}
-            names = gamefiles.equipment_names(install)
-            archetypes = deficit.tables(install)[1]
+        if install:
+            if picked is not None and not all(e.get("type") for e in live["entries"]):
+                try:   # the type of a variant not read from memory: the newest save's variant table
+                    variants = self.saves.equipment(picked[0], live["tag"])["variants"]
+                except SaveFormatError:
+                    variants = {}
+            archetypes = deficit.tables(install, [Path(r) for r in self._game_roots(install)[1:]])[1]
+        types = {e.get("type") or (variants.get(e["id"]) or {}).get("type") for e in live["entries"]} - {None}
+        if install:
+            names = self._equipment_names(install, types | {deficit.archetype_of(t, archetypes) for t in types})
         entries = []
         for e in live["entries"]:
             v = variants.get(e["id"]) or {}
-            eq_type = v.get("type")
+            eq_type = e.get("type") or v.get("type")
             entries.append({**e, "type": eq_type, "type_name": names.get(eq_type, eq_type) if eq_type else None,
                             "archetype": deficit.archetype_of(eq_type, archetypes) if eq_type else None,
                             "name": e["name"] or v.get("name")})
         return {"data": {"tag": live["tag"], "entries": entries, "read_at": live["read_at"]}}
+
+    def _equipment_names(self, install: Path, keys: set[str]) -> dict[str, str]:
+        """Names of equipment keys (types and archetypes) from the localisation of the game and the mods it runs with;
+        the game's equipment_l_<lang>.yml for keys none of them names."""
+        names = dict(gamefiles.equipment_names(install))
+        loc = self._loc_names(install, set(keys))
+        loc.update(self._loc_names(install, {r for v in loc.values() for r in LOC_REF.findall(v)} - set(loc)))
+        names.update({k: clean_loc(loc[k], loc) for k in keys if loc.get(k) and "[" not in loc[k]})
+        return names
 
     def _focus_queue_file(self) -> Path:
         return Path(self.data_dir) / "focus-queues.json"
@@ -879,7 +891,9 @@ class DebuggerService:
                 userdata = (self.detect().get("userdata") or {}).get("path")
                 mods = gamefiles.enabled_mods(Path(userdata)) if userdata else []
                 needs, archetypes = deficit.tables(install, mods)
-                names = gamefiles.equipment_names(install)
+                types = {v.get("type") for v in data["variants"].values()} - {None}
+                names = self._equipment_names(install, types | {deficit.archetype_of(t, archetypes) for t in types}
+                                              | set(archetypes.values()))
                 items = save_equipment.rows(data, names)
                 balance = deficit.compute(data, needs, archetypes)
                 groups: dict[str, dict] = {}
@@ -887,12 +901,12 @@ class DebuggerService:
                     if item["pool"] != "stockpile":
                         continue
                     a = deficit.archetype_of(item["archetype"], archetypes)
-                    g = groups.setdefault(a, {"archetype": a, "name": names.get(a, a.replace("_", " ").capitalize()),
+                    g = groups.setdefault(a, {"archetype": a, "name": names.get(a) or a.replace("_", " ").capitalize(),
                                               "variants": []})
                     g["variants"].append(item)
                 for a, b in balance.items():
                     if b["need"] or b["stockpile"]:
-                        groups.setdefault(a, {"archetype": a, "name": names.get(a, a.replace("_", " ").capitalize()),
+                        groups.setdefault(a, {"archetype": a, "name": names.get(a) or a.replace("_", " ").capitalize(),
                                               "variants": []})
                 for a, g in groups.items():
                     g.update({k: balance.get(a, {}).get(k, 0.0) for k in ("need", "held", "missing", "shortfall")})
@@ -1703,6 +1717,23 @@ class DebuggerService:
             seller, _, resource = i.partition(" ")
             return f"{resource} from {countries.get(seller) or seller}: {detail}"
         return i
+
+    def summary_equipment(self, gid: str, tags: list[str], archetype: str | None) -> dict:
+        """Equipment chart of the Game summary: needed / in divisions / stockpile / produced a day of one equipment
+        archetype for the chosen countries (summed) of a recorded campaign, with names and icons of the archetypes."""
+        if not tags or not all(re.fullmatch(r"[A-Z][A-Z0-9]{2}", t) for t in tags):
+            raise ReportError("tag must be one or more country tags")
+        try:
+            out = self.ic_history.equipment(gid, tags, archetype)
+        except ValueError as exc:
+            raise NotFound(f"No recorded campaign {gid}") from exc
+        install = self._install_path()
+        keys = list(out["archetypes"])
+        names = self._equipment_names(install, set(keys)) if install else {}
+        icons = self._equipment_icons(install, tags[0], keys) if install else {}
+        out["archetypes"] = [{"key": a, "name": names.get(a) or a.replace("_", " ").capitalize(), "icon": icons.get(a)}
+                             for a in keys]
+        return {"data": {"id": gid, "tags": tags, **out}}
 
     def summary_delete(self, gid: str) -> dict:
         """Deletes a recorded campaign (not the one being recorded)."""

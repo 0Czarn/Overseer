@@ -235,6 +235,7 @@ class IcHistory:
         self.folder = folder
         self.active: str | None = None
         self._lock = threading.Lock()
+        self._equipment_cache: dict[str, tuple[int, list]] = {}
 
     def _path(self, gid: str) -> Path:
         if not SAFE_ID.match(gid):
@@ -335,6 +336,7 @@ class IcHistory:
             (self.folder / f"{gid}.groups.json").unlink(missing_ok=True)
             (self.folder / f"{gid}.designs.json").unlink(missing_ok=True)
             (self.folder / f"{gid}.actions.jsonl").unlink(missing_ok=True)
+            (self.folder / f"{gid}.equipment.jsonl").unlink(missing_ok=True)
 
     def _choose(self, player: str, t: int, campaign: str | None = None) -> str:
         """The campaign file a sample of `player` at day `t` of the game's campaign id `campaign` belongs to (cutting
@@ -417,10 +419,76 @@ class IcHistory:
         if any(e["t"] >= t for e in events):
             self._actions_path(gid).write_text("".join(json.dumps(e, separators=(",", ":")) + "\n" for e in events
                                                        if e["t"] < t), encoding="utf-8")
+        lines = self._equipment_lines(gid)   # equipment of replayed days
+        if any(r["t"] >= t for r in lines):
+            self._equipment_path(gid).write_text("".join(json.dumps(r, separators=(",", ":")) + "\n" for r in lines
+                                                         if r["t"] < t), encoding="utf-8")
         seen = self.designs(gid)   # designs first seen on a replayed day: the game may give their ids to new ones
         kept = {tag: {i: v for i, v in ids.items() if v[1] or v[0] < t} for tag, ids in seen.items()}
         if kept != seen:
             self._designs_path(gid).write_text(json.dumps(kept, separators=(",", ":")), encoding="utf-8")
+
+    # -- equipment of every country by day (Game summary equipment chart): <id>.equipment.jsonl, one line a day
+    # {"t": day, "e": {tag: {archetype: [needed, in divisions, stockpile, produced a day]}}} (live/service._equipment_day)
+    def _equipment_path(self, gid: str) -> Path:
+        self._path(gid)   # checks the id
+        return self.folder / f"{gid}.equipment.jsonl"
+
+    def add_equipment(self, gid: str, t: int, data: dict) -> None:
+        with self._equipment_path(gid).open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"t": t, "e": data}, separators=(",", ":")) + "\n")
+
+    def _equipment_lines(self, gid: str) -> list[dict]:
+        """The days of the equipment file, read once and then only the lines appended since (a cut file is re-read)."""
+        path = self._equipment_path(gid)
+        try:
+            size = path.stat().st_size
+        except OSError:
+            return []
+        cache = self._equipment_cache.get(gid)
+        if cache is None or size < cache[0]:
+            cache = (0, [])
+        offset, rows = cache
+        if size > offset:
+            with path.open("rb") as f:
+                f.seek(offset)
+                chunk = f.read(size - offset)
+            end = chunk.rfind(b"\n") + 1    # a line being written stays for the next reading
+            for line in chunk[:end].splitlines():
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:   # a line cut by a crash
+                    continue
+            offset += end
+        self._equipment_cache[gid] = (offset, rows)
+        return rows
+
+    def equipment(self, gid: str, tags: list[str], archetype: str | None) -> dict:
+        """{"t", "dates", "archetypes": {archetype: last needed + in divisions + stockpile of the chosen countries},
+        "series": {"needed", "held", "stockpile", "produced": [...]}} - the chosen countries summed, `archetype` (default:
+        the one with the most of it); a day without the file's line for a country counts 0."""
+        rows = self._equipment_lines(gid)
+        totals: dict[str, float] = {}
+        for r in rows[-1:]:
+            for tag in tags:
+                for a, v in (r["e"].get(tag) or {}).items():
+                    totals[a] = totals.get(a, 0) + v[0] + v[1] + v[2]
+        for r in rows:   # archetypes that existed earlier only
+            for tag in tags:
+                for a in r["e"].get(tag) or {}:
+                    totals.setdefault(a, 0)
+        chosen = archetype if archetype in totals else max(totals, key=lambda a: totals[a], default=None)
+        series = {k: [] for k in ("needed", "held", "stockpile", "produced")}
+        for r in rows:
+            sums = [0.0, 0.0, 0.0, 0.0]
+            for tag in tags:
+                v = (r["e"].get(tag) or {}).get(chosen)
+                if v:
+                    sums = [a + b for a, b in zip(sums, v)]
+            for k, x in zip(series, sums):
+                series[k].append(round(x, 2))
+        return {"t": [r["t"] for r in rows], "dates": [date_text(r["t"]) for r in rows], "archetype": chosen,
+                "archetypes": dict(sorted(totals.items(), key=lambda kv: -kv[1])), "series": series}
 
     # -- Players actions (actions.py): the watched countries and the events of each campaign --
     def _actions_path(self, gid: str) -> Path:
@@ -577,6 +645,7 @@ class IcRecorder:
             values.extend([None] * (12 - len(values)))
             values.extend(assigned.get(tag) or [None, None, None])
         designs = sample.pop("designs", None)
+        equipment = sample.pop("equipment", None)
         gid = self.history.add(sample)
         if (gid, self.history.how) != self._chosen:
             self._chosen = (gid, self.history.how)
@@ -584,6 +653,8 @@ class IcRecorder:
                           self.history.how)
         if designs is not None:
             self.history.note_designs(gid, t, designs)
+        if equipment:
+            self.history.add_equipment(gid, t, equipment)
         if self.actions is not None:
             self._record_actions(gid, t, sample.get("player"))
         if with_factions:

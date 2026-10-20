@@ -5,6 +5,7 @@
 import { h, notice, viewHeader } from '../lib/dom.js';
 import { compact, dayText, hoverSync, lineChart } from '../lib/linechart.js';
 import { refreshMs } from '../lib/options.js';
+import { equipmentSection } from './summary-equipment.js';
 import { numberLocale } from '../lib/options.js';
 
 // categorical slots in fixed order (dark steps of the validated reference palette); a colour follows its series
@@ -130,8 +131,9 @@ export default {
     const pickerList = h('div', { class: 'gs-picker-list' });
     const picker = h('div', { class: 'gs-picker' }, pickerHead, searchInput, pickerList);
     const charts = h('div', { class: 'gs-charts' });
+    const equipment = equipmentSection(ctx);   // the separate equipment chart at the bottom
     root.append(viewHeader('Game summary', 'IC a day per country over the campaign, recorded from game memory while the app runs.'),
-      status, controls, h('div', { class: 'gs-body' }, picker, charts));
+      status, controls, h('div', { class: 'gs-body' }, picker, charts), equipment.el);
 
     let games = [];
     let recorder = {};
@@ -564,6 +566,7 @@ export default {
         const a = document.activeElement;   // do not reset a list being picked or a group name being typed
         if (!(pickerList.contains(a) && (a.tagName === 'SELECT' || a.type === 'text'))) renderPicker();
         renderCharts();
+        if (main) equipment.update(prefs.game, main.countries, main.player);
       } catch (err) {
         if (!stopped) charts.replaceChildren(notice('warn', `Game summary unavailable: ${err.message}`));
       }

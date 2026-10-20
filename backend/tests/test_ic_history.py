@@ -263,6 +263,38 @@ class PerFactoryTest(unittest.TestCase):
         self.assertEqual(game["countries"]["SOV"]["lcom"], [None])
 
 
+class EquipmentHistoryTest(unittest.TestCase):
+    def test_days_series_of_one_archetype_appended_lines_and_replayed_days(self):
+        history = IcHistory(Path(tempfile.mkdtemp()))
+        t = day(1936, 1, 2)
+        gid = history.add({"t": t, "player": "SOV", "countries": {"SOV": [1.0, 0.0, 0.0]}, "factions": None})
+        history.add_equipment(gid, t, {"SOV": {"infantry_equipment": [1000, 800, 50, 87.5], "train_equipment": [0, 0, 300, 0]},
+                                       "MON": {"infantry_equipment": [100, 100, 0, 0]}})
+        history.add_equipment(gid, t + 1, {"SOV": {"infantry_equipment": [1000, 850, 87, 87.5]}})
+        e = history.equipment(gid, ["SOV"], None)
+        self.assertEqual(e["archetype"], "infantry_equipment")            # the biggest one by default
+        self.assertEqual(e["series"]["held"], [800, 850])
+        self.assertEqual(e["series"]["produced"], [87.5, 87.5])
+        self.assertEqual(list(e["archetypes"]), ["infantry_equipment", "train_equipment"])
+        self.assertEqual(history.equipment(gid, ["SOV"], "train_equipment")["series"]["stockpile"], [300, 0])
+        self.assertEqual(history.equipment(gid, ["SOV", "MON"], None)["series"]["needed"], [1100, 1000])
+        history.add_equipment(gid, t + 2, {"SOV": {"infantry_equipment": [1000, 900, 0, 90]}})   # read after the cache
+        self.assertEqual(history.equipment(gid, ["SOV"], None)["series"]["held"], [800, 850, 900])
+        history._cut(gid, t + 1)                                           # a save of day t loaded: later days replayed
+        self.assertEqual(history.equipment(gid, ["SOV"], None)["t"], [t])
+
+    def test_the_recorder_writes_the_equipment_of_the_day(self):
+        live = FakeLive()
+        live.ic_snapshot = lambda f: {"t": live.t, "player": "SOV", "factions": None, "countries": {"SOV": [9.0, 0.0, 5.0]},
+                                      "equipment": {"SOV": {"infantry_equipment": [10, 5, 1, 2.5]}}}
+        history = IcHistory(Path(tempfile.mkdtemp()))
+        rec = IcRecorder(live, history, logging.getLogger("test"))
+        rec.step()
+        live.t += 1
+        self.assertTrue(rec.step())
+        self.assertEqual(history.equipment(history.active, ["SOV"], None)["series"]["needed"], [10])
+
+
 class GroupsTest(unittest.TestCase):
     GAME = ViewTest.GAME
 

@@ -1586,3 +1586,21 @@ class IdeaPointerTests(unittest.TestCase):
         mem.put(tech + pointers.TECHNOLOGY_TEMPLATE, "Q", template)
         self._string(mem, template + pointers.TEMPLATE_ID, "tech_trucks")
         self.assertEqual(pointers.read_researched(mem, country), ["tech_trucks"])
+
+
+class EquipmentTypeTests(unittest.TestCase):
+    def test_types_from_the_equipment_database_and_the_variant_token(self):
+        mem = FakeMemory()
+        module = BASE - pointers.EQUIPMENT_DB + 0x10      # [module + EQUIPMENT_DB] inside the fake region
+        db, array, types = BASE + 0x100, BASE + 0x400, BASE + 0x800
+        mem.put(module + pointers.EQUIPMENT_DB, "Q", db)
+        mem.put(db + pointers.EQUIPMENT_TYPES, "Qii", array, 3, 3)
+        for i, (token, key) in enumerate(((0, ""), (0x4ED2, "infantry_equipment_0"), (0x4F57, "light_tank_chassis_1"))):
+            t = types + 0x100 * i
+            mem.put(array + 8 * i, "Q", t)
+            mem.put(t + pointers.EQUIPMENT_TYPE["token"], "I", token)
+            raw = key.encode()
+            heap = t + 0x80
+            mem.regions_data[BASE][heap - BASE:heap - BASE + len(raw)] = raw
+            mem.put(t + pointers.EQUIPMENT_TYPE["key"], "QQQQ", heap, 0, len(raw), max(len(raw), 16))
+        self.assertEqual(pointers.read_equipment_types(mem, module), {0x4ED2: "infantry_equipment_0", 0x4F57: "light_tank_chassis_1"})

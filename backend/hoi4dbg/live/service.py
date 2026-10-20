@@ -21,6 +21,7 @@ from ..integration.memory import ENCODINGS, MemoryAccessError, ProcessMemory, ne
 from ..integration.code_write import ProcessCodePatcher
 from ..integration.memory_write import ProcessMemoryWriter
 from .. import construction as construction_mod
+from .. import deficit
 from .. import gamefiles
 from .. import ic_history
 from .. import triggers
@@ -70,7 +71,8 @@ class LiveService:
         self._module_base: dict[tuple, int] = {}   # (pid, started) -> hoi4.exe base
         self._tags: dict[str, list[str]] = {}      # install path -> tag order
         self._mods: tuple = ()                     # mod folders the game runs with (gamefiles.enabled_mods)
-        self._tree_members: dict[tuple, list[str] | None] = {}   # (pid, started, tree id) -> the tree's focus ids
+        self._tree_members: dict[tuple, list[str] | None] = {}
+        self._equipment_types: dict[tuple, dict[int, str]] = {}   # (pid, started) -> {token: equipment type}   # (pid, started, tree id) -> the tree's focus ids
         self._player: tuple[float, tuple, str] | None = None  # (read at, process key, tag)
 
     # -- persistence -----------------------------------------------------------------------
@@ -1070,6 +1072,43 @@ class LiveService:
         except (MemoryAccessError, OSError, KeyError) as exc:
             raise LiveError("memory_error", f"Code patch failed: {exc}") from exc
 
+    def _equipment_day(self, mem, base: int, process: dict, countries: dict, tags) -> dict | None:
+        """{tag: {archetype: [needed, in divisions, stockpile, produced a day]}} of the countries `tags` for the Game
+        summary equipment chart: needed = divisions of each template x the need of its sub-units (common/units of the game
+        and mods), the rest from game memory (pointers.read_equipment_status); archetypes with only zeros are left out.
+        None when the equipment types are not readable."""
+        key = (process["pid"], process.get("started"))
+        if key not in self._equipment_types:
+            try:
+                self._equipment_types = {key: pointers.read_equipment_types(mem, base)}
+            except pointers.PointerError:
+                self._equipment_types = {key: {}}
+        types = self._equipment_types[key]
+        if not types:
+            return None
+        needs, archetypes = deficit.tables(Path(process.get("install") or ""), list(self._mods))
+        arch = lambda t: deficit.archetype_of(t, archetypes)  # noqa: E731
+        out = {}
+        for tag in tags:
+            try:
+                status = pointers.read_equipment_status(mem, countries[tag], types)
+                army = pointers.read_army(mem, countries[tag])
+            except pointers.PointerError:
+                continue
+            rows: dict[str, list[float]] = {}
+            for tpl in army["templates"]:
+                for unit in [u for k in ("battalions", "support", "regimental") for u in tpl[k] if u]:
+                    for a, n in needs.get(unit, {}).items():
+                        rows.setdefault(arch(a), [0.0, 0.0, 0.0, 0.0])[0] += n * tpl["count"]
+            for i, part in ((1, "held"), (2, "stockpile"), (3, "produced")):
+                for t, v in status[part].items():
+                    rows.setdefault(arch(t), [0.0, 0.0, 0.0, 0.0])[i] += v
+            rows = {a: [round(v[0]), round(v[1]), round(v[2]), round(v[3], 2)] for a, v in rows.items() if any(v)}
+            rows = {a: v for a, v in rows.items() if any(v)}
+            if rows:
+                out[tag] = rows
+        return out
+
     def ic_snapshot(self, with_factions: bool = False) -> dict:
         """{"t", "player", "countries": {tag: [mil, nav, civ, civilian factories, military factories, dockyards,
         wasted mil, wasted nav, wasted civ]}, "factions": {tag: faction name} or None, "players": {tag: {"n": player
@@ -1099,6 +1138,7 @@ class LiveService:
                             fac["civilian"]["total"], fac["military"]["total"], fac["dockyards"]["total"],
                             wasted["wmil"], wasted["wnav"], wasted["wciv"]]
                 assigned[tag] = [ic["amil"], ic["anav"], ic["aciv"]]
+            equipment = self._equipment_day(mem, base, process, countries, out)
             factions = None
             if with_factions:
                 by_object = {c: t for t, c in countries.items()}
@@ -1138,6 +1178,7 @@ class LiveService:
                     continue
             return {"t": t, "player": player, "campaign": pointers.campaign_id(mem, base), "countries": out,
                     "factions": factions, "players": players or None, "losses": losses, "assigned": assigned,
+                    "equipment": equipment,
                     "designs": {k: v for k, v in designs.items() if v}}
         return self._game_memory(read)
 
@@ -1148,8 +1189,15 @@ class LiveService:
             raise LiveError("unsupported_version", "Live stockpile reading is only verified for 1.19.3.0.c01a")
         tag = tag or self.player_tag(process)
         entries = self._with_country(process, tag, pointers.read_stockpile)
-        return {"tag": tag, "entries": [{k: e[k] for k in ("id", "name", "amount")} for e in entries],
-                "read_at": self._clock()}
+        key = (process["pid"], process.get("started"))
+        if key not in self._equipment_types:   # the types do not change while the game runs
+            try:
+                self._equipment_types = {key: self._game_memory(lambda mem, base, _t, _p: pointers.read_equipment_types(mem, base))}
+            except LiveError:
+                self._equipment_types = {key: {}}
+        types = self._equipment_types[key]
+        return {"tag": tag, "entries": [{**{k: e[k] for k in ("id", "name", "amount")}, "type": types.get(e.get("type_token"))}
+                                        for e in entries], "read_at": self._clock()}
 
     def write_stockpile(self, equipment_id: str, amount: float, tag: str | None = None,
                         expected_before: float | None = None) -> dict:

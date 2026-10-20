@@ -424,6 +424,19 @@ ZROBIONE
             także WŁASNYCH PROJEKTÓW po nazwie (np. "Test Tank"; sprawdzone dla czołgów)
             + deficyt sprzętu (szacunek), grupy wariantów rozwijane/zwijane
             + magazyn NA ŻYWO z pamięci i edycja ilości (lokalnie, tylko singleplayer)
+            + WYGLĄD (2026-10-20, prośba użytkownika): pasek podsumowania (rodzaje sprzętu, braki w dywizjach, zapas -
+              na żywo po odczycie, najbardziej brakujący), kafelek "Live stockpile" z przełącznikiem Live | On refresh
+              (jak inne kafelki; odczyt wstrzymany podczas wpisywania ilości), karty sprzętu z ikonami z gry
+              (GFX_<TAG>_<typ>_medium / GFX_archetype_<typ>_medium; podwozia czołgów i płatowce -> ikona czołgu /
+              myśliwca / CAS / bombowca), zmiana od poprzedniego odczytu (▲/▼), pasek pokrycia potrzeb dywizji;
+              tabela potrzeb z ikonami i kolumną Covered. Ikony w /api/equipment/<TAG> ("icons"), raz na widok.
+            + SPRZĘT WŁASNY I Z MODÓW (2026-10-20, pytanie użytkownika): rodzaj sprzętu wariantu Z PAMIĘCI -
+              CEquipmentVariant +0x18 = token rodzaju; [hoi4.exe+0x332EEC0] CEquipmentDatabase +0x68 = tablica
+              CEquipmentType* (+0x8 token, +0x18 klucz). 575 rodzajów (gra + R56), 89/89 wariantów 8 państw zgodnych z
+              save'em; mapa raz na proces (0,28 s), odczyt zapasu 0,008 s. Nowe projekty (czołgi/samoloty/okręty)
+              rozpoznane bez save'a; save tylko, gdy w pamięci brak rodzaju. Nazwy sprzętu z tłumaczeń gry I MODÓW
+              (R56: "Small Arms '36", "G.W-Era Artillery"), przypisanie do rodzaju z plików gry i modów (wcześniej na
+              żywo tylko gra).
 
 ======================================================================
 DO ZROBIENIA (w tej kolejności)
@@ -551,6 +564,17 @@ DO ZROBIENIA (w tej kolejności)
             i nazwie w obu trybach, wspólny kursor: najechanie na jeden wykres pokazuje dzień i wartości widocznych serii w
             obu. POPRAWKI: podpowiedź pokazywała "[object HTMLDivElement]" (replaceChildren z tablicą); kliknięte pole
             wyboru blokowało odświeżenie panelu grup.
+            SPRZĘT W GAME SUMMARY (2026-10-20, prośba użytkownika; wybory: wszystkie państwa, rodzaj sprzętu, tylko dane
+            na żywo, jedno państwo z 4 liniami): osobna sekcja "Equipment" na dole zakładki - wybór państwa i rodzaju
+            (przyciski z ikonami), wykres needed / in divisions / stockpile i osobny wykres produced a day, tabela
+            ostatniego dnia z brakiem. Rejestrator co dzień gry dla każdego państwa: <id>.equipment.jsonl
+            {t, e: {TAG: {rodzaj: [needed, in divisions, stockpile, produced]}}} (ucinany jak główny plik przy
+            wczytaniu save'a; odczyt przyrostowy). Pamięć (zgodne z SOV_1936_01_16_12 git.hoi4 co do sztuki, 8 państw):
+            in divisions = CArmy +0x368 {wariant*, fixed64}; needed = szablony x liczba dywizji (read_army) x need
+            batalionów z common/units gry i modów; produced = IC dnia linii / koszt sztuki, wariant linii +0x88.
+            Wszystkie państwa 0,26 s na dzień, ok. 11 KB na dzień (94 państwa ze sprzętem). API:
+            /api/summary/games/<id>/equipment?tag=SOV&archetype=infantry_equipment.
+            [ ] wymaga ponownego uruchomienia aplikacji (nowy rejestrator); kampanie sprzed 2026-10-20 bez sprzętu
             IC NA FABRYKĘ (2026-10-20, prośba użytkownika): grupa "IC per factory" - Military IC / fabrykę wojskową,
             Naval IC / stocznię, Construction IC / fabrykę cywilną; liczone na fabryki PRACUJĄCE na liniach (wydajność,
             factory/dockyard output, szybkość budowy, braki surowców), grupy/frakcje/gracze = suma IC / suma fabryk.

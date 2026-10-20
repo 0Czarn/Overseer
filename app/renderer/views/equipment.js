@@ -2,6 +2,7 @@ import { h, card, demoBanner, keyValues, meter, notice, scopeBadge, select, sour
 import { filterByText, formatAge, formatValue, freshnessInfo, humanize, stockBalance } from '../lib/format.js';
 import { countryPicker } from './shared.js';
 import { refreshMs } from '../lib/options.js';
+import { refreshControl } from '../lib/refresh.js';
 
 function saveLine(data) {
   const fresh = freshnessInfo(data.freshness?.category);
@@ -16,8 +17,34 @@ function saveLine(data) {
 
 const fmtInt = (v) => formatValue(Math.round(v ?? 0), 'integer');
 
+/** Share of the need that divisions hold plus the stockpile (1 = nothing missing); null without a need. */
+export function coverage(g, stockpile = g?.stockpile) {
+  if (!g?.need) return null;
+  return Math.min(1, ((g.held ?? 0) + (stockpile ?? 0)) / g.need);
+}
+
+/** {archetype: amount} of live stockpile entries (an entry without an archetype counts under its type). */
+export function archetypeTotals(entries) {
+  const out = {};
+  for (const e of entries ?? []) {
+    const key = e.archetype ?? e.type ?? `#${e.id}`;
+    out[key] = (out[key] ?? 0) + e.amount;
+  }
+  return out;
+}
+
+/** Non-zero changes between two readings of archetypeTotals. */
+export function totalChanges(before, now) {
+  const out = {};
+  for (const k of new Set([...Object.keys(before), ...Object.keys(now)])) {
+    const d = (now[k] ?? 0) - (before[k] ?? 0);
+    if (Math.abs(d) >= 0.5) out[k] = d;
+  }
+  return out;
+}
+
 /** One row per equipment archetype (need / held / stockpile / shortfall) - click to show or hide its variants. */
-function groupTable(groups, tag, ctx) {
+function groupTable(groups, tag, ctx, icons = {}) {
   let filter = '';
   const open = new Set(JSON.parse(sessionStorage.getItem('hoi4dbg.eqOpen') ?? '[]'));
   const host = h('div');
@@ -26,7 +53,7 @@ function groupTable(groups, tag, ctx) {
     try { sessionStorage.setItem('hoi4dbg.eqOpen', JSON.stringify([...open])); } catch { /* convenience only */ }
     render();
   };
-  const head = h('thead', null, h('tr', null, ['Equipment', 'Needed', 'In divisions', 'Stockpile', 'Deficit'].map(
+  const head = h('thead', null, h('tr', null, ['Equipment', 'Needed', 'In divisions', 'Stockpile', 'Deficit', 'Covered'].map(
     (t, i) => h('th', { class: i ? 'num' : '' }, t))));
   function render() {
     const f = filter.toLowerCase();
@@ -37,23 +64,27 @@ function groupTable(groups, tag, ctx) {
       const isOpen = open.has(g.archetype);
       const canOpen = g.variants.length > 0;
       rows.push(h('tr', { class: `eq-group${g.shortfall > 0 ? ' eq-deficit' : ''}`, onClick: canOpen ? () => toggle(g.archetype) : null },
-        h('td', null, h('span', { class: 'eq-caret' }, canOpen ? (isOpen ? '▼' : '▶') : ''), h('b', { title: g.archetype }, g.name),
+        h('td', null, h('span', { class: 'eq-caret' }, canOpen ? (isOpen ? '▼' : '▶') : ''),
+          icons[g.archetype] ? h('img', { class: 'eq-icon-small', src: icons[g.archetype], alt: '', draggable: 'false' }) : null,
+          h('b', { title: g.archetype }, g.name),
           canOpen ? h('span', { class: 'muted' }, ` (${g.variants.length})`) : null),
         h('td', { class: 'num' }, g.need ? fmtInt(g.need) : '—'),
         h('td', { class: 'num' }, g.need ? fmtInt(g.held) : '—'),
         h('td', { class: 'num' }, fmtInt(g.stockpile)),
-        h('td', { class: `num ${g.shortfall > 0 ? 'bad-text' : 'good-text'}` }, g.shortfall > 0 ? `−${fmtInt(g.shortfall)}` : (g.need ? 'OK' : ''))));
+        h('td', { class: `num ${g.shortfall > 0 ? 'bad-text' : 'good-text'}` }, g.shortfall > 0 ? `−${fmtInt(g.shortfall)}` : (g.need ? 'OK' : '')),
+        h('td', { class: 'eq-cover' }, g.need ? [meter(coverage(g), g.shortfall > 0 ? 'meter-bad' : 'meter-good'),
+          h('span', { class: 'muted' }, `${Math.round(coverage(g) * 100)}%`)] : null)));
       if (isOpen) {
         for (const v of (f ? variants : g.variants)) {
           rows.push(h('tr', { class: 'eq-variant' },
             h('td', null, h('span', { class: 'eq-indent' }), v.variant ?? h('span', { class: 'muted' }, `${v.archetype_name} (base)`),
               h('span', { class: 'muted' }, ` · ${v.archetype}${v.creator ? ` · ${v.creator}` : ''}${v.obsolete ? ' · obsolete' : ''}`)),
-            h('td', null), h('td', null), h('td', { class: 'num' }, fmtInt(v.amount)), h('td', null)));
+            h('td', null), h('td', null), h('td', { class: 'num' }, fmtInt(v.amount)), h('td', null), h('td', null)));
         }
       }
     }
     host.replaceChildren(h('div', { class: 'table-wrap' }, h('table', { class: 'table eq-table' }, head,
-      h('tbody', null, rows.length ? rows : h('tr', null, h('td', { colspan: '5', class: 'muted' }, `No equipment for ${tag}`))))));
+      h('tbody', null, rows.length ? rows : h('tr', null, h('td', { colspan: '6', class: 'muted' }, `No equipment for ${tag}`))))));
   }
   render();
   return [h('p', { class: 'hint' }, 'Deficit = equipment missing in fielded divisions minus the stockpile (estimate: '
@@ -67,13 +98,16 @@ const directEnabled = () => { try { return localStorage.getItem(DIRECT_PREF) ===
 
 /** Stockpile read from game memory every few seconds; with direct writes enabled each variant can be set
  *  (LOCAL memory write, single player only - the backend refuses it in multiplayer). */
-function liveStockpileCard(ctx, tag) {
+function liveStockpileCard(ctx, tag, { groups = [], icons = {}, onRead } = {}) {
   const host = h('div', null, h('p', { class: 'muted' }, 'Reading game memory…'));
-  const badge = h('span');
+  const badge = h('span', { class: 'hoi-status' });
   const result = h('div');
   const open = new Set(JSON.parse(sessionStorage.getItem('hoi4dbg.eqLiveOpen') ?? '[]'));
+  const needs = new Map(groups.map((g) => [g.archetype, g]));
   let entries = [];
-  let timer = null;
+  let lastKey = null;
+  let previous = null;   // totals of the reading before, for the change since then
+  let changes = {};
   let stopped = false;
   let editing = false;
   const toggleBox = h('input', { type: 'checkbox', checked: directEnabled(), onChange: (e) => {
@@ -99,18 +133,32 @@ function liveStockpileCard(ctx, tag) {
       groups.get(key).push(e);
     }
     const allowed = directEnabled();
+    const totals = archetypeTotals(entries);
     const rows = [];
-    for (const [key, list] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-      const total = list.reduce((n, e) => n + e.amount, 0);
+    const cards = [];
+    for (const [key, list] of [...groups.entries()].sort((a, b) => (totals[b[0]] - totals[a[0]]) || a[0].localeCompare(b[0]))) {
+      const total = totals[key];
       const isOpen = open.has(key);
-      rows.push(h('tr', { class: 'eq-group', onClick: () => {
+      const need = needs.get(key);
+      const covered = need?.need ? Math.min(1, ((need.held ?? 0) + total) / need.need) : null;
+      const d = changes[key] ?? 0;
+      cards.push(h('button', { type: 'button', class: `eq-card${isOpen ? ' eq-card-open' : ''}`, onClick: () => {
         if (isOpen) open.delete(key); else open.add(key);
         try { sessionStorage.setItem('hoi4dbg.eqLiveOpen', JSON.stringify([...open])); } catch { /* convenience */ }
         render();
-      } }, h('td', null, h('span', { class: 'eq-caret' }, isOpen ? '▼' : '▶'), h('b', null, list[0].type_name && list.length === 1
-        ? list[0].type_name : key.replace(/_/g, ' ')), h('span', { class: 'muted' }, ` (${list.length})`)),
-      h('td', { class: 'num' }, fmtInt(total)), h('td', null)));
+      } },
+      icons[key] ? h('img', { class: 'eq-icon', src: icons[key], alt: '', draggable: 'false' }) : h('span', { class: 'eq-icon eq-icon-none' }),
+      h('span', { class: 'eq-card-text' },
+        h('span', { class: 'eq-card-name' }, need?.name ?? key.replace(/_/g, ' ')),
+        h('span', { class: 'eq-card-amount' }, fmtInt(total),
+          Math.abs(d) >= 0.5 ? h('span', { class: `eq-change ${d > 0 ? 'hoi-pos' : 'hoi-neg'}`,
+            title: 'Change since the previous reading' }, `${d > 0 ? '▲ +' : '▼ −'}${fmtInt(Math.abs(d))}`) : null),
+        covered === null ? h('span', { class: 'eq-card-need muted' }, `${list.length} variant${list.length === 1 ? '' : 's'}`)
+          : h('span', { class: 'eq-card-need', title: `Divisions need ${fmtInt(need.need)}, hold ${fmtInt(need.held)} (newest save)` },
+            meter(covered, covered < 1 ? 'meter-bad' : 'meter-good'), `${Math.round(covered * 100)}% of need`))));
       if (!isOpen) continue;
+      rows.push(h('tr', { class: 'eq-group' }, h('td', null, h('b', null, need?.name ?? key.replace(/_/g, ' '))),
+        h('td', { class: 'num' }, fmtInt(total)), h('td', null)));
       for (const e of list) {
         const input = h('input', { class: 'input input-small', type: 'number', min: '0', step: '1', value: String(Math.round(e.amount)),
           'aria-label': 'New amount', onFocus: () => { editing = true; }, onBlur: () => { editing = false; } });
@@ -122,36 +170,46 @@ function liveStockpileCard(ctx, tag) {
             h('button', { class: 'btn btn-small btn-primary', onClick: () => setAmount(e, input) }, 'Set')) : null)));
       }
     }
-    host.replaceChildren(
+    host.replaceChildren(...[
+      cards.length ? h('div', { class: 'eq-cards' }, cards) : h('p', { class: 'muted' }, 'Empty stockpile'),
+      rows.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'table eq-table' },
+        h('thead', null, h('tr', null, h('th', null, 'Variant'), h('th', { class: 'num' }, 'Live amount'), h('th', null, allowed ? 'Set to' : ''))),
+        h('tbody', null, rows))) : h('p', { class: 'hint' }, 'Click a card to see its variants.'),
       h('label', { class: 'switch' }, toggleBox, h('span', null, 'Enable direct memory writes (LOCAL, single player only)')),
-      h('div', { class: 'table-wrap' }, h('table', { class: 'table eq-table' },
-        h('thead', null, h('tr', null, h('th', null, 'Equipment'), h('th', { class: 'num' }, 'Live amount'), h('th', null, allowed ? 'Set to' : ''))),
-        h('tbody', null, rows.length ? rows : h('tr', null, h('td', { colspan: '3', class: 'muted' }, 'Empty stockpile'))))),
-      result);
+      result]);
   }
-  async function tick() {
-    if (stopped) return;
-    clearTimeout(timer);
-    if (!editing) {
-      try {
-        entries = (await ctx.api.get(`/api/live/stockpile?tag=${encodeURIComponent(tag)}`)).data.entries;
-        badge.replaceChildren(h('span', { class: 'badge badge-live' }, 'LIVE'));
+  // Live | On refresh like the other tiles; a reading waits while an amount is being typed
+  async function tick(force = false) {
+    if (stopped || (editing && !force)) return;
+    try {
+      const data = (await ctx.api.get(`/api/live/stockpile?tag=${encodeURIComponent(tag)}`)).data;
+      onRead?.(data.entries);
+      const key = JSON.stringify(data.entries);
+      badge.textContent = `game memory · read ${new Date().toLocaleTimeString()}`;
+      badge.className = 'hoi-status hoi-status-on';
+      if (force || key !== lastKey) {
+        lastKey = key;
+        entries = data.entries;
+        const totals = archetypeTotals(entries);
+        changes = previous ? totalChanges(previous, totals) : {};
+        previous = totals;
         render();
-      } catch (err) {
-        badge.replaceChildren(h('span', { class: 'badge badge-na' }, 'NO LIVE DATA'));
-        host.replaceChildren(notice('muted', `Live stockpile unavailable: ${err.message}`));
       }
+    } catch (err) {
+      badge.textContent = 'no live data';
+      badge.className = 'hoi-status';
+      host.replaceChildren(notice('muted', `Live stockpile unavailable: ${err.message}`));
     }
-    timer = setTimeout(tick, 3000);
   }
-  tick();
+  const control = refreshControl('equipment-live', 'Live stockpile', tick);
+  tick(true);
   return {
     el: card(`Live stockpile of ${tag} (game memory)`, [
       notice('warn', ['Setting an amount writes game memory directly - ', scopeBadge('local'), ' only. Single player: in '
         + 'multiplayer it would exist on your client only, so the app refuses it there. Only variants that already have a '
         + 'stockpile entry can be set (add a new one once with "Add equipment" below).']),
-      host], { extra: badge }),
-    stop: () => { stopped = true; clearTimeout(timer); },
+      host], { extra: h('span', { class: 'hoi-head-right' }, badge, control.el) }),
+    stop: () => { stopped = true; control.stop(); },
   };
 }
 
@@ -232,17 +290,38 @@ export default {
     const [res, picker] = await Promise.all([
       ctx.api.get(`/api/equipment/${encodeURIComponent(tag)}`), countryPicker(ctx)]);
     const fromSave = res.source === 'save';
+    const groups = res.data.groups ?? [];
+    const icons = res.data.icons ?? {};
     const adder = fromSave ? addCard(ctx, tag, res.data.items, res.data.designs ?? []) : null;
-    const liveStock = fromSave ? liveStockpileCard(ctx, tag) : null;
+    // summary: kinds, shortages in divisions (save), stockpile (live once read, else the save's)
+    const short = groups.filter((g) => g.shortfall > 0);
+    const stat = (label, value, sub, cls = '') => {
+      const v = h('span', { class: `stat-value ${cls}`.trim() }, value);
+      const s = h('span', { class: 'muted eq-stat-sub' }, sub);
+      return { el: h('div', { class: 'stat-tile' }, h('span', { class: 'stat-label' }, label), v, s), v, s };
+    };
+    const stockTile = stat('Stockpile', fmtInt(groups.reduce((n, g) => n + (g.stockpile ?? 0), 0)), 'units · newest save');
+    const summary = fromSave ? h('div', { class: 'tile-grid eq-summary' },
+      stat('Equipment kinds', String(groups.length), `${groups.filter((g) => g.need).length} used by divisions`).el,
+      stat('Short in divisions', String(short.length), short.length
+        ? `${fmtInt(short.reduce((n, g) => n + g.shortfall, 0))} units missing` : 'nothing missing',
+      short.length ? 'bad-text' : 'good-text').el,
+      stockTile.el,
+      stat('Most needed', short[0]?.name ?? '—', short[0] ? `−${fmtInt(short[0].shortfall)}` : 'all covered').el) : null;
+    const liveStock = fromSave ? liveStockpileCard(ctx, tag, { groups, icons, onRead: (entries) => {
+      stockTile.v.textContent = fmtInt(entries.reduce((n, e) => n + e.amount, 0));
+      stockTile.s.textContent = `units · game memory ${new Date().toLocaleTimeString()}`;
+    } }) : null;
 
     root.append(...[
-      viewHeader('Equipment Manager', 'Stockpiles and variants of the selected country.',
+      viewHeader('Equipment Manager', 'What the divisions need and miss, the stockpile live from game memory, adding equipment.',
         picker, sourceBadge(res.source, res.note)),
       fromSave ? saveLine(res.data) : demoBanner(res.note),
       fromSave ? null : notice('info', 'Adding or removing equipment stays disabled until a safe method has been '
         + 'implemented and tested.'),
-      card(fromSave ? `Equipment of ${tag}` : 'Stockpile', fromSave ? groupTable(res.data.groups ?? [], tag, ctx) : demoTable(res, tag)),
+      summary,
       liveStock?.el,
+      card(fromSave ? `Needs of the divisions of ${tag}` : 'Stockpile', fromSave ? groupTable(groups, tag, ctx, icons) : demoTable(res, tag)),
       adder?.el,
     ].filter(Boolean));
     return () => { adder?.stop(); liveStock?.stop(); };
