@@ -385,7 +385,9 @@ export default {
         row(tt('Windows notifications', 'Powiadomienia Windows'), tt('Shown even while you play.', 'Widoczne także podczas gry.'),
           check(o.notifyFocus, (v) => set({ notifyFocus: v }), tt('National focus (next focus to pick, auto-start)', 'Narodowy cel (następny do wybrania, auto-start)')),
           check(o.notifyRecording, (v) => set({ notifyRecording: v }), tt('Campaign recording started or switched', 'Start lub zmiana nagrywanej kampanii')),
-          check(o.notifyGame, (v) => set({ notifyGame: v }), tt('Game started / closed', 'Gra uruchomiona / zamknięta'))),
+          check(o.notifyGame, (v) => set({ notifyGame: v }), tt('Game started / closed', 'Gra uruchomiona / zamknięta')),
+          check(o.notifyTrade, (v) => set({ notifyTrade: v }), tt('Trade advice each game month (deals to make or cancel)',
+            'Rada handlu co miesiąc gry (umowy do zawarcia lub anulowania)'))),
         row('', null, h('button', { class: 'btn btn-small btn-ghost', onclick: () => {
           try { new Notification('The OVERSEER', { body: tt('The Overseer is watching.', 'Nadzorca patrzy.') }); } catch (err) { toast(err.message, 'error'); }
         } }, tt('Send a test notification', 'Wyślij próbne powiadomienie'))),

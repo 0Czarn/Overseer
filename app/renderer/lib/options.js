@@ -10,7 +10,7 @@ export const DEFAULTS = {
   image: null,            // id of a background image (backend /api/backgrounds) or null
   imageOpacity: 35, imageFit: 'cover', imageBlur: 0,
   startTab: '',           // '' = the dashboard
-  notifyFocus: true, notifyRecording: true, notifyGame: false,   // Windows notifications
+  notifyFocus: true, notifyRecording: true, notifyGame: false, notifyTrade: true,   // Windows notifications
   refresh: 'normal',      // live reading pace: 'fast' | 'normal' | 'light'
   lang: 'en', numbers: 'en',   // interface language, number format ('en' 1,234.5 | 'pl' 1 234,5 | 'system')
   textSize: 100,          // % zoom of the whole window
@@ -51,6 +51,7 @@ export function normalizeOptions(raw) {
     imageBlur: clamp(o.imageBlur, 0, 20, DEFAULTS.imageBlur),
     startTab: typeof o.startTab === 'string' ? o.startTab : '',
     notifyFocus: Boolean(o.notifyFocus), notifyRecording: Boolean(o.notifyRecording), notifyGame: Boolean(o.notifyGame),
+    notifyTrade: o.notifyTrade !== false,
     refresh: o.refresh in REFRESH ? o.refresh : DEFAULTS.refresh,
     lang: o.lang in LANGS ? o.lang : DEFAULTS.lang,
     numbers: o.numbers in NUMBERS ? o.numbers : DEFAULTS.numbers,

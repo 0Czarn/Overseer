@@ -169,6 +169,7 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("GET", "/api/live/players", lambda q, b: {"data": live().session_players()}),
         r("GET", "/api/live/overlay", lambda q, b: {"data": live().overlay()}),
         r("GET", "/api/live/focus", lambda q, b: svc.live_focus(_str(q, "tag").upper() or None)),
+        r("GET", "/api/live/date", lambda q, b: svc.live_date()),
         r("GET", "/api/live/values", lambda q, b: {"data": live().values(_str(q, "tag").upper() or None)}),
         r("POST", "/api/live/calibration", lambda q, b: calibration(b)),
         r("POST", "/api/live/write", lambda q, b: live_write(b)),

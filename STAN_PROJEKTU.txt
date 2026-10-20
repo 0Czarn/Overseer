@@ -282,6 +282,14 @@ ZROBIONE
                 tylko na czas przerzutu - po dotarciu tablica pusta; trwały ślad ochotników nieznaleziony
                 (potrzebny kontrolowany test: wysłanie/wycofanie ochotników przy zatrzymanej grze).
             [ ] konwoje na trasy morskie.
+            [x] RADA HANDLU CO MIESIĄC (2026-10-20, prośba użytkownika "automatyczny handel"): mod bez zmiany checksumu
+                niemożliwy (checksum_manifest.txt: common/, events/, history/, map/ - cała logika moda jest tam);
+                wysyłanie komend gry z aplikacji - zarzucone (wstrzykiwanie kodu do procesu gry; nic nie uruchomiono).
+                Wybór użytkownika: powiadomienie. lib/trade-watch.js co 15 s czyta /api/live/date (gracz, data gry);
+                przy nowym miesiącu (pierwszy odczyt = punkt odniesienia, cofnięcie save'a nie liczy się) rada doradcy
+                z jego ustawieniami -> toast + powiadomienie Windows (Options > Notifications: "Trade advice each game
+                month", domyślnie wł.), np. "SOV - February 1936: buy 8 Rubber from Britain (1 factory)". Umowy zawiera
+                gracz. POPRAWKA: nazwy surowców "$rubber$" (odwołanie w tłumaczeniu) - rozwijane.
 [x] ZAKŁADKA CONSTRUCTION (2026-10-13, nowa, na życzenie użytkownika; wzór: construction.png): wybór państwa +
             kafelek "Construction queue" [Live | On refresh] - kolejka budowy NA ŻYWO w kolejności gry: stan, ikona
             budynku z gry (GFX_buildings_strip, icon_frame) z liczbą poziomów, przydzielone fabryki x/15, postęp

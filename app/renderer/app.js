@@ -4,6 +4,7 @@ import { clear, errorBox, h, toast } from './lib/dom.js';
 import { startFocusWatch } from './lib/focus-watch.js';
 import { sortMessage, startConstructionSort } from './lib/construction-sort.js';
 import { autostartMessage, startFocusAutostart } from './lib/focus-autostart.js';
+import { startTradeWatch } from './lib/trade-watch.js';
 import dashboard from './views/dashboard.js';
 import countries from './views/countries.js';
 import countryEditor from './views/country-editor.js';
@@ -218,7 +219,7 @@ function renderStatus(status, error) {
 
 /** A Windows notification of the kind `kind` (Options > Notifications: focus / recording / game), if turned on. */
 function notify(kind, title, body) {
-  const on = { focus: 'notifyFocus', recording: 'notifyRecording', game: 'notifyGame' }[kind];
+  const on = { focus: 'notifyFocus', recording: 'notifyRecording', game: 'notifyGame', trade: 'notifyTrade' }[kind];
   if (!loadOptions()[on]) return;
   try { new Notification(`The OVERSEER - ${title}`, { body }); } catch { /* notifications unavailable */ }
 }
@@ -346,6 +347,12 @@ async function init() {
     notify('focus', 'national focus', message);
   }), 5000);
   if (!smoke) watchRecording();
+  // Monthly trade advice (Options > Notifications: Trade): what to buy / cancel, the player makes the deals
+  if (!smoke) startTradeWatch(api, (message) => {
+    toast(message, 'info');
+    api.log('info', `Trade advice: ${message}`);
+    notify('trade', 'trade', message);
+  }, () => loadOptions().notifyTrade);
   ctx.playersRail = startPlayersRail(api, document.getElementById('players-rail'));
   if (!smoke) setTimeout(autoCleanup, 10000);
   // Optional construction queue auto-sort (switch on the Construction tab): a refusal (multiplayer, player not

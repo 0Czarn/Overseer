@@ -3,6 +3,7 @@
 import { h, notice } from '../lib/dom.js';
 import { livePanel } from '../lib/refresh.js';
 import { slicePath } from './overview.js';
+import { MODES, TRADE_KEY, tradeSettings } from '../lib/trade-watch.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
 const COLORS = { home: '#6fbf4f', market: '#d7b25a', imported: '#5aa9e6' };
@@ -88,18 +89,6 @@ function totalsPie(rows, key, title, parts) {
     h('div', { class: 'pie-legend' }, sums.map(([label, color, v]) => h('div', { class: 'pie-row' },
       h('i', { class: 'swatch', style: { background: color } }),
       h('span', null, `${label} ${total ? Math.round((v / total) * 100) : 0}%`)))));
-}
-
-const TRADE_KEY = 'hoi4dbg.tradeAdvisor';
-const MODES = { surplus: 'Small surplus (+2)', exact: 'Exactly (0)', tolerate: 'Tolerate shortage (-2)' };
-
-function tradeSettings() {
-  try {
-    const v = JSON.parse(localStorage.getItem(TRADE_KEY)) ?? {};
-    return { mode: MODES[v.mode] ? v.mode : 'surplus', limit: Math.min(100, Math.max(10, Number(v.limit) || 25)) };
-  } catch {
-    return { mode: 'surplus', limit: 25 };
-  }
 }
 
 function saveTradeSettings(v) {

@@ -730,6 +730,13 @@ class DebuggerService:
             threading.Thread(target=build, daemon=True).start()
         return None
 
+    def live_date(self) -> dict:
+        """The player's country and the game date from game memory (the monthly trade advice watches the month)."""
+        if self.live is None:
+            raise NotFound("Live game access is disabled")
+        live = self.live.focus(None)
+        return {"data": {"tag": live["tag"], "date": live.get("date")}}
+
     def live_focus(self, tag: str | None = None) -> dict:
         """Live current focus of `tag` (default: player) + the next focus of the planned queue.
 
@@ -893,6 +900,7 @@ class DebuggerService:
                 ordered = sorted(groups.values(), key=lambda g: (-g["shortfall"], g["name"]))
                 return envelope(SAVE, {
                     "tag": tag, "items": items, "groups": ordered,
+                    "icons": self._equipment_icons(install, tag, [g["archetype"] for g in ordered]),
                     "designs": equipment_changes.designs(data, tag),
                     "editable": False, "file": analysis["file"], "in_game_date": header.get("date"),
                     "player_tag": header.get("player_tag"),
@@ -903,6 +911,26 @@ class DebuggerService:
             note = None
         return envelope(DEMO, {"tag": tag, "items": demo.equipment(tag), "editable": False},
                         f"{note} {DEMO_NOTE}" if note else DEMO_NOTE)
+
+    def _equipment_icons(self, install: Path, tag: str, archetypes: list[str]) -> dict[str, str]:
+        """{archetype: data URI} - the game's equipment icon: the country's own (GFX_<TAG>_<archetype>_medium), else the
+        generic one (GFX_archetype_<archetype>_medium); archetypes without an icon are left out."""
+        roots = self._game_roots(install)
+        sprites = gfx.sprites(roots)
+        out = {}
+        for a in archetypes[:200]:
+            # designer archetypes (tank chassis, plane airframes) show the icon of the equipment they replace
+            base = re.sub(r"^cv_", "", a)
+            alias = {"small_plane_airframe": "fighter_equipment", "small_plane_cas_airframe": "CAS_equipment",
+                     "small_plane_naval_bomber_airframe": "CAS_equipment", "medium_plane_airframe": "heavy_fighter_equipment",
+                     "medium_plane_fighter_airframe": "heavy_fighter_equipment", "large_plane_airframe": "strat_bomber_equipment",
+                     "train_equipment": "train"}.get(base) or re.sub(r"_chassis$", "_equipment", base)
+            name = next((n for n in (f"GFX_{tag}_{a}_medium", f"GFX_archetype_{a}_medium", f"GFX_archetype_{alias}_medium",
+                                     f"GFX_{a}_medium") if n in sprites), None)
+            uri = gfx.sprite_uri(roots, name) if name else None
+            if uri:
+                out[a] = uri
+        return out
 
     # -- save files ---------------------------------------------------------------------
     def saves_list(self) -> dict:
@@ -1258,8 +1286,10 @@ class DebuggerService:
         tags = {d["seller"] for row in advice["resources"] for d in row["buy"] + row["cancel"] + row["candidates"]}
         names = gamefiles.country_names(install)
         loc = self._loc_names(install, {f"PRODUCTION_MATERIALS_{r.upper()}" for r in trade_mod.RESOURCES})
+        loc.update(self._loc_names(install, {r for v in loc.values() for r in LOC_REF.findall(v)} - set(loc)))
         for row in advice["resources"]:
-            row["name"] = loc.get(f"PRODUCTION_MATERIALS_{row['resource'].upper()}", row["resource"].capitalize())
+            name = loc.get(f"PRODUCTION_MATERIALS_{row['resource'].upper()}")
+            row["name"] = clean_loc(name, loc) if name else row["resource"].capitalize()   # "$rubber$" -> Rubber
             row["frame"] = order.get(row["resource"], {}).get("frame")
         sprites = gfx.sprites(roots)
         strip = sprites.get("GFX_resources_strip")
