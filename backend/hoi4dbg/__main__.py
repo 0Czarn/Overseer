@@ -30,6 +30,31 @@ def build_integration(disabled: bool):
     return Hoi4Integration()
 
 
+def wait_for_eof(fd: int) -> None:
+    """Returns when the pipe `fd` is closed by the other side. On Windows without a blocking read: while one thread
+    waits in a synchronous ReadFile on the pipe, loading a DLL in another thread waits for it (2026-10-21: the first
+    `import numpy` for the campaign map hung the backend) - so the pipe is polled with PeekNamedPipe instead."""
+    if os.name != "nt":
+        while os.read(fd, 4096):
+            pass
+        return
+    import ctypes
+    import msvcrt
+    import time
+    from ctypes import wintypes
+    handle = msvcrt.get_osfhandle(fd)
+    peek = ctypes.windll.kernel32.PeekNamedPipe
+    peek.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p,
+                     ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
+    available = wintypes.DWORD()
+    while peek(handle, None, 0, None, ctypes.byref(available), None):
+        if available.value:   # nothing is sent over stdin; read it so the pipe never fills
+            if not os.read(fd, available.value):
+                return
+        else:
+            time.sleep(0.5)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="hoi4dbg", description="The OVERSEER backend")
     parser.add_argument("--port", type=int, default=0, help="TCP port on 127.0.0.1 (0 = random free port)")
@@ -54,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.watch_stdin:
         def watch() -> None:
-            sys.stdin.read()  # returns on EOF, i.e. when the parent process closes the pipe
+            wait_for_eof(sys.stdin.fileno())   # the parent process closed the pipe
             logger.info("Parent closed stdin - shutting down")
             server.shutdown()
         threading.Thread(target=watch, daemon=True).start()

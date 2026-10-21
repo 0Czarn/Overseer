@@ -231,9 +231,8 @@ def loc_keys(state: dict, defs: dict) -> set[str]:
     return keys
 
 
-def breakdown(state: dict, defs: dict, names: dict[str, str] | None = None) -> dict:
-    """{field: {"base", "parts": [{kind, id, name, value}], "modifiers", "total", "clamped"}} for
-    stability and war support. `state` = saves.politics.summary(); `names` = localisation."""
+def country_sources(state: dict, defs: dict, names: dict[str, str] | None = None) -> list[tuple[str, str, str, dict]]:
+    """[(kind, id, label, {modifier: value})] of the country's ideas, leader traits, advisors and dynamic modifiers."""
     names = names or {}
     chars = state.get("characters") or {}
     sources: list[tuple[str, str, str, dict]] = []   # (kind, id, label, {key: value})
@@ -273,6 +272,14 @@ def breakdown(state: dict, defs: dict, names: dict[str, str] | None = None) -> d
             except ValueError:
                 pass
         sources.append(("dynamic", dm["id"], names.get(dm["id"], dm["id"]), mods))
+    return sources
+
+
+def breakdown(state: dict, defs: dict, names: dict[str, str] | None = None) -> dict:
+    """{field: {"base", "parts": [{kind, id, name, value}], "modifiers", "total", "clamped"}} for
+    stability and war support. `state` = saves.politics.summary(); `names` = localisation."""
+    names = names or {}
+    sources = country_sources(state, defs, names)
 
     tension = state.get("tension")
     impact = defs["defines"].get("WAR_SUPPORT_TENSION_IMPACT", 0.4)

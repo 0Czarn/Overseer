@@ -64,6 +64,41 @@ class MioTests(unittest.TestCase):
             "organization_modifier": {"military_industrial_organization_funds_gain": 0.2}})
         self.assertIsNone(mio.summary({"id": "removed_organization"}, self.defs))
 
+    def test_tree_positions_parents_exclusive_and_override_keeps_bonuses(self):
+        root = Path(self._tmp.name) / "common" / "military_industrial_organization" / "organizations"
+        (root / "y.txt").write_text("""@hoesch_x = 9
+generic_infantry_tank_organization = {
+    tree_header_text = { text = mio_header_armament x = 3 }
+    trait = { token = spec position = { x=6 y=0 } equipment_bonus = { armor_value = 0.03 } }
+    trait = { token = cs position = { x=-1 y=1 } relative_position_id = spec any_parent = { spec } mutually_exclusive = { at } }
+    trait = { token = at position = { x=1 y=1 } relative_position_id = spec any_parent = { spec } mutually_exclusive = { cs } }
+    trait = { token = chassis position = { x=0 y=1 } relative_position_id = at all_parents = { cs at gone } production_bonus = { production_cost_factor = -0.02 } }
+}
+GER_henschel_organization = {
+    include = generic_infantry_tank_organization
+    override_trait = { token = chassis position = { x=0 y=3 } delete_included_values = { relative_position_id } }
+    add_trait = { token = hoesch special_trait_background = yes position = { x=@hoesch_x y=0 } production_bonus = { production_capacity_factor = 0.05 } }
+}
+""", encoding="utf-8")
+        mio.definitions.cache_clear()
+        defs = mio.definitions((self._tmp.name,))
+        t = mio.tree(defs, "GER_henschel_organization", ["spec", "at"])
+        by = {x["token"]: x for x in t["traits"]}
+        self.assertEqual(t["headers"], [{"text": "mio_header_armament", "x": 3.0}])
+        self.assertEqual({k: (v["x"], v["y"]) for k, v in by.items()},
+                         {"spec": (6, 0), "cs": (5, 1), "at": (7, 1), "chassis": (0, 3), "hoesch": (9, 0)})
+        self.assertEqual((by["cs"]["parents"], by["cs"]["exclusive"]), (["spec"], ["at"]))
+        self.assertEqual((by["chassis"]["parents"], by["chassis"]["parents_needed"]), (["cs", "at"], 3))   # unknown dropped
+        self.assertEqual(by["chassis"]["production_bonus"], {"production_cost_factor": -0.02})          # kept by the override
+        self.assertEqual((by["hoesch"]["special"], by["hoesch"]["kinds"]), (True, ["production_bonus"]))
+        self.assertEqual([k for k, v in by.items() if v["unlocked"]], ["spec", "at"])
+        self.assertEqual((t["width"], t["height"]), (10, 4))
+
+    def test_research_bonus_from_the_mio_itself(self):
+        s = mio.summary({"id": "SOV_kirov_organization", "traits": ["sov_extra"], "research_bonus": 0.1}, self.defs)
+        self.assertEqual(s["research_bonus"], 0.15)
+        self.assertEqual(mio.summary({"id": "SOV_kirov_organization"}, self.defs)["research_bonus"], 0.05)
+
     def test_save_mios_binary_and_text_shapes(self):
         binary_like = [("production", [("industrial_organisations", [("SOV_kirov_organization", [
             ("size", "2"), ("funds", "6115.7"), ("icon", "GFX_idea_SOV_kirov"),

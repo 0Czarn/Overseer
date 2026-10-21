@@ -100,6 +100,39 @@ function runSmoke(win, outDir, quit) {
             info.mios = await wc.executeJavaScript(`(() => { const t = document.querySelector('.mio-slot'); if (!t) return -1;
               t.click(); const n = document.querySelectorAll('.mio-list:not([hidden]) .mio').length; t.click(); return n; })()`);
             if (info.mios === 0) result.failures.push(`${size.name}/country-editor: MIO list did not open`);
+            // a tooltip of a tile at the bottom of the window opens above it, inside the window (apl_display_bug.jpg)
+            info.tipInside = await wc.executeJavaScript(`(async () => { const tiles = [...document.querySelectorAll('.gov-panel .spirit')];
+              const t = tiles[tiles.length - 1]; if (!t) return null;
+              t.scrollIntoView({ block: 'end' }); window.scrollBy(0, 0); t.focus();
+              await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+              const r = t.querySelector('.spirit-tip').getBoundingClientRect();
+              const ok = r.top >= 0 && r.bottom <= window.innerHeight + 1 && r.left >= 0 && r.right <= window.innerWidth + 1;
+              t.blur(); return ok; })()`);
+            if (info.tipInside === false) result.failures.push(`${size.name}/country-editor: a tooltip leaves the window`);
+            if (info.mios > 0) {   // a MIO: its trait tree as the game's MIO window
+              await wc.executeJavaScript(`(() => { document.querySelector('.mio-slot').click(); document.querySelector('.mio-list:not([hidden]) .mio-open').click(); })()`);
+              await waitFor(wc, `document.querySelectorAll('.mio-trait').length > 0`, 15000);
+              info.mioTree = await wc.executeJavaScript(`(() => { const w = document.querySelector('.mio-window'); w?.scrollIntoView();
+                return { traits: document.querySelectorAll('.mio-trait').length, lines: document.querySelectorAll('.mio-tree-lines polyline').length,
+                  heads: document.querySelectorAll('.mio-tree-head').length, frames: document.querySelectorAll('.mio-trait-frame[src]').length,
+                  overlap: (() => { const r = [...document.querySelectorAll('.mio-trait')].map((t) => t.getBoundingClientRect());
+                    return r.some((a, i) => r.some((b, j) => j > i && Math.abs(a.left - b.left) < 20 && Math.abs(a.top - b.top) < 20)); })() }; })()`);
+              if (!info.mioTree.traits || !info.mioTree.frames) result.failures.push(`${size.name}/country-editor: the MIO tree shows no traits`);
+              if (info.mioTree.overlap) result.failures.push(`${size.name}/country-editor: MIO traits on top of each other`);
+              info.mioZoom = await wc.executeJavaScript(`(() => { const v = document.querySelector('.mio-tree-scroll'); const t = v.querySelector('.mio-tree');
+                const r = v.getBoundingClientRect(); const before = t.style.transform;
+                v.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, clientX: r.left + 50, clientY: r.top + 50, bubbles: true, cancelable: true }));
+                const after = t.style.transform;
+                v.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, clientX: r.left + 50, clientY: r.top + 50, bubbles: true, cancelable: true }));
+                return { before, after, icons: document.querySelectorAll('.mio-side .tx-icon').length }; })()`);
+              if (info.mioZoom.before === info.mioZoom.after) result.failures.push(`${size.name}/country-editor: the MIO tree does not zoom`);
+              if (!info.mioZoom.icons) result.failures.push(`${size.name}/country-editor: no modifier icons in the MIO window`);
+              await sleep(500);
+              wc.invalidate();
+              await sleep(1500);
+              fs.writeFileSync(path.join(outDir, `${size.name}-mio-tree.png`), (await wc.capturePage()).toPNG());
+              await wc.executeJavaScript(`document.querySelector('.mio-slot').click()`);   // closed again
+            }
             await waitFor(wc, `!!document.querySelector('.ov-body .pie, .ov-body .notice')`, 20000);
             info.pieSlices = await wc.executeJavaScript(`document.querySelectorAll('.ov-body .pie-slice').length`);
             if (!info.pieSlices) result.failures.push(`${size.name}/country-editor: no party popularity pie`);
@@ -192,7 +225,7 @@ function runSmoke(win, outDir, quit) {
             if (info.summary.charts) {   // factory counts: one chart (a level, no cumulative)
               await wc.executeJavaScript(`(() => { const b = document.querySelectorAll('.gs-seg')[1].querySelectorAll('.gs-seg-btn')[1]; b.focus(); b.click(); })()`);
               await waitFor(wc, `document.querySelector('.lc-title')?.textContent === 'Military factories'`, 10000);
-              info.summary.factoryCharts = await wc.executeJavaScript(`document.querySelectorAll('.lc-svg').length`);
+              info.summary.factoryCharts = await wc.executeJavaScript(`document.querySelectorAll('.gs-charts .lc-svg').length`);
               // the clicked button is the highlighted one, even while it keeps the focus
               info.summary.highlight = await wc.executeJavaScript(`[...document.querySelectorAll('.gs-field')]
                 .filter((f) => f.querySelector('.gs-seg-on')).map((f) => f.firstChild.textContent + ':' + f.querySelector('.gs-seg-on').textContent)`);
@@ -215,6 +248,97 @@ function runSmoke(win, outDir, quit) {
               await wc.executeJavaScript(`[...document.querySelectorAll('.gs-group summary')].find((s) => s.textContent.includes('Smoke bloc'))
                 ?.querySelector('.gs-del')?.click()`);
               await waitFor(wc, `![...document.querySelectorAll('.gs-group-name')].some((e) => e.textContent.startsWith('Smoke bloc'))`, 10000);
+            }
+          }
+          if (tab === 'summary') {   // campaign analysis (2026-10-21): notes, sessions and map cards on every campaign
+            info.analysis = await wc.executeJavaScript(`({ notes: !!document.querySelector('.gs-notes-card'),
+              sessions: !!document.querySelector('.gs-sessions-card'), map: !!document.querySelector('.gs-map-card'),
+              groups: [...document.querySelectorAll('.gs-seg-label')].map((e) => e.textContent) })`);
+            if (!info.analysis.notes || !info.analysis.sessions || !info.analysis.map) result.failures.push(`${size.name}/summary: analysis cards missing`);
+            if (!['Politics', 'Army', 'Territory', 'Research', 'Manpower'].every((g) => info.analysis.groups.includes(g))) {
+              result.failures.push(`${size.name}/summary: new metric groups missing`);
+            }
+            // HOI4DBG_SMOKE_CAMPAIGN: a recorded test campaign with map rows - the map is drawn, played back and hovered,
+            // a click on a chart picks the note day, the ranking shows; the user's choice is restored after
+            const smokeGame = process.env.HOI4DBG_SMOKE_CAMPAIGN;
+            if (smokeGame) {
+              const saved = await wc.executeJavaScript(`localStorage.getItem('hoi4dbg.summary')`);
+              await wc.executeJavaScript(`(() => { const p = JSON.parse(localStorage.getItem('hoi4dbg.summary') || '{}');
+                Object.assign(p, { game: ${JSON.stringify(smokeGame)}, compare: null, players: true, factions: false, metric: 'sctl', hiddenPlayers: [] });
+                localStorage.setItem('hoi4dbg.summary', JSON.stringify(p)); location.hash = '#/dashboard'; })()`);
+              await waitFor(wc, `document.body.dataset.rendered === 'dashboard'`, 20000);
+              await wc.executeJavaScript(`location.hash = '#/summary'`);
+              const drawn = await waitFor(wc, `!!document.querySelector('.gs-map-canvas') && document.querySelector('.gs-map-date')?.textContent.length > 4`, 30000);
+              await waitFor(wc, `document.querySelectorAll('.gs-rank-cat').length > 0`, 10000);
+              if (!drawn) {
+                info.campaignText = await wc.executeJavaScript(`(async () => { const t = Date.now();
+                  const r = await window.hoi4dbg.request('GET', '/api/summary/games/${smokeGame}/map?raster=1');
+                  return { ms: Date.now() - t, ok: r.ok, status: r.status, error: r.body?.error, len: JSON.stringify(r.body).length }; })()`);
+                result.failures.push(`${size.name}/summary: direct map request ${JSON.stringify(info.campaignText)}`);
+                info.campaignText = await wc.executeJavaScript(`({ map: document.querySelector('.gs-map-card')?.innerText,
+                  charts: document.querySelector('.gs-charts')?.innerText?.slice(0, 300), game: JSON.parse(localStorage.getItem('hoi4dbg.summary')).game })`);
+                result.failures.push(`${size.name}/summary: the campaign map is not drawn: ${JSON.stringify(info.campaignText)}`);
+              }
+              if (drawn) info.campaign = await wc.executeJavaScript(`(async () => {
+                const c = document.querySelector('.gs-map-canvas');
+                const g = c.getContext('2d');
+                const px = (x, y) => [...g.getImageData(x, y, 1, 1).data.slice(0, 3)];
+                const colours = new Set(); for (let i = 0; i < 400; i++) colours.add(px((i * 97) % c.width, (i * 53) % c.height).join());
+                const lastDate = document.querySelector('.gs-map-date').textContent;
+                const s = document.querySelector('.gs-map-slider'); s.value = '0'; s.dispatchEvent(new Event('input'));
+                const firstDate = document.querySelector('.gs-map-date').textContent;
+                s.value = s.max; s.dispatchEvent(new Event('input'));
+                const r = c.getBoundingClientRect();
+                c.dispatchEvent(new MouseEvent('mousemove', { clientX: r.left + r.width * 0.52, clientY: r.top + r.height * 0.22, bubbles: true }));
+                const tip = document.querySelector('.gs-map-tip');
+                const hit = document.querySelector('.lc-hit'); const hr = hit.getBoundingClientRect();
+                hit.dispatchEvent(new MouseEvent('click', { clientX: hr.left + hr.width / 2, clientY: hr.top + 10, bubbles: true }));
+                await new Promise((res) => setTimeout(res, 300));
+                return { width: c.width, colours: colours.size, firstDate, lastDate, tip: tip.hidden ? null : tip.textContent,
+                  noteDay: document.querySelector('.gs-note-day')?.textContent, markers: document.querySelectorAll('.lc-note').length,
+                  ranking: document.querySelectorAll('.gs-rank-cat').length, sessions: document.querySelectorAll('.gs-sess-table tbody tr').length,
+                  legend: document.querySelectorAll('.gs-map-legend-item').length };
+              })()`);
+              if (drawn && info.campaign.colours < 5) result.failures.push(`${size.name}/summary: the campaign map is not drawn`);
+              if (drawn && info.campaign.firstDate === info.campaign.lastDate) result.failures.push(`${size.name}/summary: the map slider does not change the day`);
+              if (drawn && !info.campaign.markers) result.failures.push(`${size.name}/summary: notes are not on the charts`);
+              if (drawn && !info.campaign.ranking) result.failures.push(`${size.name}/summary: no players ranking`);
+              await wc.executeJavaScript(`document.querySelector('.gs-map-card').scrollIntoView({ block: 'start' })`);
+              wc.invalidate(); await sleep(1500); wc.invalidate(); await sleep(800);
+              fs.writeFileSync(path.join(outDir, `${size.name}-campaign-map.png`), (await wc.capturePage()).toPNG());
+              await wc.executeJavaScript(`document.querySelector('.gs-ranking-card').scrollIntoView()`);
+              await sleep(400);
+              wc.invalidate(); await sleep(500);
+              fs.writeFileSync(path.join(outDir, `${size.name}-ranking.png`), (await wc.capturePage()).toPNG());
+              await wc.executeJavaScript(`document.querySelector('.gs-main').scrollIntoView()`);
+              await sleep(400);
+              wc.invalidate(); await sleep(500);
+              fs.writeFileSync(path.join(outDir, `${size.name}-summary-notes.png`), (await wc.capturePage()).toPNG());
+              await wc.executeJavaScript(`document.querySelector('.gs-sessions-card').scrollIntoView()`);
+              await sleep(400);
+              wc.invalidate(); await sleep(500);
+              fs.writeFileSync(path.join(outDir, `${size.name}-sessions.png`), (await wc.capturePage()).toPNG());
+              // the report: the download is caught instead of the save dialog
+              info.report = await wc.executeJavaScript(`(async () => {
+                const click = HTMLAnchorElement.prototype.click;
+                const make = URL.createObjectURL;
+                let got = null;
+                let blob = null;
+                URL.createObjectURL = (b) => { blob = b; return make.call(URL, b); };
+                HTMLAnchorElement.prototype.click = function () { got = { name: this.download }; };
+                try {
+                  [...document.querySelectorAll('.gs-report-btn')][0].click();
+                  for (let i = 0; i < 100 && !got; i++) await new Promise((r) => setTimeout(r, 200));
+                } finally { HTMLAnchorElement.prototype.click = click; URL.createObjectURL = make; }
+                if (!got || !blob) return null;
+                const html = await blob.text();
+                return { name: got.name, size: html.length, charts: (html.match(/class="lc-svg"/g) || []).length,
+                  map: html.includes('data:image/png'), ranking: html.includes('Players ranking'), notes: html.includes('Soviet invasion') };
+              })()`);
+              if (!info.report || info.report.charts < 5 || !info.report.map || !info.report.ranking || !info.report.notes) {
+                result.failures.push(`${size.name}/summary: report ${JSON.stringify(info.report)}`);
+              }
+              await wc.executeJavaScript(`localStorage.setItem('hoi4dbg.summary', ${JSON.stringify(saved ?? '{}')})`);
             }
           }
           if (tab === 'doctrines') {
@@ -244,8 +368,54 @@ function runSmoke(win, outDir, quit) {
               await sleep(1500);
               fs.writeFileSync(path.join(outDir, `${size.name}-army-designer.png`), (await wc.capturePage()).toPNG());
             }
-            if (await waitFor(wc, `!!document.querySelector('.mil-design-head')`, 15000)) {   // a plane design unfolds into its modules
-              await wc.executeJavaScript(`(() => { localStorage.removeItem('hoi4dbg.planeView'); document.querySelector('.mil-design-head').click(); })()`);
+            // the tiles by their title (Tank designs comes before Air Force)
+            const panel = (title) => `[...document.querySelectorAll('.hoi-panel')].find((p) => p.querySelector('.hoi-head-title')?.textContent === '${title}')`;
+            if (await waitFor(wc, `!!${panel('Tank designs')}?.querySelector('.mil-design-head')`, 15000)) {   // a tank design: the tank designer
+              await wc.executeJavaScript(`(() => { localStorage.removeItem('hoi4dbg.tankView'); ${panel('Tank designs')}.querySelector('.mil-design-head').click(); })()`);
+              await waitFor(wc, `!!document.querySelector('.mil-tdg .mil-td-tank')`, 15000);
+              info.tankDesign = await wc.executeJavaScript(`(() => { const d = document.querySelector('.mil-tdg'); d.scrollIntoView();
+                return { slots: d.querySelectorAll('.mil-pd-slot').length, drawing: !!d.querySelector('.mil-td-tank'),
+                  modules: d.querySelectorAll('.mil-pd-img').length, mios: document.querySelectorAll('.mil-design-type').length,
+                  mio: d.querySelector('.mil-mio')?.textContent ?? null }; })()`);
+              if (info.tankDesign.slots !== 9) result.failures.push(`${size.name}/army: the tank designer should show 2 + 3 + 4 slots`);
+              if (!info.tankDesign.drawing) result.failures.push(`${size.name}/army: the tank designer shows no chassis drawing`);
+              await sleep(500);
+              wc.invalidate();
+              await sleep(1500);
+              fs.writeFileSync(path.join(outDir, `${size.name}-tank-designer.png`), (await wc.capturePage()).toPNG());
+              await wc.executeJavaScript(`${panel('Tank designs')}.querySelector('.mil-design-head').click()`);   // folded again
+            }
+            // the compare tile at the bottom: a table of stats; a second column can be added and removed again
+            if (await waitFor(wc, `!!document.querySelector('.cmp-panel .cmp-table tbody tr th.cmp-label')`, 20000)) {
+              info.compare = await wc.executeJavaScript(`(async () => {
+                const rows = () => document.querySelectorAll('.cmp-panel .cmp-table tbody tr').length;
+                const cols = () => document.querySelectorAll('.cmp-panel th.cmp-col').length;
+                const before = cols();
+                [...document.querySelectorAll('.cmp-panel .cmp-actions button')].find((b) => b.textContent.includes('Add column'))?.click();
+                for (let i = 0; i < 40 && cols() === before; i += 1) await new Promise((r) => setTimeout(r, 250));
+                const added = cols();
+                const sel = document.querySelector('.cmp-panel th.cmp-col:last-child select');   // another country in the new column
+                const other = [...(sel?.options ?? [])].find((o) => o.value !== sel.value && ['SOV', 'GER', 'FRA'].includes(o.value));
+                if (other) { sel.value = other.value; sel.dispatchEvent(new Event('change')); await new Promise((r) => setTimeout(r, 3000)); }
+                document.querySelector('.cmp-panel').scrollIntoView();
+                return { rows: rows(), before, added, other: other?.value ?? null }; })()`);
+              await wc.executeJavaScript(`document.querySelector('.cmp-panel .cmp-table').scrollIntoView({ block: 'start' })`);
+              await sleep(500);
+              wc.invalidate();
+              await sleep(1500);
+              fs.writeFileSync(path.join(outDir, `${size.name}-compare.png`), (await wc.capturePage()).toPNG());
+              info.compare.after = await wc.executeJavaScript(`(async () => {
+                const cols = () => document.querySelectorAll('.cmp-panel th.cmp-col').length;
+                const before = cols();
+                document.querySelector('.cmp-panel th.cmp-col:last-child button')?.click();
+                for (let i = 0; i < 40 && cols() === before; i += 1) await new Promise((r) => setTimeout(r, 250));
+                return cols(); })()`);
+              if (!(info.compare.rows > 5 && info.compare.added === info.compare.before + 1 && info.compare.after === info.compare.before)) {
+                result.failures.push(`${size.name}/compare: ${JSON.stringify(info.compare)}`);
+              }
+            } else result.failures.push(`${size.name}/compare: no stats table`);
+            if (await waitFor(wc, `!!${panel('Air Force')}?.querySelector('.mil-design-head')`, 15000)) {   // a plane design unfolds into its modules
+              await wc.executeJavaScript(`(() => { localStorage.removeItem('hoi4dbg.planeView'); ${panel('Air Force')}.querySelector('.mil-design-head').click(); })()`);
               await waitFor(wc, `!!document.querySelector('.mil-pdg')`, 10000);
               await waitFor(wc, `!!document.querySelector('.mil-pdg-plane')`, 15000);
               info.planeDesign = await wc.executeJavaScript(`(() => { document.querySelector('.mil-design-open').scrollIntoView();
@@ -264,6 +434,18 @@ function runSmoke(win, outDir, quit) {
               wc.invalidate();
               await sleep(1200);
             }
+          }
+          if (tab === 'equipment') {   // the needs of the divisions: Live / On refresh, read from game memory (or the save without a game)
+            await waitFor(wc, `/game memory|live not read/.test([...document.querySelectorAll('.card')].find((c) => /Needs of the divisions/.test(c.querySelector('h2')?.textContent ?? ''))?.querySelector('.hoi-status')?.textContent ?? '')`, 30000);
+            info.needs = await wc.executeJavaScript(`(() => { const c = [...document.querySelectorAll('.card')].find((x) => /Needs of the divisions/.test(x.querySelector('h2')?.textContent ?? ''));
+              return c ? { switch: !!c.querySelector('.hoi-mode'), status: c.querySelector('.hoi-status')?.textContent ?? null,
+                rows: c.querySelectorAll('tr.eq-group').length, produced: [...c.querySelectorAll('th')].some((t) => t.textContent === 'Produced / day') } : null; })()`);
+            if (!info.needs?.switch || !info.needs.rows) result.failures.push(`${size.name}/equipment: needs table ${JSON.stringify(info.needs)}`);
+            await wc.executeJavaScript(`[...document.querySelectorAll('.card')].find((c) => /Needs of the divisions/.test(c.querySelector('h2')?.textContent ?? ''))?.scrollIntoView()`);
+            await sleep(500);
+            wc.invalidate();
+            await sleep(1200);
+            fs.writeFileSync(path.join(outDir, `${size.name}-equipment-needs.png`), (await wc.capturePage()).toPNG());
           }
           if (tab === 'construction') {
             // queue rows, the empty-queue line, or the reason (game not running)
@@ -292,6 +474,34 @@ function runSmoke(win, outDir, quit) {
             await wc.executeJavaScript(`document.querySelector('.tech-tree-scroll')?.scrollIntoView({ block: 'start' })`);
             wc.invalidate();
             await sleep(1200);
+          }
+          // every tile with a title can be folded: the first one folds to its head and unfolds again (state restored)
+          info.tiles = await wc.executeJavaScript(`(async () => {
+            const tiles = [...document.querySelectorAll('#view .card, #view .hoi-panel')].filter((t) =>
+              [...t.children].some((c) => c.classList.contains('card-head') || c.classList.contains('hoi-head')));
+            const headOf = (t) => [...t.children].find((c) => c.classList.contains('card-head') || c.classList.contains('hoi-head'));
+            const toggles = tiles.filter((t) => headOf(t).querySelector('.tile-toggle')).length;
+            const t = tiles.find((x) => !x.classList.contains('tile-collapsed'));
+            let folded = null;
+            if (t) {
+              const btn = headOf(t).querySelector('.tile-toggle');
+              btn.click();
+              folded = [...t.children].filter((c) => !c.classList.contains('card-head') && !c.classList.contains('hoi-head'))
+                .every((c) => getComputedStyle(c).display === 'none');
+              btn.click();
+            }
+            // head layout: title at the left, the tile's controls next to the fold button at the right edge
+            const head = document.querySelector('#view .hoi-head:has(> .hoi-head-right .tile-toggle)');
+            let layout = null;
+            if (head) {
+              const r = (el) => el.getBoundingClientRect();
+              const hb = r(head), tb = r(head.querySelector('.tile-toggle'));
+              layout = tb.right > hb.right - 20;   // the fold button at the right edge (a narrow head may wrap to a second line)
+            }
+            return { tiles: tiles.length, toggles, folded, layout, all: !!document.querySelector('#view .view-header .tile-all') };
+          })()`);
+          if (info.tiles.toggles !== info.tiles.tiles || info.tiles.folded === false || info.tiles.layout === false) {
+            result.failures.push(`${size.name}/${tab}: tiles not collapsible ${JSON.stringify(info.tiles)}`);
           }
           const image = await wc.capturePage();
           const file = path.join(outDir, `${size.name}-${tab}.png`);

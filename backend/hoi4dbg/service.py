@@ -3,6 +3,7 @@ into the payloads served by the API. Contains no HTTP and no UI code."""
 
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import json
 from pathlib import Path
@@ -17,6 +18,7 @@ import time
 
 from . import __version__, construction as construction_mod, doctrines as doctrines_mod, geography, trade as trade_mod, deficit, demo, equipment_changes, gamefiles, gfx, modifiers
 from . import government as government_mod
+from . import campaign_map
 from . import mio as mio_mod
 from . import divisions as divisions_mod
 from . import ic_history as ic_history_mod
@@ -814,6 +816,35 @@ class DebuggerService:
         return envelope(LIVE, {"game_mode": mode, "players": players, "countries": countries,
                                "other_players_readable": False, "read_at": live["read_at"]}, note)
 
+    def live_equipment_needs(self, tag: str) -> dict:
+        """Needs of the divisions of `tag` LIVE (game memory): per archetype needed / in divisions / stockpile /
+        missing / shortfall like the save-based table (equipment()), the stockpile's variants and produced a day."""
+        if self.live is None:
+            raise NotFound("Live game access is disabled")
+        tag = tag.upper()
+        status = self.live.equipment_status(tag)
+        stock = self.live_stockpile(tag)["data"]["entries"]
+        install = self._install_path()
+        rows = status["equipment"]
+        names = self._equipment_names(install, set(rows)) if install else {}
+        variants: dict[str, list] = {}
+        for e in stock:
+            a = e.get("archetype") or e.get("type") or f"#{e['id']}"
+            variants.setdefault(a, []).append({"id": e["id"], "archetype": e.get("type") or a, "archetype_name": e.get("type_name") or a,
+                                               "variant": e.get("name") or None, "amount": e["amount"], "pool": "stockpile"})
+        groups = []
+        for a in set(rows) | set(variants):
+            need, held, stockpile, produced = rows.get(a, [0, 0, 0, 0])
+            missing = max(0.0, need - held)
+            groups.append({"archetype": a, "name": names.get(a) or a.replace("_", " ").capitalize(), "need": need, "held": held,
+                           "stockpile": stockpile, "produced": produced, "missing": missing,
+                           "shortfall": max(0.0, missing - stockpile), "variants": variants.get(a, [])})
+        groups = [g for g in groups if g["need"] or g["held"] or g["stockpile"] or g["variants"]]
+        groups.sort(key=lambda g: (-g["shortfall"], g["name"]))
+        return envelope(LIVE, {"tag": tag, "groups": groups, "read_at": status["read_at"],
+                               "icons": self._equipment_icons(install, tag, [g["archetype"] for g in groups]) if install else {}},
+                        f"Needs of the divisions of {tag} from game memory.")
+
     def live_stockpile(self, tag: str | None = None) -> dict:
         """Live stockpile (game memory) with archetype / equipment type from the newest save's variant table."""
         if self.live is None:
@@ -939,8 +970,9 @@ class DebuggerService:
                      "small_plane_naval_bomber_airframe": "CAS_equipment", "medium_plane_airframe": "heavy_fighter_equipment",
                      "medium_plane_fighter_airframe": "heavy_fighter_equipment", "large_plane_airframe": "strat_bomber_equipment",
                      "train_equipment": "train"}.get(base) or re.sub(r"_chassis$", "_equipment", base)
+            plain = re.sub(r"_(?:destroyer|aa|artillery|flame|amphibious)(?=_equipment$)", "", alias)   # tank variants
             name = next((n for n in (f"GFX_{tag}_{a}_medium", f"GFX_archetype_{a}_medium", f"GFX_archetype_{alias}_medium",
-                                     f"GFX_{a}_medium") if n in sprites), None)
+                                     f"GFX_{a}_medium", f"GFX_archetype_{plain}_medium") if n in sprites), None)
             uri = gfx.sprite_uri(roots, name) if name else None
             if uri:
                 out[a] = uri
@@ -1053,6 +1085,7 @@ class DebuggerService:
         state.pop("_all", None)
         live = self._live_ideas(tag, state)
         live_advisors = self._live_advisors(tag, state)
+        live_mios = self._live_mios(tag, state)
         roots = self._game_roots(install)
         defs = modifiers.definitions(roots)
         groups = government_mod.sections(state, defs)
@@ -1061,7 +1094,8 @@ class DebuggerService:
         data = {name: [next(shown) for _ in items] for name, items in groups.items()}
         data["mios"] = self._mios(state, tag, install, roots)
         return envelope(SAVE, {"tag": tag, **data, "ideas_source": "live" if live else "save",
-                               "advisors_source": "live" if live_advisors else "save", "file": analysis["file"],
+                               "advisors_source": "live" if live_advisors else "save", 
+                               "mios_source": "live" if live_mios else "save", "file": analysis["file"],
                                "in_game_date": (analysis.get("header") or {}).get("date")},
                         f"Laws, companies and advisors from {analysis['file']['name']}.")
 
@@ -1473,7 +1507,8 @@ class DebuggerService:
         eq_ids = {a for t in army["templates"] for a in ((t.get("designer") or {}).get("cost") or {}).get("equipment", {})}
         ids |= eq_ids | {f"{a}_short" for a in eq_ids}
         planes = found.get("plane_designs") or []
-        ids |= {d["type"] for d in planes} | {s["module"] for d in planes for s in d.get("slots", []) if s["module"]}
+        tanks = found.get("tank_designs") or []
+        ids |= {d["type"] for d in planes + tanks} | {s["module"] for d in planes + tanks for s in d.get("slots", []) if s["module"]}
         stat_keys = {k for g in air + reserve for k in (g["stats"] or {})}
         names = self._loc_names(install, ids | {f"{i}_short" for i in ids} | {f"STAT_{k.upper()}" for k in stat_keys}
                                     | {f"EQUIPMENT_STAT_{k.upper()}" for k in stat_keys} | set(stat_keys))
@@ -1518,10 +1553,59 @@ class DebuggerService:
                            if k not in stat_label})
         return envelope(LIVE, {
             "tag": tag, "military_source": "live",
-            "army": army, "navy": navy_out,
+            "army": {**army, "tank_designs": self._plane_designs(tag, self._with_country_bonuses(install, tanks, found), label)},
+            "navy": navy_out, "mios": self._design_mios(install, tag, found.get("mios") or {}, planes + tanks),
             "air": {"planes": sum(g["planes"] for g in air), "wings": air, "reserve": reserve, "stat_labels": stat_label,
-                    "designs": self._plane_designs(tag, planes, label)},
+                    "designs": self._plane_designs(tag, self._with_country_bonuses(install, planes, found), label)},
         }, "Army, air force and navy from game memory.")
+
+    def _with_country_bonuses(self, install: Path, designs: list[dict], found: dict) -> list[dict]:
+        """Plane and tank designs with the country's equipment bonuses the designer adds to a design (2026-10-20, user's
+        FW 190 B: air attack 56.7 in the design, 59.5 in the designer = x 1.05 from the doctrine reward "loose formation"
+        of Airspace Dominance: category_fighter { air_attack = 0.05 air_agility = 0.05 }): every technology and unlocked
+        doctrine bonus for the air sub-unit that flies the design's equipment type (fighter needs small_plane_airframe) or
+        its categories, stat x (1 + sum). "base_stats" keeps the design's own values, "bonuses" what was added."""
+        roots = self._game_roots(install)
+        try:
+            tabs = divisions_mod.tables(roots)
+            mods, _mults = divisions_mod.bonuses(tabs, found.get("researched") or [], found.get("doctrine_state") or [],
+                                                 doctrines_mod.definitions(roots))
+        except Exception as exc:  # broken game files: the design's own stats
+            self.log.debug("Plane bonuses not computed: %s", exc)
+            return designs
+        out = []
+        for d in designs:
+            unit, stats, add = divisions_mod.design_with_bonuses(tabs["units"], mods, d.get("type") or "", d["stats"])
+            out.append({**d, "stats": stats, "base_stats": d["stats"], "bonuses": add, "role": unit})
+        return out
+
+    def _design_mios(self, install: Path, tag: str, mios: dict, designs: list[dict]) -> dict:
+        """{MIO id: {"key", "name", "icon" (data URI)}} of the MIOs the designs use: key from the game files by the
+        organisation's icon (the country's own MIO first), name from its own name or the key's localisation."""
+        used = {d.get("mio") for d in designs} - {None}
+        if not used:
+            return {}
+        roots = self._game_roots(install)
+        defs = mio_mod.definitions(roots)
+        by_icon: dict[str, list[str]] = {}
+        for key in defs["organizations"]:
+            icon = (mio_mod.resolve(defs, key) or {}).get("icon")
+            if icon:
+                by_icon.setdefault(icon, []).append(key)
+        out = {}
+        for mid in used:
+            m = mios.get(mid) or mios.get(str(mid)) or {}
+            keys = by_icon.get(m.get("icon") or "", [])
+            key = next((k for k in keys if k.startswith(f"{tag}_")), keys[0] if keys else None)
+            name_key = m.get("name") or ((defs["organizations"].get(key) or {}).get("name") if key else None) or key
+            out[mid] = {"key": key, "name_key": name_key, "icon": gfx.sprite_uri(roots, m["icon"]) if m.get("icon") else None}
+        names = self._loc_names(install, {v["name_key"] for v in out.values() if v["name_key"]})
+        for _ in range(2):   # "$messerschmitt$" -> Messerschmitt (references inside references too)
+            names.update(self._loc_names(install, {r for v in names.values() for r in LOC_REF.findall(v)} - set(names)))
+        for v in out.values():
+            k = v.pop("name_key")
+            v["name"] = clean_loc(names[k], names) if k in names else (k or "").replace("_organization", "").replace("_", " ").title() or None
+        return out
 
     def _plane_designs(self, tag: str, planes: list[dict], label) -> list[dict]:
         """Plane designs of `tag` like the production screen: name (a base airframe: its type), type, outdated, stats,
@@ -1537,7 +1621,7 @@ class DebuggerService:
         return out
 
     def military_icons(self, units: list[str], templates: list[int], modules: list[str] | None = None,
-                       blueprints: list[str] | None = None) -> dict:
+                       blueprints: list[str] | None = None, tanks: list[str] | None = None, tag: str = "") -> dict:
         """Icons of the designers: {"units": {sub-unit id: data URI}, "templates": {icon number: data URI}, "modules":
         {plane module id: data URI}, "blueprints": {plane type: data URI}, "designer": {"background", "locked"}}
         (GFX_unit_<id>_icon_medium, GFX_div_templ_<n>_large, GFX_EMI_<id>, GFX_TC_<type>); fetched once by the Army
@@ -1553,7 +1637,23 @@ class DebuggerService:
             # the plane designer: the airframe's blueprint (GFX_TC_<type>), its background and the locked slot
             "blueprints": {b: gfx.sprite_uri(roots, f"GFX_TC_{b}") for b in (blueprints or [])[:100] if re.fullmatch(r"\w{1,80}", b)},
             "designer": {"background": gfx.sprite_uri(roots, "GFX_generic_plane_blueprint_background"),
-                         "locked": gfx.sprite_uri(roots, "GFX_EMSI_locked")} if blueprints else {}}}
+                         "locked": gfx.sprite_uri(roots, "GFX_EMSI_locked")} if blueprints else {},
+            # the tank designer: the chassis drawing of the country (GFX_TC_light_tank_chassis_sov), else the generic one
+            "tanks": {t: self._tank_blueprint(roots, t, tag) for t in (tanks or [])[:100] if re.fullmatch(r"\w{1,80}", t)},
+            "tank_designer": {"background": gfx.sprite_uri(roots, "GFX_tank_blueprint_background"),
+                              "locked": gfx.sprite_uri(roots, "GFX_EMSI_locked")} if tanks else {}}}
+
+    @staticmethod
+    def _tank_blueprint(roots: tuple[str, ...], type_id: str, tag: str) -> str | None:
+        base = re.sub(r"_\d+$", "", type_id)   # light_tank_chassis_2 -> light_tank_chassis
+        # a variant without a drawing of its own (flame, amphibious) shows the plain chassis of its class
+        plain = re.sub(r"_(?:flame|amphibious)(?=_chassis$)", "", base)
+        if plain == "amphibious_tank_chassis":
+            plain = "light_tank_chassis"
+        sprites = gfx.sprites(roots)
+        names = [f"GFX_TC_{b}_{tag.lower()}" for b in (base, plain)] + [f"GFX_TC_{base}", f"GFX_TC_generic_{base}", f"GFX_TC_{plain}"]
+        name = next((n for n in names if n in sprites), None)
+        return gfx.sprite_uri(roots, name) if name else None
 
     def _division_stats(self, install: Path, templates: list[dict], found: dict) -> None:
         """Adds "designer" (stats like the game's division designer, divisions.py) to each template; an estimate when
@@ -1757,6 +1857,65 @@ class DebuggerService:
         if data is not None:
             self.log.info("Game summary groups of %s: %d custom, %d moved", gid, len(groups["custom"]), len(groups["assign"]))
         return {"data": groups}
+
+    def summary_map(self, gid: str, raster: bool = False) -> dict:
+        """Campaign map of the Game summary (campaign_map.py): the recorded owner / controller rows of `gid` (changes per
+        day, ic_history.add_map), country colours and names, state names and victory points of the game and the mods
+        it runs with, the map's key - and with `raster` the state map itself (PNG data URI; the renderer keeps it by key)."""
+        try:
+            rows = self.ic_history.map_rows(gid)
+            game = self.ic_history.game(gid)
+        except (FileNotFoundError, ValueError):
+            raise NotFound(f"No recorded campaign {gid}") from None
+        install = self._install_path()
+        if install is None:
+            raise ReportError("The game installation was not found - the map comes from its files")
+        roots = self._game_roots(install)
+        try:
+            image = campaign_map.raster(roots, Path(self.data_dir or ".") / "cache")
+        except (OSError, ValueError, ImportError) as exc:
+            raise ReportError(f"The game's map could not be read: {exc}") from None
+        loc = campaign_map.state_names(roots)
+        states = {sid: {"name": loc.get(s["name_key"] or "") or s["name_key"] or f"State {sid}", "vp": s["vp"]}
+                  for sid, s in campaign_map.states(roots).items()}
+        out = {"id": gid, "rows": rows, "t": game["t"], "dates": game["dates"], "colors": campaign_map.country_colors(roots),
+               "names": gamefiles.country_names(install), "states": states,
+               "map": {"key": image["key"], "width": image["width"], "height": image["height"]}}
+        if raster:
+            out["map"]["png"] = "data:image/png;base64," + base64.b64encode(image["png"]).decode("ascii")
+        return {"data": out}
+
+    def summary_notes(self, gid: str, data=None) -> dict:
+        """The user's notes on a campaign's timeline; with `data` {"t", "text", "id"?} one is added, changed or (an
+        empty text) deleted."""
+        try:
+            if data is None:
+                notes = self.ic_history.notes(gid)
+            else:
+                nid = data.get("id")
+                notes = self.ic_history.set_note(gid, data.get("t"), data.get("text", ""),
+                                                 nid if isinstance(nid, int) else None)
+        except FileNotFoundError:
+            raise NotFound(f"No recorded campaign {gid} or note") from None
+        except ValueError as exc:
+            raise ReportError(str(exc)) from None
+        return {"data": [{**n, "date": ic_history_mod.date_text(n["t"])} for n in notes]}
+
+    def summary_sessions(self, gid: str) -> dict:
+        """Play sessions and the players' time of a campaign (ic_history.sessions)."""
+        try:
+            game = self.ic_history.game(gid)
+        except (FileNotFoundError, ValueError):
+            raise NotFound(f"No recorded campaign {gid}") from None
+        return {"data": {"id": gid, **ic_history_mod.sessions(game)}}
+
+    def summary_ranking(self, gid: str, subjects: bool = True) -> dict:
+        """The human players ranked by category (ic_history.ranking)."""
+        try:
+            game = self.ic_history.game(gid)
+        except (FileNotFoundError, ValueError):
+            raise NotFound(f"No recorded campaign {gid}") from None
+        return {"data": {"id": gid, "subjects": subjects, **ic_history_mod.ranking(game, subjects)}}
 
     def research_tabs(self) -> dict:
         """Tabs of the research screen (technology folders) for the installed game, enabled mods and owned DLCs,
@@ -2145,26 +2304,27 @@ class DebuggerService:
                                "in_game_date": (analysis.get("header") or {}).get("date")},
                         f"Government from {analysis['file']['name']}.")
 
-    def _mios(self, state: dict, tag: str, install: Path, roots: tuple[str, ...]) -> dict[str, list[dict]]:
-        """{design slot: [MIO for display]} - level, funds, policy, unlocked traits and current bonuses."""
-        defs = mio_mod.definitions(roots)
-        items = [s for s in (mio_mod.summary(m, defs) for m in state.get("mios") or []) if s]
-        def name_keys(it):
-            n = it["name_key"]
-            return [k for k in (f"{tag}_{n}" if n else None, n, f"{tag}_{it['id']}", it["id"]) if k]
-        def trait_keys(it, t):
-            n = t.get("name")
-            return [k for k in (f"{tag}_{n}" if n else None, n, f"{tag}_{it['id']}_{t['token']}",
-                                f"{it['id']}_{t['token']}", t["token"]) if k]
-        stat_keys = lambda kind, stat: (  # noqa: E731
-            [f"STAT_{p}_{stat.upper()}" for p in ("ARMY", "COMMON", "NAVY", "AIR")] if kind == "equipment_bonus"
-            else [f"BONUS_{stat.upper()}"] if kind == "production_bonus" else [f"MODIFIER_{stat.upper()}"])
-        keys = {"MODIFIER_MIO_RESEARCH_BONUS"}
-        for it in items:
-            keys.update(name_keys(it))
-            keys.update(k for t in it["traits"] + ([it["initial_trait"]] if it["initial_trait"] else []) for k in trait_keys(it, t))
-            keys.add(it["policy"] or "")
-            keys.update(k for kind, stats in it["bonuses"].items() for s in stats for k in stat_keys(kind, s))
+    # MIO window numbers (defines NIndustrialOrganisation): PP a day of an assigned design team, funds to the next level
+    MIO_ASSIGN_COST = 0.1
+    MIO_SIZE_UP = (700.0, 100.0, 1.8)   # FUNDS_FOR_SIZE_UP, _LEVEL_FACTOR, _LEVEL_POW
+
+    @staticmethod
+    def _mio_keys(tag: str, it: dict):
+        """(name keys of a MIO, function trait -> its name keys, function (kind, stat) -> label keys)."""
+        n = it.get("name_key")
+        names = [k for k in (f"{tag}_{n}" if n else None, n, f"{tag}_{it['id']}", it["id"]) if k]
+        def trait_keys(t):
+            tn = t.get("name")
+            return [k for k in (f"{tag}_{tn}" if tn else None, tn, f"{tag}_{it['id']}_{t.get('token')}",
+                                f"{it['id']}_{t.get('token')}", t.get("token")) if k]
+        def stat_keys(kind, stat):
+            if kind == "equipment_bonus":
+                return [f"STAT_{p}_{stat.upper()}" for p in ("ARMY", "COMMON", "NAVY", "AIR")] + [stat]
+            return [f"BONUS_{stat.upper()}", stat] if kind == "production_bonus" else [f"MODIFIER_{stat.upper()}", stat]
+        return names, trait_keys, stat_keys
+
+    def _mio_loc(self, install: Path, keys: set[str]):
+        """Function (candidate keys, fallback) -> the first localised text (references $x$ resolved)."""
         names = self._loc_names(install, keys)
         refs = {r for v in names.values() for r in LOC_REF.findall(v)}
         names.update(self._loc_names(install, refs - set(names)))
@@ -2173,26 +2333,174 @@ class DebuggerService:
                 v = clean_loc(names[k], names).rstrip(": ").strip() if k in names else ""
                 if v and "$" not in v:
                     return v
-            return fallback.replace("_", " ").capitalize()
+            return (fallback or "").replace("_", " ").capitalize()
+        return loc
+
+    def _live_mios(self, tag: str, state: dict) -> bool:
+        """Replaces state["mios"] with the live level, funds, unlocked traits and policy of `tag`'s MIOs."""
+        if self.live is None:
+            return False
+        try:
+            state["mios"] = self.live.mios(tag)["mios"]
+        except Exception:  # live data is optional: the save values stay
+            return False
+        return True
+
+    @staticmethod
+    def _country_mio_modifiers(state: dict, roots: tuple[str, ...]) -> dict[str, float]:
+        """{military_industrial_organization_* modifier: total} of the country's ideas, leader, advisors and dynamic
+        modifiers (GER 1940: +15% research bonus, +15% funds gain from its spirits)."""
+        try:
+            sources = modifiers.country_sources(state, modifiers.definitions(roots))
+        except Exception:  # an unreadable modifier source must not hide the MIOs
+            return {}
+        out: dict[str, float] = {}
+        for _kind, _id, _label, mods in sources:
+            for k, v in mods.items():
+                if k.startswith("military_industrial_organization_"):
+                    out[k] = round(out.get(k, 0.0) + v, 6)
+        return out
+
+    def _mio_attributes(self, it: dict, country: dict[str, float]) -> dict:
+        """Attributes of the MIO window: research bonus, design team assign cost a day, funds gain, size up progress."""
+        org = (it.get("bonuses") or {}).get("organization_modifier") or {}
+        total = lambda key: org.get(key, 0.0) + country.get(key, 0.0)  # noqa: E731
+        base, factor, power = self.MIO_SIZE_UP
+        size = it.get("size") or 0
+        need = base + factor * size ** power
+        assign = it.get("assign_cost") if it.get("assign_cost") is not None else self.MIO_ASSIGN_COST
+        return {"research_bonus": round((it.get("research_bonus") or 0.0) + country.get(mio_mod.RESEARCH_BONUS, 0.0), 4),
+                "assign_cost": round(assign * max(0.0, 1 + total("military_industrial_organization_design_team_assign_cost")), 4),
+                "funds_gain": round((it.get("funds_factor") or 1.0) * (1 + total("military_industrial_organization_funds_gain")) - 1, 4),
+                "funds_needed": round(need, 1),
+                "progress": round(min(1.0, (it.get("funds") or 0.0) / need), 4) if need else None}
+
+    def _mios(self, state: dict, tag: str, install: Path, roots: tuple[str, ...]) -> dict[str, list[dict]]:
+        """{design slot: [MIO for display]} - level, funds, policy, unlocked traits and current bonuses."""
+        defs = mio_mod.definitions(roots)
+        items = [s for s in (mio_mod.summary(m, defs) for m in state.get("mios") or []) if s]
+        country = self._country_mio_modifiers(state, roots)
+        keys = {"MODIFIER_MIO_RESEARCH_BONUS"}
+        for it in items:
+            names, trait_keys, stat_keys = self._mio_keys(tag, it)
+            keys.update(names)
+            keys.update(k for t in it["traits"] + ([it["initial_trait"]] if it["initial_trait"] else []) for k in trait_keys(t))
+            keys.add(it["policy"] or "")
+            keys.update(k for kind, stats in it["bonuses"].items() for s in stats for k in stat_keys(kind, s))
+        loc = self._mio_loc(install, keys)
         sprites = gfx.sprites(roots)
         groups = {"equipment_bonus": "Equipment", "production_bonus": "Production", "organization_modifier": "Organization"}
         out: dict[str, list[dict]] = {c: [] for c in mio_mod.CATEGORIES}
         for it in sorted(items, key=lambda i: (-(i["size"] or 0), i["id"])):
+            names, trait_keys, stat_keys = self._mio_keys(tag, it)
             texture = sprites.get(it["icon"] or "")
+            attributes = self._mio_attributes(it, country)
             out[it["category"]].append({
-                "id": it["id"], "name": loc(name_keys(it), it["id"].removesuffix("_organization")),
+                "id": it["id"], "name": loc(names, it["id"].removesuffix("_organization")),
                 "icon": gfx.icon_data_uri(texture) if texture else None, "size": it["size"], "funds": it["funds"],
-                "research_bonus": it["research_bonus"],
+                "research_bonus": attributes["research_bonus"], "attributes": attributes,
                 "policy": loc([it["policy"]], it["policy"]) if it["policy"] else None,
-                "initial_trait": loc(trait_keys(it, it["initial_trait"]), it["initial_trait"]["token"] or "initial trait")
+                "initial_trait": loc(trait_keys(it["initial_trait"]), it["initial_trait"].get("token") or "initial trait")
                 if it["initial_trait"] else None,
-                "traits": [loc(trait_keys(it, t), t["token"]) for t in it["traits"]],
+                "traits": [loc(trait_keys(t), t.get("token")) for t in it["traits"]],
                 "bonuses": [{"group": groups[kind], "entries": [
-                    {"key": stat, "label": "Research bonus" if stat == "military_industrial_organization_research_bonus"
+                    {"key": stat, "label": "Research bonus" if stat == mio_mod.RESEARCH_BONUS
                      else loc(stat_keys(kind, stat), stat), "value": v} for stat, v in stats.items() if v]}
                     for kind, stats in it["bonuses"].items() if any(stats.values())],
             })
         return out
+
+    def mio_tree(self, tag: str, mio_id: str) -> dict:
+        """Trait tree of one MIO of `tag` as the game's MIO window: column headers, traits at their grid positions with
+        icons, bonuses, parents and exclusions, which are unlocked (game memory when the game runs, else the newest
+        save), level, funds, policy and attributes."""
+        tag = tag.upper()
+        install = self._install_path()
+        picked = self._pick_save(None)
+        if install is None:
+            return envelope(UNAVAILABLE, None, "Needs the game installation")
+        state: dict = {"mios": []}
+        if picked is not None:
+            try:
+                state = self.saves.politics(picked[0], tag)
+                state.pop("analysis", None)
+                state.pop("_all", None)
+            except SaveFormatError:
+                state = {"mios": []}
+        live = self._live_mios(tag, state)
+        self._live_ideas(tag, state)
+        self._live_advisors(tag, state)
+        roots = self._game_roots(install)
+        defs = mio_mod.definitions(roots)
+        mine = next((m for m in state.get("mios") or [] if m.get("id") == mio_id), None) or {"id": mio_id}
+        it = mio_mod.summary(mine, defs)
+        tree = mio_mod.tree(defs, mio_id, mine.get("traits"))
+        if it is None or tree is None:
+            return envelope(UNAVAILABLE, None, f"{mio_id} is not a military industrial organisation of the game files")
+        names, trait_keys, stat_keys = self._mio_keys(tag, it)
+        policy = defs["policies"].get(it["policy"] or "") or {}
+        bonus_sources = tree["traits"] + ([tree["initial_trait"]] if tree["initial_trait"] else []) + [policy]
+        keys = set(names) | {h["text"] for h in tree["headers"]} | {it["policy"] or ""}
+        keys.update(k for t in tree["traits"] + ([tree["initial_trait"]] if tree["initial_trait"] else []) for k in trait_keys(t))
+        for src in bonus_sources:
+            for kind in mio_mod.BONUS_KINDS:
+                keys.update(k for stat in src.get(kind) or {} for k in stat_keys(kind, stat))
+                for scope, stats in (src.get(f"{kind}_scoped") or {}).items():
+                    keys.add(scope)
+                    keys.update(k for stat in stats for k in stat_keys(kind, stat))
+        keys.update(e for t in tree["traits"] for e in t.get("limit_to") or [])
+        loc = self._mio_loc(install, keys)
+        sprites = gfx.sprites(roots)
+        icon = lambda name: gfx.icon_data_uri(sprites[name]) if name and name in sprites else None  # noqa: E731
+
+        def bonuses(src: dict) -> list[dict]:
+            out = []
+            for kind in mio_mod.BONUS_KINDS:
+                for stat, v in (src.get(kind) or {}).items():
+                    if v:
+                        out.append({"kind": kind, "key": stat, "scope": None, "value": v,
+                                    "label": "Research bonus" if stat == mio_mod.RESEARCH_BONUS else loc(stat_keys(kind, stat), stat)})
+                for scope, stats in (src.get(f"{kind}_scoped") or {}).items():
+                    out.extend({"kind": kind, "key": stat, "scope": loc([scope], scope), "value": v,
+                                "label": loc(stat_keys(kind, stat), stat)} for stat, v in stats.items() if v)
+            return out
+
+        def trait_icon(t: dict) -> str | None:
+            for name in (t.get("icon"), f"GFX_{tag}_{it['id']}_{t['token']}", f"GFX_{it['id']}_{t['token']}"):
+                if name and name in sprites:
+                    return icon(name)
+            return icon("GFX_industrial_org_trait_placeholder")
+
+        frames = gfx.sprite_frames(roots)
+        def strip(name: str) -> list[str | None]:
+            texture, n = sprites.get(name), frames.get(name) or 1
+            return [gfx.frame_data_uri(texture, i, n) for i in range(1, n + 1)] if texture else []
+
+        traits = [{"token": t["token"], "name": loc(trait_keys(t), t["token"]), "icon": trait_icon(t), "x": t["x"], "y": t["y"],
+                   "parents": t["parents"], "parents_needed": t["parents_needed"], "exclusive": t["exclusive"],
+                   "special": t["special"], "kinds": t["kinds"], "unlocked": t["unlocked"],
+                   "limit_to": [loc([e], e) for e in t.get("limit_to") or []], "bonuses": bonuses(t)}
+                  for t in tree["traits"]]
+        initial = tree["initial_trait"]
+        texture = sprites.get(it["icon"] or "")
+        attributes = self._mio_attributes(it, self._country_mio_modifiers(state, roots))
+        return envelope(SAVE, {
+            "tag": tag, "id": mio_id, "name": loc(names, mio_id.removesuffix("_organization")),
+            "icon": gfx.icon_data_uri(texture) if texture else None, "category": it["category"],
+            "size": it["size"], "funds": it["funds"], "attributes": attributes,
+            "policy": {"name": loc([it["policy"]], it["policy"]), "icon": icon(policy.get("icon")), "bonuses": bonuses(policy)}
+            if it["policy"] else None,
+            "initial_trait": {"name": loc(trait_keys(initial), initial.get("token") or "initial trait"), "bonuses": bonuses(initial),
+                              "limit_to": [loc([e], e) for e in initial.get("limit_to") or []]} if initial else None,
+            "headers": [{"text": loc([h["text"]], h["text"]), "x": h["x"]} for h in tree["headers"]],
+            "traits": traits, "width": tree["width"], "height": tree["height"],
+            "unlocked_count": sum(t["unlocked"] for t in traits),
+            "sprites": {"frame": strip("GFX_industrial_org_trait_button"), "special": strip("GFX_country_spefific_org_trait_button"),
+                        "exclusive": strip("GFX_focus_link_exclusive"),
+                        "equipment_bonus": icon("GFX_design_team_icon"), "production_bonus": icon("GFX_industrial_manufacturer_icon"),
+                        "organization_modifier": icon("GFX_organization_modifier_icon")},
+            "source": "live" if live else "save",
+        }, "MIO state from game memory." if live else "MIO state from the newest save (the game is not read).")
 
     def _present(self, items: list[dict], install: Path, roots: tuple[str, ...]) -> list[dict]:
         """Localised names, descriptions, modifier labels, trait names and icons (data: URIs) for display."""

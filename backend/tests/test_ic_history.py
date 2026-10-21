@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from hoi4dbg import ic_history
-from hoi4dbg.ic_history import IcHistory, IcRecorder
+from hoi4dbg.ic_history import IcHistory, IcRecorder, scan_game_log
 
 
 def day(year, month, dom):
@@ -159,6 +159,38 @@ class IcRecorderTest(unittest.TestCase):
         self.assertEqual(live.snapshots, 0)
         live.t += 1
         self.assertTrue(rec.step())
+
+    def test_the_day_a_game_starts_on_is_recorded_once(self):
+        live = FakeLive()
+        live.launch = None
+        live.game_launch = lambda: live.launch
+        rec = IcRecorder(live, IcHistory(Path(tempfile.mkdtemp())), logging.getLogger("test"))
+        live.t = day(1936, 1, 1)       # country selection: not in a game
+        self.assertFalse(rec.step())
+        live.launch = "start#1"        # "Launching SINGLEPLAYER-game" ... map shown
+        self.assertTrue(rec.step())
+        self.assertEqual(rec.status()["last"], "1936.01.01")
+        self.assertFalse(rec.step())   # the same day, paused: once
+        live.t += 1
+        self.assertTrue(rec.step())    # then every played day as before
+        live.launch, live.t = "start#2", day(1941, 6, 1)   # back to the menu, a save loaded
+        self.assertTrue(rec.step())
+        self.assertEqual(live.snapshots, 3)
+
+    def test_game_log_states(self):
+        log = ["[16:09:29][no_game_date][gameapplication.cpp:2968]: Resetting game",
+               "[16:09:52][1936.01.01.12][frontend.cpp:682]: ", "\t\t[[ Launching SINGLEPLAYER-game ]]",
+               "\tStart-date: 1936.1.1.12"]
+        state = scan_game_log(log)
+        self.assertEqual((state["pending"], state["in_game"]), (True, None))   # loading: the map not shown yet
+        state = scan_game_log(["[16:09:56][1936.01.01.12][ingameidler.cpp:5323]: End RestoreDeviceObjects"], state)
+        self.assertEqual(state["in_game"], 1)
+        state = scan_game_log(["[19:25:00][1941.10.21.13][ingameidler.cpp:5323]: End RestoreDeviceObjects"], state)
+        self.assertEqual(state["in_game"], 1)   # a graphics reset in the game is no new start
+        state = scan_game_log(["[23:04:53][1941.10.23.04][ingameidler.cpp:6691]: Resetting gamestate"], state)
+        self.assertIsNone(state["in_game"])
+        state = scan_game_log(log[2:] + ["[23:05:16][1936.01.01.12][ingameidler.cpp:5323]: End RestoreDeviceObjects"], state)
+        self.assertEqual(state["in_game"], 2)
 
     def test_all_zero_production_is_skipped(self):
         live = FakeLive()
@@ -411,3 +443,128 @@ class WastedAndLossesTest(unittest.TestCase):
                 c.setdefault(k, [0, 0])
         v = ic_history.view(game, "lcom", None, True)
         self.assertEqual(v["series"], [{"key": "Comintern", "values": [None, 5.0]}])   # no Non-aligned line
+
+
+def extra(**values):
+    """A row's EXTRA values (2026-10-21) by name."""
+    return [values.get(k) for k in ic_history.EXTRA]
+
+
+def full_row(mil=0.0, losses=(None, None, None), **values):
+    """A whole STORED row: IC, factories, wasted IC, losses, assigned factories and the EXTRA values."""
+    return [mil, 0, 0, 0, 0, 0, 0, 0, 0, *losses, None, None, None, *extra(**values)]
+
+
+class CampaignAnalysisTest(unittest.TestCase):
+    def setUp(self):
+        self.history = IcHistory(Path(tempfile.mkdtemp()) / "ic-history")
+        self.t = day(1941, 11, 1)
+
+    def add(self, t, countries, players=None, wall=None, still=0, factions=None):
+        return self.history.add({"t": t, "player": "GER", "countries": countries, "factions": factions,
+                                 "players": players, "wall": wall, "still": still})
+
+    def test_group_values_sum_but_stability_is_a_mean(self):
+        gid = self.add(self.t, {"GER": full_row(stab=80, divs=100, pp=50), "ITA": full_row(stab=40, divs=50, pp=10)},
+                       factions={"GER": "Axis", "ITA": "Axis"})
+        game = self.history.game(gid)
+        axis = lambda m: next(s for s in ic_history.view(game, m, None, True)["series"] if s["key"] == "Axis")  # noqa: E731
+        self.assertEqual(axis("stab")["values"], [60])
+        self.assertEqual(axis("divs")["values"], [150])
+        self.assertEqual(ic_history.combine([None, 3], "pp"), None)   # a day recorded before the value existed
+        self.assertEqual(ic_history.combine([None, 30], "stab"), 30)
+
+    def test_destroyed_per_lost_is_a_ratio_of_running_sums(self):
+        self.assertEqual(ic_history.cum_ratio([0, 1, 3], [10, None, 5], [5, 5, None]), [2.0, 1.0, 2.0])
+        gid = self.add(self.t, {"GER": full_row(losses=(2, 2, 20))})
+        self.add(self.t + 1, {"GER": full_row(losses=(4, 2, 10))})
+        game = self.history.game(gid)
+        self.assertEqual(game["countries"]["GER"]["kd"], [5.0, 3.0])
+        players = ic_history.view(game, "kd", None, False, by_player=True)
+        self.assertEqual(players["series"][0]["values"], [5.0, 3.0])
+
+    def test_ranking_of_players_now_and_a_month_before(self):
+        p = {"GER": {"n": "Rodan", "s": []}, "SOV": {"n": "Czarny", "s": []}}
+        gid = self.add(self.t, {"GER": full_row(mil=50, divs=10), "SOV": full_row(mil=10, divs=20)}, p)
+        self.add(self.t + 40, {"GER": full_row(mil=60, divs=10), "SOV": full_row(mil=90, divs=5)}, p)
+        rank = ic_history.ranking(self.history.game(gid))
+        ic = next(c for c in rank["categories"] if c["key"] == "icall")
+        self.assertEqual([(r["name"], r["rank"], r["rank_before"]) for r in ic["rows"]], [("Czarny", 1, 2), ("Rodan", 2, 1)])
+        self.assertEqual(rank["since"], "1941.11.01")
+
+    def test_sessions_players_and_stopped_time(self):
+        a = {"GER": {"n": "Rodan", "s": []}}
+        b = {"GER": {"n": "Rodan", "s": []}, "SOV": {"n": "Czarny", "s": []}}
+        gid = self.add(self.t, {"GER": full_row()}, a, wall=1000)
+        self.add(self.t + 10, {"GER": full_row()}, b, wall=1600, still=120)
+        self.add(self.t + 20, {"GER": full_row()}, a, wall=2200)
+        self.add(self.t + 30, {"GER": full_row()}, a, wall=9000)   # next evening
+        out = ic_history.sessions(self.history.game(gid))
+        first, second = out["sessions"]
+        self.assertEqual((first["minutes"], first["days"], first["stopped_minutes"]), (20.0, 20, 2.0))
+        self.assertEqual(first["days_per_hour"], 60.0)
+        self.assertEqual([j["name"] for j in first["joined"]], ["Czarny"])
+        self.assertEqual([j["name"] for j in first["left"]], ["Czarny"])
+        self.assertEqual(second["minutes"], 0)
+        rodan = next(p for p in out["players"] if p["name"] == "Rodan")
+        self.assertEqual((rodan["sessions"], rodan["minutes"]), (2, 20.0))
+
+    def test_map_rows_are_changes_and_cut_with_replayed_days(self):
+        gid = self.add(self.t, {"GER": full_row()})
+        self.history.add_map(gid, self.t, {1: ["GER", "GER"], 2: ["POL", "POL"]}, True)
+        self.history.add_map(gid, self.t + 5, {2: ["POL", "GER"]}, False)
+        self.assertEqual(self.history.map_states(gid), {"1": ["GER", "GER"], "2": ["POL", "GER"]})
+        self.assertEqual(self.history.map_states(gid, self.t + 1)["2"], ["POL", "POL"])
+        self.add(self.t + 6, {"GER": full_row()})
+        self.history.request(gid)
+        self.add(self.t + 3, {"GER": full_row()})   # an earlier save loaded into the same file
+        self.assertEqual(self.history.map_states(gid)["2"], ["POL", "POL"])
+
+    def test_notes(self):
+        gid = self.add(self.t, {"GER": full_row()})
+        self.history.set_note(gid, self.t, "ITA betrayed us")
+        [note] = self.history.set_note(gid, self.t + 2, "second", None)[1:]
+        self.assertEqual(note["id"], 2)
+        self.assertEqual([n["text"] for n in self.history.set_note(gid, self.t, "", 1)], ["second"])   # deleted
+        with self.assertRaises(ValueError):
+            self.history.set_note(gid, self.t, "  ")
+
+
+class MapLive(FakeLive):
+    def __init__(self):
+        super().__init__()
+        self.control = {1: ["SOV", "SOV"], 2: ["FIN", "FIN"]}
+        self.hours = None
+
+    def game_hours(self):
+        return self.hours if self.hours is not None else self.t * 24
+
+    def ic_snapshot(self, with_factions):
+        s = super().ic_snapshot(with_factions)
+        return {**s, "extra": {"SOV": extra(stab=55.5, divs=300)}, "map": dict(self.control)}
+
+
+class RecorderCampaignTest(unittest.TestCase):
+    def test_extra_values_map_changes_and_stopped_time(self):
+        live = MapLive()
+        history = IcHistory(Path(tempfile.mkdtemp()))
+        rec = IcRecorder(live, history, logging.getLogger("test"))
+        clock = [0.0]
+        rec.monotonic = lambda: clock[0]
+        rec.wall = lambda: 5000 + clock[0]
+        rec.step()
+        live.t += 1
+        self.assertTrue(rec.step())
+        clock[0] = 10                     # the same hour for 10 s: paused
+        rec.step()
+        live.control[2] = ["FIN", "SOV"]
+        live.t += 1
+        clock[0] = 11
+        self.assertTrue(rec.step())
+        game = history.game(history.active)
+        self.assertEqual(game["countries"]["SOV"]["stab"], [55.5, 55.5])
+        self.assertEqual(game["countries"]["SOV"]["divs"], [300, 300])
+        self.assertEqual(game["still"], [0, 11])
+        rows = history.map_rows(history.active)
+        self.assertEqual([r.get("full") for r in rows], [1, None])
+        self.assertEqual(rows[1]["s"], {"2": ["FIN", "SOV"]})

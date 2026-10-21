@@ -1604,3 +1604,86 @@ class EquipmentTypeTests(unittest.TestCase):
             mem.regions_data[BASE][heap - BASE:heap - BASE + len(raw)] = raw
             mem.put(t + pointers.EQUIPMENT_TYPE["key"], "QQQQ", heap, 0, len(raw), max(len(raw), 16))
         self.assertEqual(pointers.read_equipment_types(mem, module), {0x4ED2: "infantry_equipment_0", 0x4F57: "light_tank_chassis_1"})
+
+
+class TankTypeTests(unittest.TestCase):
+    def test_tank_designer_chassis_and_their_variants(self):
+        for t in ("light_tank_chassis_1", "heavy_tank_destroyer_chassis_2", "light_tank_aa_chassis_0", "medium_tank_artillery_chassis",
+                  "medium_tank_flame_chassis_1", "light_tank_amphibious_chassis", "amphibious_tank_chassis_1", "land_cruiser_chassis"):
+            self.assertTrue(pointers.is_tank_type(t), t)
+        for t in ("anti_tank_equipment_1", "light_tank_equipment_1", "gw_tank_equipment", "small_plane_airframe_1", "ship_hull_light_1"):
+            self.assertFalse(pointers.is_tank_type(t), t)
+
+
+class MioTests(unittest.TestCase):
+    def test_country_mios_by_id_with_name_and_icon(self):
+        mem = FakeMemory()
+        country, prod, array, orgs = BASE + 0x100, BASE + 0x400, BASE + 0x800, BASE + 0x1000
+        mem.put(country + pointers.STOCKPILE["production"], "Q", prod)
+        mem.put(prod + pointers.COUNTRY_MIOS, "Qii", array, 2, 2)
+        for i, (mid, icon) in enumerate(((16, "GFX_idea_messerschmitt"), (6, "GFX_idea_henschel"))):
+            o = orgs + 0x200 * i
+            mem.put(array + 8 * i, "Q", o)
+            mem.put(o + pointers.MIO["id"] - 4, "ii", pointers.MIO_ID_TYPE, mid)
+            heap = o + 0x100
+            mem.regions_data[BASE][heap - BASE:heap - BASE + len(icon)] = icon.encode()
+            mem.put(o + pointers.MIO["icon"], "QQQQ", heap, 0, len(icon), max(len(icon), 16))
+            mem.put(o + pointers.MIO["name"] + 16, "QQ", 0, 15)   # empty own name
+        self.assertEqual(pointers.read_mios(mem, country), {16: {"name": None, "icon": "GFX_idea_messerschmitt"},
+                                                            6: {"name": None, "icon": "GFX_idea_henschel"}})
+
+    @staticmethod
+    def _tokens(mem, names: dict[int, str]):
+        """Token table with `names` (tokens 101..) in the second region; returns the module base."""
+        heap = BASE + 0x10_0000
+        module = BASE + 0x80 - pointers.TOKEN_TABLE["rva"]
+        mem.put(module + pointers.TOKEN_TABLE["rva"] + pointers.TOKEN_TABLE["last"], "i", 100 + len(names))
+        mem.put(module + pointers.TOKEN_TABLE["rva"] + pointers.TOKEN_TABLE["before_first"], "i", 100)
+        mem.put(module + pointers.TOKEN_TABLE["rva"] + pointers.TOKEN_TABLE["first"], "Q", heap + pointers.TOKEN_ENTRY["token"])
+        text = heap + 0x2000
+        for token, name in names.items():
+            e = heap + (token - 101) * pointers.TOKEN_ENTRY["size"]
+            mem.put(e + pointers.TOKEN_ENTRY["token"], "q", token)
+            mem.put(e + pointers.TOKEN_ENTRY["text"], "Q", text)
+            mem.put(e + pointers.TOKEN_ENTRY["length"], "i", len(name))
+            mem.regions_data[heap][text - heap:text - heap + len(name)] = name.encode()
+            text += 0x40
+        return module
+
+    def test_token_names_checks_the_entry(self):
+        mem = FakeMemory()
+        module = self._tokens(mem, {101: "aluminium", 102: "GER_henschel_organization"})
+        name = pointers.token_names(mem, module)
+        self.assertEqual((name(101), name(102), name(100), name(103)), ("aluminium", "GER_henschel_organization", None, None))
+        mem.put(BASE + 0x10_0000 + pointers.TOKEN_ENTRY["token"], "q", 999)   # entry of another token: not trusted
+        self.assertIsNone(pointers.token_names(mem, module)(101))
+
+    def test_mio_states_level_funds_traits_policy_attributes(self):
+        mem = FakeMemory()
+        module = self._tokens(mem, {101: "GER_henschel_organization", 102: "generic_mio_trait_adaptable_chassis",
+                                    103: "GER_mio_trait_technical_superiority", 104: "mio_policy_land_heavy_gantry_cranes"})
+        country, prod, array, org, traits = BASE + 0x100, BASE + 0x200, BASE + 0x300, BASE + 0x1000, BASE + 0x400
+        mem.put(country + pointers.STOCKPILE["production"], "Q", prod)
+        mem.put(prod + pointers.COUNTRY_MIOS, "Qii", array, 1, 1)
+        mem.put(array, "Q", org)
+        mem.put(org + pointers.MIO["id"] - 4, "ii", pointers.MIO_ID_TYPE, 6)
+        st = pointers.MIO_STATE
+        mem.put(org + st["key"], "i", 101)
+        mem.put(org + st["funds"], "q", 231387716)
+        mem.put(org + st["size"], "i", 12)
+        mem.put(org + st["traits"], "Qii", traits, 2, 2)
+        mem.put(traits + st["trait_token"], "i", 102)
+        mem.put(traits + st["trait_entry"] + st["trait_token"], "i", 103)
+        mem.put(org + st["policy"], "i", 104)
+        mem.put(org + st["research_bonus"], "q", 10000)
+        mem.put(org + st["assign_cost"], "q", 10000)
+        mem.put(org + st["funds_factor"], "q", 125000)
+        mem.put(org + pointers.MIO["icon"] + 16, "QQ", 0, 15)
+        self.assertEqual(pointers.read_mio_states(mem, module, country), [{
+            "id": "GER_henschel_organization", "size": 12, "funds": 2313.87716,
+            "traits": ["generic_mio_trait_adaptable_chassis", "GER_mio_trait_technical_superiority"],
+            "policy": "mio_policy_land_heavy_gantry_cranes", "icon": None,
+            "research_bonus": 0.1, "assign_cost": 0.1, "funds_factor": 1.25}])
+        mem.put(org + st["size"], "i", -5)
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_mio_states(mem, module, country)

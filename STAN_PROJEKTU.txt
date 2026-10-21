@@ -1,5 +1,5 @@
 HOI4 DEBUGGER - STAN PROJEKTU
-Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-20 (drzewka focusów z modów jak w grze; kolejność tagów z modami)
+Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-22 (Game summary: analiza kampanii - mapa, ranking, sesje, notatki, raport, prognoza)
 Szczegóły i dowody: docs/PROGRESS.md, plan: docs/STATUS-AND-PLAN.md
 
 ======================================================================
@@ -430,6 +430,11 @@ ZROBIONE
               (GFX_<TAG>_<typ>_medium / GFX_archetype_<typ>_medium; podwozia czołgów i płatowce -> ikona czołgu /
               myśliwca / CAS / bombowca), zmiana od poprzedniego odczytu (▲/▼), pasek pokrycia potrzeb dywizji;
               tabela potrzeb z ikonami i kolumną Covered. Ikony w /api/equipment/<TAG> ("icons"), raz na widok.
+            + POTRZEBY DYWIZJI NA ŻYWO (2026-10-20, prośba użytkownika): kafelek "Needs of the divisions of <TAG>" z
+              przełącznikiem Live | On refresh - /api/live/equipment-needs (needed = szablony x dywizje x need, in divisions
+              = CArmy +0x368, stockpile, produced/day = linie produkcji; jak rejestrator Game summary), warianty z zapasu na
+              żywo; bez gry - tabela z save'a. Nowa kolumna "Produced / day". Pasek podsumowania (rodzaje, braki,
+              najbardziej brakujący) aktualizowany z tego odczytu. GER 1941: 22 rodzaje, 0,13 s (pierwszy odczyt 1,9 s).
             + SPRZĘT WŁASNY I Z MODÓW (2026-10-20, pytanie użytkownika): rodzaj sprzętu wariantu Z PAMIĘCI -
               CEquipmentVariant +0x18 = token rodzaju; [hoi4.exe+0x332EEC0] CEquipmentDatabase +0x68 = tablica
               CEquipmentType* (+0x8 token, +0x18 klucz). 575 rodzajów (gra + R56), 89/89 wariantów 8 państw zgodnych z
@@ -564,6 +569,110 @@ DO ZROBIENIA (w tej kolejności)
             i nazwie w obu trybach, wspólny kursor: najechanie na jeden wykres pokazuje dzień i wartości widocznych serii w
             obu. POPRAWKI: podpowiedź pokazywała "[object HTMLDivElement]" (replaceChildren z tablicą); kliknięte pole
             wyboru blokowało odświeżenie panelu grup.
+            MIO PROJEKTU (2026-10-20, prośba użytkownika): koncern przypisany do projektu czołgu / samolotu. Pamięć:
+            CEquipmentVariant +0x488 = {int32 79 (typ id MIO), int32 id MIO} (save: design_team = { id type=79 });
+            [produkcja +0x130] = tablica NIndustrialOrganisation::COrganisation* państwa (+0xC id, +0x60 własna nazwa,
+            +0x80 ikona). Klucz z plików po ikonie (najpierw MIO tego państwa), nazwa z tłumaczenia z rozwinięciem
+            $odwołań$. GER: Bf 109 D / FW 190 B = Messerschmitt, Sturer Emil = Henschel, Panzer II L = Daimler-Benz;
+            ENG Spitfire = Supermarine; SOV BT-7 = Morozov Design Bureau. Widok: ikona + nazwa w nagłówku projektanta
+            czołgów i samolotów, "typ · MIO" na liście projektów i w porównywarce. Rejestr tokenów (+0x38 obiektu MIO =
+            token klucza) - stały wskaźnik znaleziony później (patrz DRZEWKO MIO).
+            POPRAWKA STATYSTYK CZOŁGÓW (2026-10-20, zgłoszenie użytkownika, heavy-tank-to-tank-dest.jpg: Sturer Emil Ausf. G
+            hard attack w grze 73,9, w aplikacji 49,28): projektant czołgów liczy jak projektant dywizji - projekt x (1 +
+            własny współczynnik batalionu roli + bonusy państwa z technologii i nagród doktryn dla jego kategorii), plus
+            supply use i suppression batalionu. Rola = batalion, którego need zawiera podwozie, bez hq_ / _support /
+            recon / airborne (heavy_tank_destroyer_chassis -> heavy_tank_destroyer_brigade). Sturer Emil G: +0,5 hard
+            attack (category_tank_destroyers) -> 73,92, koszt 29,36 = gra; w roli Heavy Tank (te same moduły) soft 49,5,
+            piercing 137,5, breakthrough 75,0, armor 103, defense 2,9, supply 0,32, suppression 2,5 = gra (hard attack
+            52,2 nie - podgląd innej roli przelicza podwozie). Wspólne z samolotami: divisions.design_with_bonuses.
+            [ ] sprawdzić czołg z miotaczem ognia / AA / artylerię na zrzucie z gry (ujemne współczynniki batalionu)
+            POPRAWKA WARIANTÓW CZOŁGÓW (2026-10-20, zgłoszenie użytkownika: brak tank destroyer, anti air, artillery, flame):
+            filtr is_tank_type przepuszczał tylko *tank_chassis; warianty to osobne rodzaje podwozi (heavy_tank_destroyer_
+            chassis, light_tank_aa_chassis, medium_tank_artillery_chassis, medium_tank_flame_chassis, *_tank_amphibious_
+            chassis, amphibious_tank_chassis, land_cruiser_chassis). GER: 57 projektów zamiast 40 (9 niszczycieli, 8 flame).
+            Rysunki: własne GFX_TC_<wariant>[_<państwo>], flame i amfibie bez własnego - zwykłe podwozie klasy; ikony
+            Equipment Manager: wariant bez ikony -> ikona czołgu tej klasy.
+            POPRAWKA STATYSTYK SAMOLOTÓW (2026-10-20, zgłoszenie użytkownika, temp-air.jpg / aplik.jpg: FW 190 B w grze
+            air attack 59,5 / agility 51,9, w aplikacji 56,7 / 49,5): projekt w pamięci ma bonusy MIO, ale nie bonusy
+            państwa - projektant gry dolicza technologie i odblokowane nagrody doktryn (tu "loose formation" z Airspace
+            Dominance: category_fighter air_attack +5 %, air_agility +5 %). Teraz divisions.design_with_bonuses: rola =
+            jednostka lotnicza, której need zawiera rodzaj sprzętu (fighter <- small_plane_airframe), bonusy dla jej
+            kategorii, stat x (1 + suma); air_range -> range. FW 190 B: 59,535 / 51,975 (gra ucina: 59,5 / 51,9), reszta
+            bez zmian. Dotyczy projektanta samolotów i porównywarki ("base_stats" = wartości samego projektu).
+            [ ] Supply Use samolotu - offset w pamięci nieznany
+            [ ] czy projektant czołgów gry też dolicza bonusy państwa - do sprawdzenia na zrzucie
+            DRZEWKO MIO (2026-10-20, prośba użytkownika, MIO-TREE.jpg - Henschel): klik na MIO w Country Editor
+            (Research & Production -> projektant -> MIO) otwiera okno jak w grze: lewa strona - ikona, poziom, pasek
+            funduszy do następnego poziomu (700 + 100 x poziom^1,8), Research Bonus, Design Team Assign Cost, Funds Gain,
+            liczba cech, cecha początkowa z premiami, polityka z ikoną i premiami (też per typ sprzętu); prawa -
+            drzewko cech: nagłówki kolumn (tree_header_text), cechy w siatce gry 88 x 117 (position + relative_position_id,
+            zmienne @ z pliku), ramki gry (niebieska / szara = brak rodziców / czarna = wykluczona, złota = specjalna),
+            ikony cech, ikonki rodzaju premii (kolba / klucz / fabryka), ✓ przy odblokowanych, linie do rodziców
+            (zielone od odblokowanego, niebieskie; kropkowane gdy wystarczy jeden z kilku), pary wykluczające z czerwonym
+            "!"; po najechaniu nazwa, stan, premie, wymagani rodzice, wykluczenia. Drzewko z plików gry i modów
+            (include / add / override_trait scala tylko podane pola - wcześniej override kasował premie, delete_included_values).
+            Pamięć (sprawdzone na GER 1941, zgodne z MIO-TREE.jpg): rejestr tokenów [hoi4.exe + 0x35E1AB0] (+0x4 ostatni
+            token, +0xC token przed pierwszym, +0x10 wpis; wpis 0x48 B: +0x8 token, +0x10 tekst, +0x18 długość);
+            COrganisation +0x38 token klucza, +0x128 fundusze, +0x130 poziom, +0x150 odblokowane cechy (16 B
+            {vtable, token}), +0x188 token polityki, fixed64: +0xA0 własny bonus badań (Henschel 0,10), +0xB0 koszt
+            przydziału / dzień, +0xC8 mnożnik funduszy (1,25). Bazy: [+0x332EF40] CPolicyDatabase, [+0x332EF48]
+            COrganisationDatabase. Henschel: poziom 12, 6 cech, Heavy Gantry Cranes, Research 25% (0,10 + 0,15 z duchów
+            państwa), Funds Gain +43,75% (1,25 x 1,15), 0,10/day - jak w grze. Kafelek Government czyta MIO na żywo
+            ("MIOs" w Live), otwarte drzewko zostaje po odświeżeniu. API /api/countries/<TAG>/mios/<id> (0,05 s).
+            Testy: mio (drzewko, override, bonus badań), live (rejestr tokenów, stan MIO), mio-tree.test.js; smoke:
+            17 cech Daimler-Benz bez nakładania, zrzuty wide/narrow-mio-tree.png.
+            [ ] punkty cech (Trait points) - pole w pamięci niepewne, nie pokazywane
+            IKONY I ZOOM DRZEWKA MIO (2026-10-20, prośba użytkownika): ikony modyfikatorów przy premiach (okno MIO, dymki
+            cech, dymek MIO na liście) - mapa MIO_ICONS w lib/icons.js (59 z 60 statystyk MIO gry, brak tylko
+            patrol_coordination), inaczej ikona modyfikatora. Drzewko: kółko myszy = przybliżanie przy kursorze, lewy
+            przycisk + ruch = przesuwanie, pasek − / % / + / Fit / 100% (lib/zoom.js jak drzewka badań i focusów, poziom
+            zapamiętany), dymek cechy poza powiększanym obszarem (nie przesuwa się ani nie ucina). Smoke: zoom kółkiem
+            zmienia skalę, ikony w oknie MIO.
+            DYMKI W OKNIE (2026-10-20, zgłoszenie użytkownika apl_display_bug.jpg: dymek Military Staff ucięty dolną
+            krawędzią): lib/tooltips.js - dymki gry (.spirit-tip: duchy, prawa, doradcy, sztab, MIO, przywódca, wykres
+            partii) przy otwarciu ustawiane fixed: pod kafelkiem, jak się nie mieści - nad, inaczej tak wysoko jak się da;
+            przesuwane w lewo przy prawej krawędzi (też nie ucina ich kafelek). Test tipPosition; smoke: fokus na ostatnim
+            kafelku Military Staff przy dole okna - dymek w całości w oknie (wide i narrow).
+            PIERWSZY DZIEŃ KAMPANII (2026-10-20, prośba użytkownika: nagrywanie od razu po wejściu do gry, nie od
+            następnego dnia): gra pisze do logs/game.log "[[ Launching SINGLEPLAYER-game ]]" przy starcie gry z menu
+            (nowa gra lub wczytany save), "End RestoreDeviceObjects" gdy pokaże mapę, "Resetting game(state)" przy
+            wyjściu do menu. live.game_launch() czyta log przyrostowo (od ostatniego miejsca, ~0,01 s) ->
+            ic_history.scan_game_log; rejestrator po skoku daty (menu / wczytanie) zapisuje dzień od razu, gdy log mówi
+            "w grze" - raz na start gry (ten sam dzień zapisany ponownie zastępuje poprzedni wpis). Aplikacja włączona
+            w trakcie gry też zapisuje bieżący dzień od razu. Stan wyboru państwa / menu dalej pomijany. Na żywo: gra
+            1936.01.01 -> "w grze" (start nr 2 tej sesji). Testy: test_ic_history (stany logu, zapis raz na start).
+            [ ] wczytanie save'a z menu w trakcie gry (Esc -> Load) - czy gra pisze "Launching" (do sprawdzenia)
+            POPRAWKA (2026-10-20, zgłoszenie użytkownika "nie wykrywało kampanii ani na pauzie, ani po puszczeniu
+            czasu"): rejestrator działał (app.log 23:23:20: GER_1936-01-01 zapisany 3 s po wejściu do gry), ale Game
+            summary odświeżał się tylko przy wybranej aktywnej kampanii - po usunięciu wszystkich kampanii widok stał na
+            "No campaign recorded yet". Teraz przy starej kampanii / bez kampanii co 5 s lekko sprawdza listę: nowe
+            nagranie otwiera się samo, inna zmiana listy odświeża widok. Status w menu: "Waiting for the game (in the
+            menu, or the next game day)".
+            ZWIJANE KAFELKI (2026-10-20, prośba użytkownika "każdy kafelek można zwinąć"; pytania bez odpowiedzi ->
+            rekomendowane: pamięć na stałe, zwinięty nie czyta gry, przyciski Collapse all / Expand all): lib/collapse.js
+            - każdy .card z nagłówkiem i .hoi-panel dostaje ▾/▸ (też kafelki dodane później, MutationObserver), stan per
+            zakładka + tytuł bez liczb i tagów (localStorage hoi4dbg.collapsed); refreshControl pomija zwinięte, livePanel
+            czyta od razu po rozwinięciu. Game summary: wykres IC w kafelku "IC a day", Players actions: "Events".
+            Smoke: każda zakładka - wszystkie kafelki z przyciskiem, zwinięcie chowa treść, przycisk przy prawej krawędzi.
+            PORÓWNYWARKA - STRZAŁKI: ▲/▼ = więcej/mniej, zielona = lepiej, czerwona = gorzej; mniej = lepiej dla kosztu,
+            zaopatrzenia, wagi, paliwa, czasu szkolenia, ludzi, utraty doświadczenia; szerokość frontu bez koloru.
+            PORÓWNANIE (2026-10-20, prośba użytkownika; wybory: dywizje + czołgi + samoloty, różnica do pierwszej kolumny;
+            miejsce i liczba bez odpowiedzi -> na dole Army/Air/Navy, do 4 kolumn): kafelek "Compare" (views/compare.js) -
+            Division templates | Tank designs | Plane designs, w każdej kolumnie państwo + szablon/projekt, pierwsza =
+            odniesienie, pozostałe: wartość i +/- (=) w formacie wiersza; statystyki projektanta dywizji każdego państwa
+            (jego badania i doktryny), koszt produkcji i paliwo; tylko aktualne projekty. Dane /api/countries/<TAG>/military
+            na żywo (0,1-0,6 s na państwo, raz na widok, przycisk "Read again"); wybór zapamiętany. Smoke: 30 wierszy,
+            dodanie / usunięcie kolumny, zrzut wide-compare.png (GER Infanterie-Division vs SOV Strelkovaya Diviziya).
+            PROJEKTY CZOŁGÓW (2026-10-20, prośba użytkownika "graficznie jak przy samolotach"): kafelek "Tank designs" w
+            Army/Air/Navy (pod Army): Current / Decommissioned, rozwijany projekt Graphic | Text. Grafika jak projektant
+            czołgów gry: wieża + uzbrojenie główne, rysunek podwozia (GFX_TC_<podwozie>_<państwo>, inaczej ogólny) na
+            GFX_tank_blueprint_background, zawieszenie / pancerz / silnik, 4 moduły specjalne (ikony GFX_EMI_<moduł>,
+            brak slotu = GFX_EMSI_locked); statystyki Base / Combat / Misc. Pamięć: sloty i moduły jak samoloty
+            (_plane_slots), statystyki lądowe wariantu fixed64 (TANK_STATS: defense +0x108, breakthrough +0x110, hardness
+            +0x118, soft +0x120, hard +0x128, air attack +0x280, speed +0x2F0, armor +0x2F8, piercing +0x300,
+            reliability +0x308, fuel +0x328, koszt +0x368) - sprawdzone na infantry_equipment_1 (= plik R56) i BT-7.
+            Smoke: 9 slotów, rysunek, zrzut wide-tank-designer.png.
+            [ ] porównanie statystyk z projektantem w grze przez użytkownika
             SPRZĘT W GAME SUMMARY (2026-10-20, prośba użytkownika; wybory: wszystkie państwa, rodzaj sprzętu, tylko dane
             na żywo, jedno państwo z 4 liniami): osobna sekcja "Equipment" na dole zakładki - wybór państwa i rodzaju
             (przyciski z ikonami), wykres needed / in divisions / stockpile i osobny wykres produced a day, tabela
@@ -750,6 +859,40 @@ DO ZROBIENIA (w tej kolejności)
             Na żywo bez budynków prowincji i kontrolerów pojedynczych prowincji (tylko w widoku Save).
 [x] STATE EDITOR - IKONY (2026-10-15): budynki regionu i prowincji oraz zasoby z ikonami modów (po id budynku /
             zasobu); bez własnej ikony (pomniki, budynki modów) - ogólna ikona budynku.
+[~] GAME SUMMARY - ANALIZA KAMPANII (2026-10-21/22, prośba użytkownika: pomysły 2-11 + nowe funkcje 2-4)
+            REJESTRATOR (ic_history.EXTRA, live/service._campaign_day): co dzień gry dla każdego państwa PP, stabilność %,
+            poparcie wojny %, CP, paliwo, dywizje, bataliony, wyposażenie dywizji % (min(w dywizjach, potrzeba) / potrzeba),
+            stany posiadane / kontrolowane, VP kontrolowane (VP stanów z history/states gry i modów, stan liczy się
+            w całości kontrolerowi), technologie (pointers.researched_count - sam rozmiar tablicy), manpower wolny (stany
+            kontrolowane) / w polu / w szkoleniu. Na żywo (GER 1936.01.01, 99 państw, 0,46 s na dzień): GER 24 stany,
+            30 dywizji / 253 bataliony, 55 technologii, stabilność 70%, VP 320; SOV 152 stany, 138 dywizji.
+            Grupy: suma; stabilność / poparcie / wyposażenie = średnia. "Destroyed / lost" = zniszczone wroga / stracone
+            (sumy narastające IC). Zapis w wierszu dnia: "w" czas rzeczywisty, "s" sekundy zatrzymania (godzina gry stoi
+            > 3 s: pauza / czekanie).
+            ZAKŁADKA: nowe grupy przycisków Politics / Army / Territory / Research / Manpower (+ Destroyed / lost w IC
+            lost); NOTATKI (<id>.notes.json, klik w wykres = dzień, żółte linie na wykresach, tekst w dymku);
+            RANKING GRACZY (9 kategorii, ▲▼ względem 30 dni gry wcześniej, z marionetkami lub bez); MAPA KAMPANII
+            (campaign_map.py: provinces.bmp / definition.csv / history/states / colors.txt z gry i modów - ostatni root
+            wygrywa; PNG z numerem stanu w pikselu 2816x1024, cache <dane>/cache; <id>.map.jsonl: pierwszy dzień pełny,
+            potem zmiany właściciela / kontrolera; odtwarzanie Slow/Normal/Fast, suwak dni, tryb Owner (okupacja w paski)
+            / Controller, granice państw, dymek: stan, właściciel, kontroler, VP, legenda 14 państw, zoom/przesuwanie);
+            SESJE (nowa po 15 min bez dnia lub po wczytaniu save'a: czas, dni gry, dni/godz., zatrzymanie, gracze,
+            dołączyli / wyszli; czas gry na gracza); PROGNOZA PRODUKCJI w sekcji Equipment (każdy rodzaj sprzętu:
+            brakuje, produkcja dzienna, dni do uzupełnienia, data); RAPORT "Export report" -> jeden plik HTML (wykresy SVG
+            13 wartości dla pokazanych linii, ostatnie wartości, ranking, mapa dnia, notatki, sesje).
+            Sprawdzone: testy py 338 / js 116, smoke na kampanii testowej (mapa narysowana, suwak, notatka z kliknięcia,
+            ranking, sesje, raport 17 wykresów + mapa). Zrzuty smoke-output/*-campaign-map.png, *-ranking.png.
+            POPRAWKA BACKENDU: --watch-stdin czytał stdin blokująco w wątku - na Windows ładowanie DLL (pierwszy import
+            numpy dla mapy) czekało na ten odczyt i backend wisiał; teraz PeekNamedPipe co 0,5 s (__main__.wait_for_eof).
+            [ ] wymaga ponownego uruchomienia aplikacji (nowy rejestrator); kampanie sprzed 2026-10-21 bez tych wartości
+            [ ] STRATY LUDZI: w zapisie war_relation {first_casualties, second_casualties} na parę państw; w pamięci obiekt
+                wojny (relacja +0x2E8): +0x10/+0x14 strony, +0x20 data startu (godziny), od +0x48 zera w 1936.01.01 -
+                kandydaci na straty; do potwierdzenia po kilku dniach wojny (porównanie z autozapisem)
+            [ ] KOMENDY W MP (nowa funkcja 3): rozpoznanie hoi4.exe 1.19.3: CSetNationalFocusCommand (vtable rva
+                0x2996458, konstruktor 0x1146f70: (cmd, &tag int32 -> +0x28, focus -> +0x30), 0x38 B przez 0x21c9af0),
+                CSetResearchCommand (vtable 0x2994f40, konstruktor 0x11479c0); interfejs wysyła przez 0x2250b00(handler,
+                cmd, 0), handler = [obiekt+0xF38]->vfunc 0x88. Do zrobienia: wywołanie w głównym wątku gry (hook), nie
+                z obcego wątku (kolejka komend nie jest na to gotowa - ryzyko crasha), test na 2 klientach (Krok H)
 [ ] Krok G  Game Tools (narzędzia lokalne)
             (zakładka Intelligence Lab USUNIĘTA 2026-10-13 na prośbę użytkownika - była tylko na danych DEMO)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)

@@ -1,6 +1,7 @@
 // Line chart over game days (SVG): recessive grid and axes, 2px lines, a legend, crosshair + tooltip with every
 // series' value on the hovered day (in every chart of the same hoverSync).
-// Series: { label, color, dash, points: [[day, value], ...] } (days ascending).
+// Series: { label, color, dash, points: [[day, value], ...] } (days ascending). Markers: [{ t, label }] - the user's
+// notes as dashed vertical lines, their text in the tooltip near them; onPick(day): a click on the plot (a note on that day).
 import { h } from './dom.js';
 import { numberLocale } from './options.js';
 
@@ -79,7 +80,7 @@ export function hoverSync() {
   return { charts: [] };
 }
 
-export function lineChart({ title, series, format = compact, sync = null }) {
+export function lineChart({ title, series, format = compact, sync = null, markers = [], onPick = null }) {
   const all = series.flatMap((s) => s.points);
   if (!all.length) return h('div', { class: 'lc' }, h('div', { class: 'lc-title' }, title), h('p', { class: 'muted' }, 'No data yet.'));
   const t0 = Math.min(...all.map((p) => p[0]));
@@ -109,6 +110,13 @@ export function lineChart({ title, series, format = compact, sync = null }) {
     root.append(svg('path', { d, class: 'lc-line', stroke: s.color, ...(s.dash ? { 'stroke-dasharray': '6 4' } : {}) }));
     if (s.points.length === 1) root.append(svg('circle', { cx: x(s.points[0][0]), cy: y(s.points[0][1]), r: 4, fill: s.color, class: 'lc-dot' }));
   }
+  for (const m of markers) {
+    if (m.t < t0 || m.t > t1) continue;
+    const g = svg('g', { class: 'lc-note' });
+    g.append(svg('line', { x1: x(m.t), x2: x(m.t), y1: PAD.top, y2: H - PAD.bottom, class: 'lc-note-line' }),
+      svg('path', { d: `M${x(m.t)},${PAD.top}l7,4l-7,4z`, class: 'lc-note-flag' }));
+    root.append(g);
+  }
   const cross = svg('line', { y1: PAD.top, y2: H - PAD.bottom, class: 'lc-cross', visibility: 'hidden' });
   const dots = series.map((s) => svg('circle', { r: 4, fill: s.color, class: 'lc-dot', visibility: 'hidden' }));
   const hit = svg('rect', { x: PAD.left, y: PAD.top, width: W - PAD.left - PAD.right, height: H - PAD.top - PAD.bottom, class: 'lc-hit' });
@@ -126,7 +134,10 @@ export function lineChart({ title, series, format = compact, sync = null }) {
       dots[i].setAttribute('cx', x(t)); dots[i].setAttribute('cy', y(v)); dots[i].setAttribute('visibility', 'visible');
       return { s, v };
     }).filter(Boolean).sort((a, b) => b.v - a.v);
+    const near = Math.max(1, (t1 - t0) / 80);   // notes within about a pixel column or two of the cursor
+    const notes = markers.filter((m) => Math.abs(m.t - t) <= near);
     tip.replaceChildren(h('div', { class: 'lc-tip-date' }, dayText(t)),
+      ...notes.map((m) => h('div', { class: 'lc-tip-note' }, `✎ ${dayText(m.t)}: ${m.label}`)),
       ...rows.map(({ s, v }) => h('div', { class: 'lc-tip-row' },
         h('span', { class: `lc-swatch ${s.dash ? 'lc-swatch-dash' : ''}`, style: { borderColor: s.color } }),
         h('span', { class: 'lc-tip-label' }, s.label), h('span', { class: 'lc-tip-value' }, format === compact
@@ -141,12 +152,19 @@ export function lineChart({ title, series, format = compact, sync = null }) {
     dots.forEach((d) => d.setAttribute('visibility', 'hidden'));
   };
   sync?.charts.push({ showAt, hide });
-  hit.addEventListener('mousemove', (ev) => {
+  const dayAt = (ev) => {
     const r = root.getBoundingClientRect();
     const px = ((ev.clientX - r.left) / r.width) * W;
-    const t = Math.round(t0 + ((px - PAD.left) / (W - PAD.left - PAD.right)) * (t1 - t0));
+    return Math.min(t1, Math.max(t0, Math.round(t0 + ((px - PAD.left) / (W - PAD.left - PAD.right)) * (t1 - t0))));
+  };
+  hit.addEventListener('mousemove', (ev) => {
+    const t = dayAt(ev);
     if (sync) sync.charts.forEach((c) => c.showAt(t)); else showAt(t);
   });
+  if (onPick) {
+    hit.classList.add('lc-hit-pick');
+    hit.addEventListener('click', (ev) => onPick(dayAt(ev)));
+  }
   hit.addEventListener('mouseleave', () => (sync ? sync.charts.forEach((c) => c.hide()) : hide()));
   // a series without any value stays in the legend, marked, so a chosen country never silently disappears
   const legend = series.length > 1 ? h('div', { class: 'lc-legend' }, series.map((s) => h('span', {

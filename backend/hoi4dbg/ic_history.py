@@ -52,22 +52,52 @@ def date_text(t: int) -> str:
 STORED = ("mil", "nav", "civ", "fciv", "fmil", "fdock",   # order of the values in a file row
           "wmil", "wnav", "wciv",                        # IC a day wasted by idle military / naval / civilian factories
           "lcom", "latt", "lenemy",                      # IC of equipment lost in combat / to attrition / of the enemy
-          "amil", "anav", "aciv")                        # factories on military / naval production lines, construction
-SUMS = {"fall": ("fciv", "fmil", "fdock"), "wall": ("wmil", "wnav", "wciv"), "lall": ("lcom", "latt")}
+          "amil", "anav", "aciv",                        # factories on military / naval production lines, construction
+          *("pp", "stab", "ws", "cp", "fuel",            # from 2026-10-21 (EXTRA, live/service._campaign_day)
+            "divs", "bat", "cover", "sown", "sctl", "vp", "tech", "mpf", "mpa", "mpt"))
+# values recorded from 2026-10-21 (user's request): political power, stability %, war support %, command power, fuel,
+# divisions, battalions, equipment coverage % of the divisions, owned / controlled states, victory points controlled,
+# researched technologies, free manpower, manpower in the field, in training
+EXTRA = STORED[15:]
+SUMS = {"fall": ("fciv", "fmil", "fdock"), "wall": ("wmil", "wnav", "wciv"), "lall": ("lcom", "latt"),
+        "mpall": ("mpf", "mpa", "mpt"), "icall": ("mil", "nav", "civ")}
 # IC a day per factory working on a line (2026-10-20, user's request): IC / assigned factories - the line's efficiency,
 # factory / dockyard output and construction speed bonuses, resource shortages. Groups: their IC / their factories.
 # Days recorded before the assigned factories were stored (before 2026-10-20): military and naval from the wasted IC
 # (wasted = idle x IC / assigned and idle = factories - assigned, so assigned = factories x IC / (IC + wasted));
 # civilian ones stay unknown (free civilian factories were not stored).
 RATIOS = {"pmil": ("mil", "amil", "fmil", "wmil"), "pnav": ("nav", "anav", "fdock", "wnav"), "pciv": ("civ", "aciv", None, None)}
-METRICS = STORED + tuple(SUMS) + tuple(RATIOS)
-LEVEL_METRICS = ("fciv", "fmil", "fdock", "fall", *RATIOS)   # states of a day, not flows: no cumulative chart
+# equipment destroyed of the enemy per equipment lost, both summed from the first known day (IC; a group: its sums)
+CUM_RATIOS = {"kd": ("lenemy", "lall")}
+METRICS = STORED + tuple(SUMS) + tuple(RATIOS) + tuple(CUM_RATIOS)
+LEVEL_METRICS = ("fciv", "fmil", "fdock", "fall", *RATIOS, *EXTRA, "mpall", *CUM_RATIOS)   # states of a day, not flows
+AVERAGES = ("stab", "ws", "cover")   # a group's value: the mean of its countries with one
 LOSS_METRICS = ("lcom", "latt", "lenemy", "lall")   # only countries with a combat log have them
 NO_FACTION = "Non-aligned"
 
 # IC a day of one factory without any line to compare with (common/defines NProduction, 1.19.3): BASE_FACTORY_SPEED_MIL,
 # BASE_FACTORY_SPEED_NAV, BASE_FACTORY_SPEED (construction)
 BASE_SPEED = {"mil": 3.5, "nav": 2.0, "civ": 4.0}
+
+
+LAUNCH_LINE = re.compile(r"\[\[ Launching ([A-Z]+)-game \]\]")
+
+
+def scan_game_log(lines, state: dict | None = None) -> dict:
+    """In-game state from logs/game.log lines (read in parts: pass the state back). The game writes
+    "[[ Launching SINGLEPLAYER-game ]]" when a game starts from the menu (a new one or a loaded save) and
+    "End RestoreDeviceObjects" when its map is shown; "Resetting game" when it goes back to the menu.
+    {"n": launches seen, "pending": launched, map not shown yet, "in_game": number of the game being played or None}."""
+    state = dict(state or {"n": 0, "pending": False, "in_game": None})
+    for line in lines:
+        if LAUNCH_LINE.search(line):
+            state["n"] += 1
+            state["pending"] = True
+        elif "End RestoreDeviceObjects" in line and state["pending"]:
+            state["pending"], state["in_game"] = False, state["n"]
+        elif "Resetting game" in line:   # also "Resetting gamestate"
+            state["pending"], state["in_game"] = False, None
+    return state
 
 
 def wasted_ic(ic: dict, idle: dict) -> dict:
@@ -145,6 +175,33 @@ def per_factory(ic, factories) -> float | None:
     return None if ic is None or not factories else round(ic / factories, 3)
 
 
+def combine(values: list, metric: str) -> float | None:
+    """A group's value of a day from its countries' values: the sum (unknown when one is unknown); the losses sum the
+    countries with a combat log (most have none); stability, war support and coverage are the mean of the known ones."""
+    known = [v for v in values if v is not None]
+    if metric in AVERAGES:
+        return round(sum(known) / len(known), 3) if known else None
+    if metric in LOSS_METRICS:
+        return round(sum(known), 3) if known else None
+    return None if len(known) < len(values) else round(sum(known), 3)
+
+
+def cum_ratio(t: list[int], num: list, den: list) -> list[float | None]:
+    """Running sum of `num` / running sum of `den` (each day's value counts for the days until the next sample, as the
+    cumulative chart); None until both are known and the denominator is above zero."""
+    out, a, b = [], None, None
+    for i in range(len(t)):
+        w = 1 if i == 0 else t[i] - t[i - 1]
+        x = num[i] if i < len(num) else None
+        y = den[i] if i < len(den) else None
+        if x is not None:
+            a = (a or 0.0) + x * w
+        if y is not None:
+            b = (b or 0.0) + y * w
+        out.append(round(a / b, 3) if a is not None and b else None)
+    return out
+
+
 def view(game: dict, metric: str, tags: list[str] | None, by_faction: bool, groups: dict | None = None,
          by_player: bool = False, subjects: bool = True) -> dict:
     """What the Game summary tab draws: the country list (latest IC a day, faction) and the day series of `metric`
@@ -166,6 +223,17 @@ def view(game: dict, metric: str, tags: list[str] | None, by_faction: bool, grou
         listing = view(game, metric, tags, False, groups)["countries"]
         num["series"].sort(key=lambda s: -(s["values"][-1] or 0) if s["values"] else 0)
         return {**num, "countries": listing}
+    if metric in CUM_RATIOS and (by_player or by_faction):   # a group's ratio: its sums
+        a, b = CUM_RATIOS[metric]
+        num = view(game, a, tags, by_faction, groups, by_player, subjects)
+        dens = {s["key"]: s["values"] for s in view(game, b, tags, by_faction, groups, by_player, subjects)["series"]}
+        for s in num["series"]:
+            s["values"] = cum_ratio(game["t"], s["values"], dens.get(s["key"], []))
+        lasts = {s["key"]: next((v for v in reversed(s["values"]) if v is not None), None) for s in num["series"]}
+        for p in num["players"]:
+            p["value"] = lasts.get(p["name"])
+        num["series"].sort(key=lambda s: -(lasts[s["key"]] or 0))
+        return {**num, "countries": view(game, metric, tags, False, groups)["countries"]}
     countries = game["countries"]
     game_factions = game.get("factions") or {}
     groups = groups or {"custom": [], "assign": {}}
@@ -184,41 +252,34 @@ def view(game: dict, metric: str, tags: list[str] | None, by_faction: bool, grou
     latest = days[-1] if days else {}
     players = [{"name": player_key(t, p), "tag": t, "subjects": p.get("s") or [],
                 "value": last(countries.get(t, {}), metric)} for t, p in latest.items()]
+    n = len(game["t"])
+    column = lambda tag: countries.get(tag, {}).get(metric) or [None] * n  # noqa: E731
     if by_player:
-        skip_unknown = metric in LOSS_METRICS
         sums: dict[str, list] = {}
         for i, day in enumerate(days):
+            members: dict[str, list] = {}
             for t, p in day.items():
-                acc = sums.setdefault(player_key(t, p), [None if skip_unknown else 0.0] * len(game["t"]))
-                for member in [t, *(p.get("s") or [] if subjects else [])]:
-                    x = countries.get(member, {}).get(metric, [None] * len(game["t"]))[i]
-                    if skip_unknown:
-                        acc[i] = acc[i] if x is None else (acc[i] or 0.0) + x
-                    else:
-                        acc[i] = None if x is None or acc[i] is None else acc[i] + x
-        order = sorted(sums, key=lambda n: -(sums[n][-1] or 0))
-        series = [{"key": n, "values": [None if x is None else round(x, 3) for x in sums[n]]} for n in order]
+                members.setdefault(player_key(t, p), []).extend([t, *(p.get("s") or [] if subjects else [])])
+            for name, tags_ in members.items():
+                sums.setdefault(name, [None] * n)[i] = combine([column(m)[i] for m in tags_], metric)
+        order = sorted(sums, key=lambda k: -(sums[k][-1] or 0))
+        series = [{"key": k, "values": sums[k]} for k in order]
         if subjects:   # the subjects' own value counts in the listing too
             for p in players:
-                vals = [last(countries.get(m, {}), metric) for m in [p["tag"], *p["subjects"]]]
-                p["value"] = None if all(v is None for v in vals) else round(sum(v or 0 for v in vals), 3)
+                p["value"] = combine([last(countries.get(m, {}), metric) for m in [p["tag"], *p["subjects"]]], metric)
     elif by_faction:
-        sums: dict[str, list[float]] = {}
-        skip_unknown = metric in LOSS_METRICS   # most countries have no combat log: sum the known ones
-        for t, v in countries.items():
-            name = factions.get(t) or NO_FACTION
-            acc = sums.setdefault(name, [None if skip_unknown else 0.0] * len(game["t"]))
-            for i, x in enumerate(v[metric]):
-                if skip_unknown:
-                    acc[i] = acc[i] if x is None else (acc[i] or 0.0) + x
-                else:
-                    acc[i] = None if x is None or acc[i] is None else acc[i] + x
+        members: dict[str, list[str]] = {}
+        for t in countries:
+            members.setdefault(factions.get(t) or NO_FACTION, []).append(t)
         for name in groups["custom"]:   # an empty group of the user's still shows (as zero)
-            sums.setdefault(name, [None if skip_unknown else 0.0] * len(game["t"]))
-        if skip_unknown:   # groups without any combat log are not drawn
-            sums = {n: v for n, v in sums.items() if any(x is not None for x in v) or n in groups["custom"]}
-        order = sorted(sums, key=lambda n: (n == NO_FACTION, -(sums[n][-1] or 0) if sums[n] else 0))
-        series = [{"key": n, "values": [None if x is None else round(x, 3) for x in sums[n]]} for n in order]
+            members.setdefault(name, [])
+        sums = {name: [combine([column(m)[i] for m in tags_], metric) if tags_ else
+                       (None if metric in LOSS_METRICS or metric in AVERAGES else 0.0) for i in range(n)]
+                for name, tags_ in members.items()}
+        if metric in LOSS_METRICS:   # groups without any combat log are not drawn
+            sums = {k: v for k, v in sums.items() if any(x is not None for x in v) or k in groups["custom"]}
+        order = sorted(sums, key=lambda k: (k == NO_FACTION, -(sums[k][-1] or 0) if sums[k] else 0))
+        series = [{"key": k, "values": sums[k]} for k in order]
     else:
         series = [{"key": t, "values": countries[t][metric]} for t in tags or [] if t in countries]
     for c in listing:
@@ -226,6 +287,102 @@ def view(game: dict, metric: str, tags: list[str] | None, by_faction: bool, grou
     return {"t": game["t"], "dates": game["dates"], "countries": listing, "series": series,
             "factions": sorted({f for f in factions.values() if f} | set(groups["custom"])),
             "custom": groups["custom"], "players": players}
+
+
+STOP_AFTER = 3.0    # real seconds the game hour stands still before the time counts as stopped (paused, waiting)
+SESSION_GAP = 900   # real seconds between two recorded days that start a new session (the game or the app was closed)
+RANKING = (("icall", "IC a day", False), ("fall", "Factories", False), ("divs", "Divisions", False),
+           ("mpall", "Manpower", False), ("tech", "Technologies", False), ("vp", "Victory points", False),
+           ("sctl", "States controlled", False), ("lenemy", "Enemy equipment destroyed (IC)", True),
+           ("kd", "Destroyed / lost", False))
+RANK_BACK = 30   # game days back the ranking is compared with
+
+
+def _last_known(values: list, upto: int | None = None):
+    for v in reversed(values[:None if upto is None else upto + 1]):
+        if v is not None:
+            return v
+    return None
+
+
+def ranking(game: dict, subjects: bool = True) -> dict:
+    """The human players ranked in each RANKING category (with their subjects when `subjects`): the last recorded day
+    and RANK_BACK game days before - {"date", "since", "categories": [{"key", "label", "rows": [{"name", "tag",
+    "value", "before", "rank", "rank_before"}]}]}; a cumulative category sums the days recorded."""
+    t = game["t"]
+    if not t:
+        return {"date": None, "since": None, "categories": []}
+    back = max((i for i, x in enumerate(t) if x <= t[-1] - RANK_BACK), default=0)   # else the first day
+    tags = {player_key(tag, p): tag for tag, p in (game["players"][-1] if game["players"] else {}).items()}
+    out = []
+    for key, label, cumulated in RANKING:
+        v = view(game, key, None, False, None, True, subjects)
+        rows = []
+        for s in v["series"]:
+            values = s["values"]
+            if cumulated:
+                sums, acc = [], None
+                for i, x in enumerate(values):
+                    if x is not None:
+                        acc = (acc or 0.0) + x * (1 if i == 0 else t[i] - t[i - 1])
+                    sums.append(None if acc is None else round(acc, 1))
+                values = sums
+            rows.append({"name": s["key"], "tag": tags.get(s["key"]), "value": _last_known(values),
+                         "before": _last_known(values, back) if back < len(t) - 1 else None})
+        for field, rank in (("value", "rank"), ("before", "rank_before")):
+            ordered = sorted((r for r in rows if r[field] is not None), key=lambda r: -r[field])
+            for i, r in enumerate(ordered):
+                r[rank] = i + 1
+            for r in rows:
+                r.setdefault(rank, None)
+        out.append({"key": key, "label": label, "rows": sorted(rows, key=lambda r: r["rank"] or 999)})
+    return {"date": date_text(t[-1]), "since": date_text(t[back]) if back < len(t) - 1 else None, "categories": out}
+
+
+def sessions(game: dict) -> dict:
+    """Play sessions of a campaign from the real time of each recorded day (days recorded from 2026-10-21): a new
+    session after SESSION_GAP seconds without a day or when the date goes back (a save loaded). Per session: real
+    start and end, game days, game days an hour, time stopped (the game hour stood still over STOP_AFTER seconds: paused
+    or waiting), the players and who joined or left; per player: sessions, minutes present, countries."""
+    rows = [(i, w) for i, w in enumerate(game.get("wall") or []) if w is not None]
+    out, players = [], {}
+    current = None
+    for i, w in rows:
+        day = game["t"][i]
+        names = {player_key(tag, p): tag for tag, p in (game["players"][i] or {}).items()}
+        if current is None or w - current["_w"] > SESSION_GAP or day < current["_t"]:
+            current = {"start": w, "end": w, "first": game["dates"][i], "last": game["dates"][i], "days": 0,
+                       "stopped": 0.0, "players": dict(names), "joined": [], "left": [], "_w": w, "_t": day,
+                       "_names": dict(names)}
+            out.append(current)
+        else:
+            span = w - current["_w"]
+            for n in set(names) & set(current["_names"]):   # present on both days: the time in between counts
+                players.setdefault(n, {"name": n, "sessions": set(), "seconds": 0.0, "countries": set()})["seconds"] += span
+            for n in sorted(set(names) - set(current["_names"])):
+                current["joined"].append({"name": n, "tag": names[n], "date": game["dates"][i], "at": w})
+            for n in sorted(set(current["_names"]) - set(names)):
+                current["left"].append({"name": n, "tag": current["_names"][n], "date": game["dates"][i], "at": w})
+            current["players"].update(names)
+            current["days"] += day - current["_t"]
+            current["stopped"] += (game.get("still") or [0] * len(game["t"]))[i] or 0
+            current.update(end=w, last=game["dates"][i], _w=w, _t=day, _names=names)
+        for n, tag in names.items():
+            entry = players.setdefault(n, {"name": n, "sessions": set(), "seconds": 0.0, "countries": set()})
+            entry["sessions"].add(len(out))
+            entry["countries"].add(tag)
+    for sess in out:
+        hours = (sess["end"] - sess["start"]) / 3600
+        sess["minutes"] = round(hours * 60, 1)
+        sess["days_per_hour"] = round(sess["days"] / hours, 1) if hours > 0 else None
+        sess["stopped_minutes"] = round(sess.pop("stopped") / 60, 1)
+        sess["players"] = [{"name": n, "tag": t} for n, t in sorted(sess["players"].items())]
+        for k in ("_w", "_t", "_names"):
+            sess.pop(k)
+    summary = [{"name": p["name"], "sessions": len(p["sessions"]), "minutes": round(p["seconds"] / 60, 1),
+                "countries": sorted(p["countries"])} for p in players.values()]
+    return {"sessions": out, "players": sorted(summary, key=lambda p: -p["minutes"]),
+            "recorded": len(rows), "days": len(game["t"])}
 
 
 class IcHistory:
@@ -283,10 +440,11 @@ class IcHistory:
         tags = sorted({tag for r in days for tag in r["c"]})
         series = {tag: {k: [] for k in METRICS} for tag in tags}
         factions: dict[str, str] = {}
+        MISSING = [None if k in AVERAGES else 0 for k in STORED]   # a country that did not exist that day
         for r in days:
             for tag in tags:
                 values = r["c"].get(tag)
-                row = list(values) + [None] * (len(STORED) - len(values)) if values else [0] * len(STORED)
+                row = list(values) + [None] * (len(STORED) - len(values)) if values else MISSING
                 for k, v in zip(STORED, row):   # rows recorded before a value was counted have none (None)
                     series[tag][k].append(v)
                 for k, parts in SUMS.items():
@@ -300,6 +458,10 @@ class IcHistory:
                     s[k].append(per_factory(s[ic][-1], s[assigned][-1]))
             if "f" in r:
                 factions = r["f"]
+        t = [r["t"] for r in days]
+        for tag in tags:
+            for k, (a, b) in CUM_RATIOS.items():
+                series[tag][k] = cum_ratio(t, series[tag][a], series[tag][b])
         known = [r.get("p") for r in days]
         first = next((p for p in known if p), None) or (
             {meta["player"]: {"n": None, "s": []}} if meta.get("player") else {})
@@ -308,7 +470,8 @@ class IcHistory:
             current = p or current
             players.append(current)
         return {"id": gid, "player": meta.get("player"), "t": [r["t"] for r in days], "dates": [r["d"] for r in days],
-                "countries": series, "factions": factions, "players": players}
+                "countries": series, "factions": factions, "players": players,
+                "wall": [r.get("w") for r in days], "still": [r.get("s") for r in days]}
 
     def groups(self, gid: str) -> dict:
         """The user's grouping of a campaign (check_groups), empty when none was saved."""
@@ -337,6 +500,8 @@ class IcHistory:
             (self.folder / f"{gid}.designs.json").unlink(missing_ok=True)
             (self.folder / f"{gid}.actions.jsonl").unlink(missing_ok=True)
             (self.folder / f"{gid}.equipment.jsonl").unlink(missing_ok=True)
+            (self.folder / f"{gid}.map.jsonl").unlink(missing_ok=True)
+            (self.folder / f"{gid}.notes.json").unlink(missing_ok=True)
 
     def _choose(self, player: str, t: int, campaign: str | None = None) -> str:
         """The campaign file a sample of `player` at day `t` of the game's campaign id `campaign` belongs to (cutting
@@ -423,6 +588,10 @@ class IcHistory:
         if any(r["t"] >= t for r in lines):
             self._equipment_path(gid).write_text("".join(json.dumps(r, separators=(",", ":")) + "\n" for r in lines
                                                          if r["t"] < t), encoding="utf-8")
+        lines = self.map_rows(gid)   # states of replayed days (the rows before stay valid: each holds the changes)
+        if any(r["t"] >= t for r in lines):
+            self._map_path(gid).write_text("".join(json.dumps(r, separators=(",", ":")) + "\n" for r in lines
+                                                   if r["t"] < t), encoding="utf-8")
         seen = self.designs(gid)   # designs first seen on a replayed day: the game may give their ids to new ones
         kept = {tag: {i: v for i, v in ids.items() if v[1] or v[0] < t} for tag, ids in seen.items()}
         if kept != seen:
@@ -487,8 +656,89 @@ class IcHistory:
                     sums = [a + b for a, b in zip(sums, v)]
             for k, x in zip(series, sums):
                 series[k].append(round(x, 2))
+        last: dict[str, list[float]] = {}   # every archetype on the last day: the production forecast
+        for r in rows[-1:]:
+            for tag in tags:
+                for a, v in (r["e"].get(tag) or {}).items():
+                    last[a] = [round(x + y, 2) for x, y in zip(last.get(a, [0.0, 0.0, 0.0, 0.0]), v)]
         return {"t": [r["t"] for r in rows], "dates": [date_text(r["t"]) for r in rows], "archetype": chosen,
-                "archetypes": dict(sorted(totals.items(), key=lambda kv: -kv[1])), "series": series}
+                "archetypes": dict(sorted(totals.items(), key=lambda kv: -kv[1])), "series": series, "last": last}
+
+    # -- campaign map (2026-10-21): <id>.map.jsonl, one line a day {"t", "s": {state id: [owner, controller]}} with the
+    # states changed since the line before; "full": 1 = every state (the first day the recorder writes into the file)
+    def _map_path(self, gid: str) -> Path:
+        self._path(gid)   # checks the id
+        return self.folder / f"{gid}.map.jsonl"
+
+    def add_map(self, gid: str, t: int, states: dict, full: bool) -> None:
+        row = {"t": t, "s": {str(k): v for k, v in states.items()}}
+        if full:
+            row["full"] = 1
+        with self._map_path(gid).open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row, separators=(",", ":")) + "\n")
+
+    def map_rows(self, gid: str) -> list[dict]:
+        try:
+            text = self._map_path(gid).read_text(encoding="utf-8")
+        except OSError:
+            return []
+        out = []
+        for line in text.splitlines():
+            try:
+                out.append(json.loads(line))
+            except ValueError:   # a line cut by a crash
+                continue
+        return out
+
+    def map_states(self, gid: str, t: int | None = None) -> dict[str, list]:
+        """{state id: [owner, controller]} on day `t` (default: the last recorded one)."""
+        states: dict[str, list] = {}
+        for r in self.map_rows(gid):
+            if t is not None and r["t"] > t:
+                break
+            if r.get("full"):
+                states = {}
+            states.update(r["s"])
+        return states
+
+    # -- the user's notes on the timeline (2026-10-21): <id>.notes.json = [{"id", "t", "text", "created"}]
+    def _notes_path(self, gid: str) -> Path:
+        self._path(gid)   # checks the id
+        return self.folder / f"{gid}.notes.json"
+
+    def notes(self, gid: str) -> list[dict]:
+        try:
+            data = json.loads(self._notes_path(gid).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        return sorted((n for n in data if isinstance(n, dict) and isinstance(n.get("t"), int)), key=lambda n: (n["t"], n["id"]))
+
+    def set_note(self, gid: str, t: int, text: str, nid: int | None = None) -> list[dict]:
+        """Adds a note (nid None) or changes note `nid`; an empty text deletes it."""
+        if not self._path(gid).exists():
+            raise FileNotFoundError(gid)
+        if not isinstance(t, int) or not 0 <= t < 10_000 * 365 or not isinstance(text, str) or len(text) > 2000:
+            raise ValueError("a note needs a game day and a text of at most 2000 characters")
+        with self._lock:
+            notes = self.notes(gid)
+            text = text.strip()
+            if nid is None:
+                if not text:
+                    raise ValueError("the note is empty")
+                if len(notes) >= 500:
+                    raise ValueError("at most 500 notes a campaign")
+                notes.append({"id": max((n["id"] for n in notes), default=0) + 1, "t": t, "text": text,
+                              "created": time.strftime("%Y-%m-%d %H:%M:%S")})
+            else:
+                note = next((n for n in notes if n["id"] == nid), None)
+                if note is None:
+                    raise FileNotFoundError(f"note {nid}")
+                if text:
+                    note.update(t=t, text=text)
+                else:
+                    notes.remove(note)
+            self._notes_path(gid).write_text(json.dumps(notes, indent=1), encoding="utf-8")
+            return self.notes(gid)
 
     # -- Players actions (actions.py): the watched countries and the events of each campaign --
     def _actions_path(self, gid: str) -> Path:
@@ -569,6 +819,9 @@ class IcHistory:
                 row["f"] = sample["factions"]
             if sample.get("players"):
                 row["p"] = sample["players"]
+            if sample.get("wall") is not None:   # the real time of the day (session statistics, from 2026-10-21)
+                row["w"] = sample["wall"]
+                row["s"] = sample.get("still", 0)
             with self._path(self.active).open("a", encoding="utf-8") as f:
                 f.write(json.dumps(row, separators=(",", ":")) + "\n")
             self._last_t, self._player, self._campaign = sample["t"], sample["player"], campaign
@@ -597,6 +850,14 @@ class IcRecorder:
         self._snaps: dict[str, dict] = {}  # last snapshot per watched country
         self._snaps_gid: str | None = None
         self._chosen: tuple | None = None   # (file, how it was chosen) last logged
+        self._launch_done: str | None = None   # the game start (game.log) whose loaded day is recorded
+        self._map_last: dict | None = None   # states of the last day written to the map file
+        self._map_gid: str | None = None
+        self._hour: int | None = None        # game hour of the last poll and since when (real time) it stands
+        self._hour_since: float | None = None
+        self._still = 0.0                    # real seconds stopped since the last recorded day
+        self.wall = time.time
+        self.monotonic = time.monotonic
 
     def start(self) -> None:
         threading.Thread(target=self._run, name="ic-recorder", daemon=True).start()
@@ -613,16 +874,25 @@ class IcRecorder:
     def step(self) -> bool:
         """One poll: records when a game day has passed; True when a sample was written. Only a date moving forward by
         1..MAX_STEP days counts: the main menu and the country selection screen hold a 1936.01.01 game state with the
-        hovered country as player, and loading a save jumps the date - neither is a played day."""
-        t = self.live.game_day()
+        hovered country as player, and loading a save jumps the date - neither is a played day. Except the day a game
+        starts on (2026-10-20, user's request): once game.log says the game left the menu (live.game_launch), that
+        day is recorded right away, once per game start."""
+        hours = self.live.game_hours() if hasattr(self.live, "game_hours") else None
+        t = hours // 24 if hours is not None else self.live.game_day()
+        self._track_stops(hours)
         previous, self.seen_t = self.seen_t, t
         if t is not None and t != previous:   # a game started since the user turned it on gets it too
             self.live.ensure_combat_log_patch()
+        launch = None
         if t is None or previous is None or not 0 < t - previous <= MAX_STEP:
             if t != previous:   # another game state: its combat log and snapshots do not continue the last ones
                 self._losses = None
                 self._snaps = {}
-            return False
+                self._map_last = None
+            # a game just started on a country (game.log, not the menu's state): its first day is recorded at once
+            launch = self._new_launch()
+            if t is None or launch is None:
+                return False
         with_factions = t - self._last_faction_t >= FACTION_EVERY or self.last_t is None or t < self.last_t
         sample = self.live.ic_snapshot(with_factions)
         if sample["t"] != t:   # the day moved on while reading: take it next time
@@ -641,9 +911,14 @@ class IcRecorder:
                 else:
                     values.extend([None, None, None])
             self._losses = losses
+        extra = sample.pop("extra", None) or {}
         for tag, values in sample["countries"].items():   # after the losses (None when not read): assigned factories
             values.extend([None] * (12 - len(values)))
             values.extend(assigned.get(tag) or [None, None, None])
+            values.extend(extra.get(tag) or [None] * len(EXTRA))
+        control = sample.pop("map", None)
+        sample["wall"], sample["still"] = int(self.wall()), round(self._still)
+        self._still = 0.0
         designs = sample.pop("designs", None)
         equipment = sample.pop("equipment", None)
         gid = self.history.add(sample)
@@ -655,12 +930,44 @@ class IcRecorder:
             self.history.note_designs(gid, t, designs)
         if equipment:
             self.history.add_equipment(gid, t, equipment)
+        if control:
+            self._record_map(gid, t, control)
         if self.actions is not None:
             self._record_actions(gid, t, sample.get("player"))
         if with_factions:
             self._last_faction_t = t
+        if launch is not None:
+            self._launch_done = launch
         self.last_t = t
         return True
+
+    def _track_stops(self, hours: int | None) -> None:
+        """Real time the game hour stood still over STOP_AFTER seconds (paused or waiting for a player) - counted once
+        the hour moves on; the menu (no readable date) does not count."""
+        now = self.monotonic()
+        if hours != self._hour:
+            if self._hour is not None and hours is not None and self._hour_since is not None:
+                stood = now - self._hour_since
+                if stood > STOP_AFTER:
+                    self._still += stood
+            self._hour, self._hour_since = hours, now
+
+    def _record_map(self, gid: str, t: int, control: dict) -> None:
+        """Owner and controller of every state: all of them the first day written into a file, then the changes."""
+        control = {str(k): v for k, v in control.items()}
+        full = gid != self._map_gid or self._map_last is None
+        changed = control if full else {k: v for k, v in control.items() if self._map_last.get(k) != v}
+        if full or changed:
+            self.history.add_map(gid, t, changed, full)
+        self._map_last, self._map_gid = control, gid
+
+    def _new_launch(self) -> str | None:
+        """Id of the game being played (game.log) when its loaded day is not recorded yet, else None."""
+        try:
+            launch = self.live.game_launch()
+        except Exception:  # the log is optional: the next played day is recorded anyway
+            return None
+        return launch if launch is not None and launch != self._launch_done else None
 
     def _record_actions(self, gid: str, t: int, player: str | None) -> None:
         """Snapshot of the player and the watched countries; what changed since the day before becomes events."""

@@ -29,6 +29,45 @@ export const iconImg = (file) => img(file);
 /** <img> of a modifier's icon, or null when it has none. */
 export const modifierIcon = (key) => img(modifierIconFile(key));
 
+// MIO bonus stats (equipment_bonus / production_bonus / organization_modifier keys, MIO window) without a
+// MODIFIER_<KEY> icon -> icon file
+const MIO_ICONS = {
+  reliability: 'reliability_bonus_modifier_texticon.png', maximum_speed: 'max_speed_modifier_texticon.png',
+  defense: 'defence_texticon.png', breakthrough: 'breakthrough_texticon.png', armor_value: 'armor_texticon.png',
+  soft_attack: 'soft_attack_texticon.png', hard_attack: 'hard_attack_texticon.png', ap_attack: 'piercing_modifier_texticon.png',
+  air_attack: 'air_offence_texticon.png', air_ground_attack: 'ground_attack_modifier_texticon.png', hardness: 'hardness_modifier_texticon.png',
+  build_cost_ic: 'production_cost.png', production_cost_factor: 'production_cost_modifier_texticon.png',
+  fuel_consumption: 'fuel_consumption_texticon.png', fuel_consumption_factor: 'fuel_consumption_texticon.png',
+  production_efficiency_cap_factor: 'production_efficiency_cap_modifier_texticon.png',
+  production_efficiency_gain_factor: 'production_efficiency_growth_modifier_texticon.png',
+  production_capacity_factor: 'factory_output_modifier_texticon.png',
+  production_resource_need_factor: 'production_resource_need_modifier_texticon.png',
+  production_resource_penalty_factor: 'production_resource_penalty_modifier_texticon.png',
+  production_conversion_speed_factor: 'mio_conversion_speed_texticon.png',
+  naval_range: 'naval_range_texticon.png', anti_air_attack: 'anti_air_attack_modifier_texticon.png',
+  lg_attack: 'light_attack_modifier_texticon.png', hg_attack: 'heavy_attack_modifier_texticon.png',
+  lg_armor_piercing: 'light_piercing_modifier_texticon.png', hg_armor_piercing: 'heavy_piercing_modifier_texticon.png',
+  torpedo_attack: 'torpedo_texticon.png', sub_attack: 'naval_attack_modifier_texticon.png', max_strength: 'hp_modifier_texticon.png',
+  sub_detection: 'sub_detection_modifier_texticon.png', sub_visibility: 'sub_visibility_modifier_texticon.png',
+  surface_detection: 'surface_detection_modifier_texticon.png', surface_visibility: 'surface_visibility_modifier_texticon.png',
+  mines_sweeping: 'minesweeping_modifier_texticon.png', mines_planting: 'minelaying_modifier_texticon.png',
+  naval_weather_penalty_factor: 'weather_penalty_modifier_texticon.png', night_penalty: 'night_modifier_texticon.png',
+  carrier_size: 'deck_size_modifier_texticon.png',
+  military_industrial_organization_research_bonus: 'mio_research_bonus_modifier_texticon.png',
+  military_industrial_organization_funds_gain: 'mio_funds_gain_modifier_texticon.png',
+  military_industrial_organization_size_up_requirement: 'mio_size_modifier_texticon.png',
+  military_industrial_organization_task_capacity: 'mio_capacity_texticon.png',
+  military_industrial_organization_design_team_assign_cost: 'design_team_texticon.png',
+  military_industrial_organization_design_team_change_cost: 'design_team_texticon.png',
+  military_industrial_organization_industrial_manufacturer_assign_cost: 'manufacturer_materiel_cost_texticon.png',
+};
+
+/** Icon file of a MIO bonus stat (its own icon, else the modifier's), or null. */
+export const mioIconFile = (key) => MIO_ICONS[key] ?? modifierIconFile(key);
+
+/** <img> of a MIO bonus stat, or null. */
+export const mioIcon = (key) => img(mioIconFile(key));
+
 /** <img> of a country value's icon (political_power, stability, ...), or null. */
 export const statIcon = (field) => img(STAT_ICONS[field]);
 
@@ -44,7 +83,16 @@ const DESIGNER_ICONS = {
   Entrenchment: 'entrenchment_modifier_texticon.png', 'Combat Width': 'combat_width_texticon.png', Manpower: 'manpower_texticon.png',
   'Training Time': 'training_time_modifier_texticon.png', 'Fuel Capacity': 'fuel_capacity_modifier_texticon.png',
   'Fuel Usage': 'fuel_usage_modifier_texticon.png', 'Estimated Production Cost': 'production_cost_modifier_texticon.png',
+  // tank and plane designers, compare tile
+  'Production Cost': 'production_cost_modifier_texticon.png', Reliability: 'reliability_bonus_modifier_texticon.png',
+  Hardness: 'hardness_modifier_texticon.png', Range: 'range_modifier_texticon.png', Thrust: 'thrust_modifier_texticon.png',
+  Agility: 'agility_modifier_texticon.png', 'Air Defense': 'air_defence_texticon.png', 'Air Superiority': 'air_superiority_texticon.png',
+  'Naval Attack': 'naval_attack_modifier_texticon.png', 'Naval Targeting': 'naval_targeting_modifier_texticon.png',
+  'Surface Detection': 'surface_detection_modifier_texticon.png', 'Sub Detection': 'sub_detection_modifier_texticon.png',
 };
+
+/** Labels with an icon (tests). */
+export const DESIGNER_ICON_LABELS = Object.keys(DESIGNER_ICONS);
 
 /** <img> of a division designer stat (by its label), or null - equipment rows have none. */
 export const designerIcon = (label) => img(DESIGNER_ICONS[label]);

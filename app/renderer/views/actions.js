@@ -2,7 +2,7 @@
 // spirits, advisors, leader, wars, war goals, division templates, equipment designs, construction, trade deals. The
 // backend's IC recorder compares a daily snapshot from game memory with the day before (backend hoi4dbg/actions.py);
 // the game itself keeps no such log, so only days played while the app runs are known.
-import { h, notice, viewHeader } from '../lib/dom.js';
+import { card, h, notice, viewHeader } from '../lib/dom.js';
 import { refreshMs } from '../lib/options.js';
 
 const REFRESH_MS = 5000;
@@ -50,7 +50,7 @@ export default {
     const controls = h('div', { class: 'pa-controls' });
     const list = h('div', { class: 'pa-list' });
     root.append(viewHeader('Players actions', 'What the player and the watched countries did, day by day - read from game memory while the app runs.'),
-      controls, list);
+      controls, card('Events', list, { cls: 'act-main' }));
 
     async function setWatched(tags) {
       try {

@@ -44,13 +44,13 @@ function bigNumber(label, value, title) {
 }
 
 /** Value cut off like the division designer shows it (122.96 -> "122.9"). */
-function cut(v, decimals) {
+export function cut(v, decimals) {
   const f = 10 ** decimals;
   return ((Math.sign(v) * Math.trunc(Math.abs(v) * f + 1e-9)) / f).toFixed(decimals);
 }
 
 // [key, label, format] in the designer's order: base stats, combat stats, cost
-const DESIGNER_GROUPS = [
+export const DESIGNER_GROUPS = [
   ['Base Stats', [
     ['maximum_speed', 'Max Speed', (v) => `${cut(v, 1)} km/h`], ['max_strength', 'HP', (v) => cut(v, 1)],
     ['max_organisation', 'Organization', (v) => cut(v, 1)], ['default_morale', 'Recovery Rate', (v) => cut(v, 2)],
@@ -123,7 +123,7 @@ const PLANE_SLOTS = { top: 5, bottom: 7 };
 const PLANE_UNREAD = ['Supply Use', 'Ground Attack', 'Strat. Bombing', 'Night Penalty', 'Minelaying', 'Minesweeping'];
 
 // [title, [[key, label, format]]] as the plane designer's Base / Combat / Misc. Stats
-const PLANE_GROUPS = [
+export const PLANE_GROUPS = [
   ['Base Stats', [['maximum_speed', 'Max Speed', (v) => `${cut(v, 1)} km/h`], ['range', 'Range', (v) => `${Math.round(v)} km`],
     ['weight', 'Weight', (v) => cut(v, 1)], ['thrust', 'Thrust', (v) => cut(v, 1)]]],
   ['Combat Stats', [['air_defence', 'Air Defense', (v) => cut(v, 1)], ['air_attack', 'Air Attack', (v) => cut(v, 1)],
@@ -136,6 +136,22 @@ const PLANE_GROUPS = [
 /** [[group title, [[label, text]]]] of a plane design like the game's designer (zero values shown, as the game does). */
 export function planeStatLines(stats) {
   return PLANE_GROUPS.map(([title, rows]) => [title, rows.filter(([k]) => stats[k] != null).map(([k, label, f]) => [label, f(stats[k])])]);
+}
+
+// MIOs of the designs shown (backend "mios": {id: {key, name, icon}}), set by the tiles that draw designs
+let designMios = {};
+
+/** {key, name, icon} of the MIO a design was made by, or null (no MIO assigned). */
+export function mioOf(d, mios = designMios) {
+  return d?.mio != null ? (mios[String(d.mio)] ?? null) : null;
+}
+
+/** The design's MIO like the designer shows it: icon and name. */
+function mioBadge(d) {
+  const m = mioOf(d);
+  if (!m) return null;
+  return h('span', { class: 'mil-mio', title: `Military industrial organization: ${m.name ?? m.key}` },
+    m.icon ? h('img', { src: m.icon, alt: '', draggable: 'false' }) : null, h('span', null, m.name ?? m.key));
 }
 
 function saveView(key, v) {
@@ -312,6 +328,153 @@ export function splitDesigns(designs) {
   return { current: rows.filter((d) => !d.outdated).sort(order), decommissioned: rows.filter((d) => d.outdated).sort(order) };
 }
 
+// The tank designer (2026-10-20, user's request): turret and main armament above the chassis drawing, suspension, armor
+// and engine below it, four special modules at the bottom; the stats in the designer's three columns.
+const TANK_VIEW_KEY = 'hoi4dbg.tankView';
+const TANK_ROWS = [['turret_type_slot', 'main_armament_slot'], ['suspension_type_slot', 'armor_type_slot', 'engine_type_slot'],
+  ['special_type_slot_1', 'special_type_slot_2', 'special_type_slot_3', 'special_type_slot_4']];
+const TANK_SLOT_NAMES = { turret_type_slot: 'Turret', main_armament_slot: 'Main armament', suspension_type_slot: 'Suspension',
+  armor_type_slot: 'Armor', engine_type_slot: 'Engine' };
+export const TANK_GROUPS = [
+  ['Base Stats', [['maximum_speed', 'Max Speed', (v) => `${cut(v, 2)} km/h`], ['reliability', 'Reliability', (v) => `${cut(v * 100, 1)}%`],
+    ['supply_consumption', 'Supply Use', (v) => cut(v, 2)], ['defense', 'Defense', (v) => cut(v, 2)],
+    ['breakthrough', 'Breakthrough', (v) => cut(v, 2)]]],
+  ['Combat Stats', [['soft_attack', 'Soft Attack', (v) => cut(v, 2)], ['hard_attack', 'Hard Attack', (v) => cut(v, 2)],
+    ['ap_attack', 'Piercing', (v) => cut(v, 2)], ['armor_value', 'Armor', (v) => cut(v, 2)], ['hardness', 'Hardness', (v) => `${cut(v * 100, 1)}%`],
+    ['air_attack', 'Air Attack', (v) => cut(v, 2)]]],
+  ['Misc. Stats', [['fuel_consumption', 'Fuel Usage', (v) => cut(v, 2)], ['suppression', 'Suppression', (v) => cut(v, 2)]]],
+];
+
+/** [[group title, [[label, text]]]] of a tank design like the game's tank designer. */
+export function tankStatLines(stats) {
+  return TANK_GROUPS.map(([title, rows]) => [title, rows.filter(([k]) => stats[k] != null).map(([k, label, f]) => [label, f(stats[k])])]);
+}
+
+/** "Turret" / "Special 2" - a tank designer slot. */
+export function tankSlotLabel(slot) {
+  return TANK_SLOT_NAMES[slot] ?? slotLabel(slot);
+}
+
+/** The designer's rows of a design's slots (slots the chassis lacks: null = locked). */
+export function tankRows(slots) {
+  const by = new Map((slots ?? []).map((s) => [s.slot, s]));
+  return TANK_ROWS.map((row) => row.map((name) => by.get(name) ?? null));
+}
+
+export function tankPanel(ctx, tag) {
+  let tankView = loadView(TANK_VIEW_KEY);
+  let designTab = 'current';
+  const openDesigns = new Set();
+  const tankIcons = { modules: icons.modules, chassis: new Map(), designer: {} };
+  let last = null;
+
+  async function fetchTankIcons(designs) {
+    const missing = [...new Set(designs.flatMap((d) => (d.slots ?? []).map((s) => s.module)))].filter((m) => m && !icons.modules.has(m));
+    const types = [...new Set(designs.map((d) => d.type))].filter((t) => t && !tankIcons.chassis.has(t));
+    if (!missing.length && !types.length) return;
+    missing.forEach((m) => icons.modules.set(m, null));
+    types.forEach((t) => tankIcons.chassis.set(t, null));
+    try {
+      const q = `modules=${encodeURIComponent(missing.join(','))}&tanks=${encodeURIComponent(types.join(','))}&tag=${encodeURIComponent(tag)}`;
+      const res = (await ctx.api.get(`/api/military/icons?${q}`)).data;
+      Object.entries(res.modules ?? {}).forEach(([k, v]) => icons.modules.set(k, v));
+      Object.entries(res.tanks ?? {}).forEach(([k, v]) => tankIcons.chassis.set(k, v));
+      if (res.tank_designer?.background) Object.assign(tankIcons.designer, res.tank_designer);
+      if (last) draw(...last);
+    } catch (err) {
+      ctx.api.log?.('warn', `Tank designer icons unavailable: ${err.message}`);
+    }
+  }
+
+  function tankSlot(s) {
+    if (!s) {
+      const uri = tankIcons.designer.locked;
+      return h('div', { class: 'mil-pd-slot mil-pd-locked', title: 'Not available on this chassis' },
+        uri ? h('img', { class: 'mil-pd-img', src: uri, alt: 'locked', draggable: 'false' }) : h('span', { class: 'mil-pd-label' }, '🔒'));
+    }
+    const title = `${tankSlotLabel(s.slot)}: ${s.module_name ?? 'empty'}`;
+    if (!s.module) return h('div', { class: 'mil-pd-slot mil-pd-empty', title }, h('span', { class: 'mil-pd-label' }, tankSlotLabel(s.slot)));
+    const uri = icons.modules.get(s.module);
+    return h('div', { class: 'mil-pd-slot', title },
+      uri ? h('img', { class: 'mil-pd-img', src: uri, alt: s.module_name ?? s.module, draggable: 'false' })
+        : h('span', { class: 'mil-pd-label' }, s.module_name ?? s.module),
+      h('span', { class: 'mil-td-caption' }, tankSlotLabel(s.slot)));
+  }
+
+  function tankGraphic(d) {
+    const [top, middle, specials] = tankRows(d.slots);
+    const row = (slots, cls) => h('div', { class: `mil-pdg-row ${cls}` }, slots.map(tankSlot));
+    const drawing = tankIcons.chassis.get(d.type);
+    const bg = tankIcons.designer.background;
+    return h('div', { class: 'mil-pdg mil-tdg' },
+      h('div', { class: 'mil-pdg-left' },
+        h('div', { class: 'mil-pdg-title' }, h('span', { class: 'mil-pdg-name' }, d.name), h('span', { class: 'mil-pdg-type' }, d.type_name), mioBadge(d)),
+        row(top, 'mil-td-top'),
+        h('div', { class: 'mil-pdg-blueprint mil-td-blueprint', style: bg ? { backgroundImage: `url("${bg}")` } : null },
+          h('div', { class: 'mil-pdg-caption' }, d.type_name),
+          drawing ? h('img', { class: 'mil-td-tank', src: drawing, alt: '', draggable: 'false' }) : null),
+        row(middle, 'mil-td-mid'),
+        h('div', { class: 'mil-td-special-title' }, 'Special modules'),
+        row(specials, 'mil-td-special')),
+      h('div', { class: 'mil-pdg-stats' },
+        h('div', { class: 'mil-dd-stats' }, tankStatLines(d.stats).map(([title, rows]) => h('div', { class: 'mil-dd-group' },
+          h('div', { class: 'mil-dd-group-title' }, title),
+          rows.map(([label, text]) => h('div', { class: 'hoi-line' }, h('span', { class: 'hoi-mod' }, designerIcon(label), label), h('span', { class: 'hoi-num' }, text)))))),
+        h('div', { class: 'mil-pdg-cost' }, h('span', null, 'Production Cost:'), h('span', { class: 'hoi-num' }, cut(d.stats.build_cost_ic ?? 0, 2))),
+        h('p', { class: 'muted mil-designer-note' }, 'As the game\'s tank designer: the design x (1 + the role\'s own factor + the '
+          + 'country\'s technology and doctrine bonuses for it); supply use and suppression of the role\'s battalion. '
+          + 'Not read yet: entrenchment, terrain modifiers.')));
+  }
+
+  function tankText(d) {
+    return h('div', null,
+      h('div', { class: 'mil-part mil-pd-text' }, h('div', { class: 'mil-part-title' }, 'Modules'),
+        h('div', { class: 'mil-part-list' }, (d.slots ?? []).map((s) => h('span', null, `${tankSlotLabel(s.slot)}: ${s.module_name ?? '—'}`)))),
+      h('div', { class: 'mil-stats mil-design-stats' }, tankStatLines(d.stats).flatMap(([, rows]) => rows)
+        .map(([label, text]) => h('div', { class: 'hoi-line' }, h('span', null, label), h('span', { class: 'hoi-num' }, text)))));
+  }
+
+  function designRow(d) {
+    const key = String(d.id);
+    const isOpen = openDesigns.has(key);
+    const toggle = () => { if (isOpen) openDesigns.delete(key); else openDesigns.add(key); draw(...last); };
+    return h('div', { class: `mil-design ${d.outdated ? 'mil-design-old' : ''} ${isOpen ? 'mil-design-open' : ''}`.trim() },
+      h('button', { class: 'mil-design-head', 'aria-expanded': String(isOpen), onclick: toggle },
+        h('span', { class: 'mil-design-names' }, h('span', { class: 'mil-design-name' }, d.name),
+          d.base ? null : h('span', { class: 'mil-design-type' }, d.type_name, mioOf(d) ? ` · ${mioOf(d).name ?? mioOf(d).key}` : '')),
+        h('span', { class: 'mil-design-cost', title: 'Production cost (IC)' }, (d.stats.build_cost_ic ?? 0).toFixed(2).replace(/\.?0+$/, '')),
+        h('span', { class: 'mil-tpl-caret' }, isOpen ? '▾' : '▸')),
+      isOpen ? h('div', { class: 'mil-design-body' },
+        h('div', { class: 'mil-view mil-design-view' }, [['graphic', 'Graphic'], ['text', 'Text']].map(([v, label]) =>
+          h('button', { class: `mil-view-btn ${tankView === v ? 'mil-view-on' : ''}`, 'aria-pressed': String(tankView === v),
+            onclick: () => { tankView = v; saveView(TANK_VIEW_KEY, v); draw(...last); } }, label))),
+        tankView === 'graphic' ? tankGraphic(d) : tankText(d)) : null);
+  }
+
+  function draw(body, res) {
+    last = [body, res];
+    const designs = res.data?.army?.tank_designs;
+    designMios = res.data?.mios ?? designMios;
+    if (!designs) {
+      body.replaceChildren(notice('warn', `Tank designs unavailable: ${res.note}`));
+      return;
+    }
+    fetchTankIcons(designs);
+    const { current, decommissioned } = splitDesigns(designs);
+    const tab = designTab === 'decommissioned' && decommissioned.length ? 'decommissioned' : 'current';
+    const list = tab === 'current' ? current : decommissioned;
+    body.replaceChildren(
+      h('div', { class: 'mil-designs-head' },
+        h('div', { class: 'mil-view' }, [['current', `Current (${current.length})`], ['decommissioned', `Decommissioned (${decommissioned.length})`]]
+          .map(([v, label]) => h('button', { class: `mil-view-btn ${tab === v ? 'mil-view-on' : ''}`, 'aria-pressed': String(tab === v),
+            disabled: (v === 'decommissioned' && !decommissioned.length) || null,
+            onclick: () => { designTab = v; draw(...last); } }, label)))),
+      list.length ? h('div', { class: 'mil-design-list' }, list.map(designRow)) : h('p', { class: 'muted' }, 'No tank designs.'));
+  }
+
+  return livePanel(ctx, { title: 'Tank designs', url: url(tag), liveParts, render: draw });
+}
+
 export function airPanel(ctx, tag) {
   let planeView = loadView(PLANE_VIEW_KEY);
   let designTab = 'current';
@@ -327,7 +490,7 @@ export function airPanel(ctx, tag) {
     return h('div', { class: `mil-design ${d.outdated ? 'mil-design-old' : ''} ${isOpen ? 'mil-design-open' : ''}`.trim() },
       h('button', { class: 'mil-design-head', 'aria-expanded': String(isOpen), onclick: toggle },
         h('span', { class: 'mil-design-names' }, h('span', { class: 'mil-design-name' }, d.name),
-          d.base ? null : h('span', { class: 'mil-design-type' }, d.type_name)),
+          d.base ? null : h('span', { class: 'mil-design-type' }, d.type_name, mioOf(d) ? ` · ${mioOf(d).name ?? mioOf(d).key}` : '')),
         h('span', { class: 'mil-design-cost', title: 'Production cost (IC)' }, (d.stats.build_cost_ic ?? 0).toFixed(1).replace(/\.0$/, '')),
         h('span', { class: 'mil-design-date', title: 'Game day the debugger first saw this design - the game keeps no creation date' },
           designDate(d)),
@@ -350,7 +513,7 @@ export function airPanel(ctx, tag) {
     const bg = icons.designer.background;
     return h('div', { class: 'mil-pdg' },
       h('div', { class: 'mil-pdg-left' },
-        h('div', { class: 'mil-pdg-title' }, h('span', { class: 'mil-pdg-name' }, d.name), h('span', { class: 'mil-pdg-type' }, d.type_name)),
+        h('div', { class: 'mil-pdg-title' }, h('span', { class: 'mil-pdg-name' }, d.name), h('span', { class: 'mil-pdg-type' }, d.type_name), mioBadge(d)),
         row(top, PLANE_SLOTS.top),
         h('div', { class: 'mil-pdg-blueprint', style: bg ? { backgroundImage: `url("${bg}")` } : null },
           h('div', { class: 'mil-pdg-caption' }, d.type_name),
@@ -425,6 +588,7 @@ export function airPanel(ctx, tag) {
     last = [body, res];
     {
       const a = res.data?.air;
+      designMios = res.data?.mios ?? designMios;
       if (!a) {
         body.replaceChildren(notice('warn', `Air force unavailable: ${res.note}`));
         return;

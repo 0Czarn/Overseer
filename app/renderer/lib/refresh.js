@@ -6,6 +6,7 @@
 import { h, notice } from './dom.js';
 import { refreshMs } from './options.js';
 import { tr } from './i18n.js';
+import { isCollapsed } from './collapse.js';
 
 export const LIVE_MS = 2000;
 export const MODES = { live: 'Live', manual: 'On refresh' };
@@ -64,7 +65,8 @@ export function refreshControl(id, title, run) {
     });
     button.hidden = mode === 'live';
     clearInterval(timer);
-    timer = mode === 'live' ? setInterval(() => { if (!document.hidden) run(false); }, refreshMs(LIVE_MS)) : null;
+    // a folded tile (collapse.js) does not read the game
+    timer = mode === 'live' ? setInterval(() => { if (!document.hidden && !isCollapsed(group)) run(false); }, refreshMs(LIVE_MS)) : null;
   }
 
   function set(value) {
@@ -124,6 +126,7 @@ export function livePanel(ctx, { title, url, render, liveParts, cls = '', unavai
     h('div', { class: 'hoi-head' }, h('span', { class: 'hoi-head-title' }, tr(title)),
       h('span', { class: 'hoi-head-right' }, source, control.el)),
     body);
+  el.addEventListener('tile-expanded', () => refresh(false));   // unfolded: read at once (nothing was read while folded)
   return { el, refresh, stop: () => { stopped = true; control.stop(); } };
 }
 

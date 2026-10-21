@@ -20,6 +20,7 @@ from typing import Callable
 from ..integration.memory import ENCODINGS, MemoryAccessError, ProcessMemory, needles_for, scan
 from ..integration.code_write import ProcessCodePatcher
 from ..integration.memory_write import ProcessMemoryWriter
+from .. import campaign_map
 from .. import construction as construction_mod
 from .. import deficit
 from .. import gamefiles
@@ -520,6 +521,34 @@ class LiveService:
             return None
         return found[-1] if found else None
 
+    def game_launch(self) -> str | None:
+        """Id ("<process start>#<n>") of the game being played since it left the menu, from logs/game.log
+        (ic_history.scan_game_log, read on from where the last call stopped); None in the menu or when unknown."""
+        game = self._detect()
+        logs = (game.get("userdata") or {}).get("logs_dir")
+        started = (game.get("process") or {}).get("started")
+        if not logs or not started:
+            return None
+        path = Path(logs) / "game.log"
+        watch = getattr(self, "_game_log", None)
+        try:
+            stat = path.stat()
+            if stat.st_mtime < dt.datetime.fromisoformat(started).timestamp() - 5:
+                return None   # log of an earlier game run
+            if watch is None or watch["started"] != started or stat.st_size < watch["offset"]:
+                watch = self._game_log = {"started": started, "offset": 0, "state": None}
+            if stat.st_size > watch["offset"]:
+                with path.open("rb") as f:
+                    f.seek(watch["offset"])
+                    chunk = f.read(min(stat.st_size - watch["offset"], 64 << 20))
+                end = chunk.rfind(b"\n") + 1   # whole lines only
+                watch["state"] = ic_history.scan_game_log(chunk[:end].decode("utf-8", "replace").splitlines(), watch["state"])
+                watch["offset"] += end
+        except (OSError, ValueError):
+            return None
+        n = (watch["state"] or {}).get("in_game")
+        return f"{started}#{n}" if n else None
+
     def parties(self, tag: str, ideologies: list[str]) -> dict:
         """Live party popularity and ruling party of `tag`, its leader {"id", "ideology"} and faction
         {"name", "icon", "members"} or None (game memory)."""
@@ -543,6 +572,15 @@ class LiveService:
         ideas, dynamic = self._with_country(process, tag, lambda mem, c: (pointers.read_ideas(mem, c),
                                                                            pointers.read_dynamic_modifiers(mem, c)))
         return {"ideas": ideas, "dynamic_modifiers": dynamic, "tag": tag, "read_at": self._clock()}
+
+    def mios(self, tag: str) -> dict:
+        """Live military industrial organisations of `tag`: key, level, funds, unlocked traits, policy (game memory)."""
+        process = self._process()
+        if not pointers.supported(process.get("version")):
+            raise LiveError("unsupported_version", "Live MIO reading is only verified for 1.19.3.0.c01a")
+        key = (process["pid"], process.get("started"))
+        mios = self._with_country(process, tag, lambda mem, c: pointers.read_mio_states(mem, self._module_base[key], c))
+        return {"mios": mios, "tag": tag, "read_at": self._clock()}
 
     def doctrines(self, tag: str) -> dict:
         """Live grand doctrines and subdoctrines of `tag` as name keys of common/doctrines (game memory)."""
@@ -700,17 +738,18 @@ class LiveService:
             raise LiveError("unsupported_version", "Live military reading is only verified for 1.19.3.0.c01a")
         key = (process["pid"], process.get("started"))
         tags = self._tags.setdefault(process.get("install") or "", self._tag_order(process.get("install") or ""))
-        army, navy, air, reserve, free, designs, researched, doctrine_state, planes, costs = self._with_country(
+        army, navy, air, reserve, free, designs, researched, doctrine_state, planes, costs, tanks, mios = self._with_country(
             process, tag, lambda mem, c: (
                 pointers.read_army(mem, c), pointers.read_navy(mem, c),
                 pointers.read_air(mem, self._module_base[key], tags, tag), pointers.read_stockpile_planes(mem, c),
                 pointers.read_free_manpower(mem, self._module_base[key], tags, tag), pointers.read_designs(mem, c),
                 pointers.read_researched(mem, c), pointers.read_doctrine_state(mem, self._module_base[key], tags, tag),
-                pointers.read_plane_designs(mem, c), pointers.read_design_costs(mem, c)))
+                pointers.read_plane_designs(mem, c), pointers.read_design_costs(mem, c), pointers.read_tank_designs(mem, c),
+                pointers.read_mios(mem, c)))
         army["manpower_free"] = free
         return {"army": army, "navy": navy, "air": air, "air_reserve": reserve, "designs": designs,
                 "researched": researched, "doctrine_state": doctrine_state, "plane_designs": planes,
-                "design_costs": costs, "tag": tag,
+                "tank_designs": tanks, "mios": mios, "design_costs": costs, "tag": tag,
                 "read_at": self._clock()}
 
     def action_snapshot(self, tags: list[str], resources: list[str]) -> dict[str, dict]:
@@ -957,6 +996,16 @@ class LiveService:
         except LiveError:
             return None
 
+    def game_hours(self) -> int | None:
+        """Hour number of the running game (day number x 24 + hour), None when it is not readable."""
+        def read(mem, base, _tags, _p):
+            d = pointers.read_date(mem, base)
+            return ic_history.day_number(d) * 24 + d["hour"]
+        try:
+            return self._game_memory(read)
+        except LiveError:
+            return None
+
     def states(self, buildings: list[str], resources: list[str]) -> dict:
         """Every state of the running game (pointers.read_states): owner, controller, cores, claims, category,
         buildings, resources, manpower; {"states", "date", "read_at"}."""
@@ -1072,11 +1121,25 @@ class LiveService:
         except (MemoryAccessError, OSError, KeyError) as exc:
             raise LiveError("memory_error", f"Code patch failed: {exc}") from exc
 
-    def _equipment_day(self, mem, base: int, process: dict, countries: dict, tags) -> dict | None:
+    def equipment_status(self, tag: str | None = None) -> dict:
+        """{"tag", "equipment": {archetype: [needed, in divisions, stockpile, produced a day]}, "read_at"} of one country
+        (default: the player) from game memory, as the Game summary recorder reads it every day (_equipment_day)."""
+        def run(mem, base, order, process):
+            t = tag or self.player_tag(process)
+            countries = pointers.country_objects(mem, base, order)
+            if t not in countries:
+                raise LiveError("no_country", f"{t} has no country object in the running game")
+            day = self._equipment_day(mem, base, process, countries, [t])
+            if day is None:
+                raise LiveError("unreadable", "Equipment types are not readable")
+            return {"tag": t, "equipment": day.get(t, {}), "read_at": self._clock()}
+        return self._game_memory(run)
+
+    def _equipment_day(self, mem, base: int, process: dict, countries: dict, tags, armies: dict | None = None) -> dict | None:
         """{tag: {archetype: [needed, in divisions, stockpile, produced a day]}} of the countries `tags` for the Game
         summary equipment chart: needed = divisions of each template x the need of its sub-units (common/units of the game
         and mods), the rest from game memory (pointers.read_equipment_status); archetypes with only zeros are left out.
-        None when the equipment types are not readable."""
+        None when the equipment types are not readable. `armies`: {tag: pointers.read_army} already read."""
         key = (process["pid"], process.get("started"))
         if key not in self._equipment_types:
             try:
@@ -1092,7 +1155,7 @@ class LiveService:
         for tag in tags:
             try:
                 status = pointers.read_equipment_status(mem, countries[tag], types)
-                army = pointers.read_army(mem, countries[tag])
+                army = (armies or {}).get(tag) or pointers.read_army(mem, countries[tag])
             except pointers.PointerError:
                 continue
             rows: dict[str, list[float]] = {}
@@ -1108,6 +1171,64 @@ class LiveService:
             if rows:
                 out[tag] = rows
         return out
+
+    def _campaign_day(self, mem, base: int, tags: list[str], countries: dict, out: dict, armies: dict,
+                      equipment: dict, install: str) -> tuple[dict, dict | None]:
+        """The rest of a Game summary day (2026-10-21, user's request): ({tag: values in the order of
+        ic_history.EXTRA}, {state id: [owner, controller]} or None) - political power, stability and war support in %,
+        command power, fuel, divisions, battalions, equipment coverage in % (pieces in divisions of what the templates
+        need, up to the need, of each archetype), owned and controlled states, victory points controlled (state
+        history files of the game and mods), researched technologies, free manpower (states controlled), manpower in
+        the field and in training. A value not readable is None."""
+        try:
+            control = pointers.read_state_control(mem, base, tags)
+        except pointers.PointerError as exc:
+            self.log.info("States not readable for the Game summary: %s", exc)
+            control = None
+        vps = {}
+        if control:
+            try:
+                vps = {sid: s["vp"] for sid, s in campaign_map.states([install, *self._mods]).items()}
+            except OSError:
+                vps = {}
+        terr: dict[str, list] = {}
+        for sid, (owner, controller, available) in (control or {}).items():
+            if owner:
+                terr.setdefault(owner, [0, 0, 0.0, 0])[0] += 1
+            if controller:
+                row = terr.setdefault(controller, [0, 0, 0.0, 0])
+                row[1] += 1
+                row[2] += vps.get(sid, 0)
+                row[3] += available
+        extra = {}
+        for tag in out:
+            c = countries[tag]
+            values = []
+            for field, scale in (("political_power", 1), ("stability", 100), ("war_support", 100),
+                                 ("command_power", 1), ("fuel", 1)):
+                try:
+                    values.append(round(pointers.read_field(mem, c, field) * scale, 2))
+                except pointers.PointerError:
+                    values.append(None)
+            army = armies.get(tag)
+            if army:
+                values += [army["divisions"], sum(t["count"] * len(t["battalions"]) for t in army["templates"])]
+            else:
+                values += [None, None]
+            need = sum(v[0] for v in (equipment.get(tag) or {}).values())
+            held = sum(min(v[0], v[1]) for v in (equipment.get(tag) or {}).values())
+            values.append(round(100 * held / need, 1) if need else None)
+            t = terr.get(tag)
+            values += [t[0], t[1], round(t[2], 1)] if t else ([0, 0, 0] if control else [None, None, None])
+            try:
+                values.append(pointers.researched_count(mem, c))
+            except pointers.PointerError:
+                values.append(None)
+            values.append(t[3] if t else (0 if control else None))
+            values += [army.get("manpower_field"), army.get("manpower_training")] if army else [None, None]
+            extra[tag] = values
+        mapped = {sid: [o, c] for sid, (o, c, _a) in control.items()} if control else None
+        return extra, mapped
 
     def ic_snapshot(self, with_factions: bool = False) -> dict:
         """{"t", "player", "countries": {tag: [mil, nav, civ, civilian factories, military factories, dockyards,
@@ -1138,7 +1259,15 @@ class LiveService:
                             fac["civilian"]["total"], fac["military"]["total"], fac["dockyards"]["total"],
                             wasted["wmil"], wasted["wnav"], wasted["wciv"]]
                 assigned[tag] = [ic["amil"], ic["anav"], ic["aciv"]]
-            equipment = self._equipment_day(mem, base, process, countries, out)
+            armies = {}
+            for tag in out:
+                try:
+                    armies[tag] = pointers.read_army(mem, countries[tag])
+                except pointers.PointerError:
+                    continue
+            equipment = self._equipment_day(mem, base, process, countries, out, armies)
+            extra, control = self._campaign_day(mem, base, tags, countries, out, armies, equipment or {},
+                                                process.get("install") or "")
             factions = None
             if with_factions:
                 by_object = {c: t for t, c in countries.items()}
@@ -1178,7 +1307,7 @@ class LiveService:
                     continue
             return {"t": t, "player": player, "campaign": pointers.campaign_id(mem, base), "countries": out,
                     "factions": factions, "players": players or None, "losses": losses, "assigned": assigned,
-                    "equipment": equipment,
+                    "equipment": equipment, "extra": extra, "map": control,
                     "designs": {k: v for k, v in designs.items() if v}}
         return self._game_memory(read)
 

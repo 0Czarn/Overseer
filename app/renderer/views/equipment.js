@@ -46,6 +46,7 @@ export function totalChanges(before, now) {
 /** One row per equipment archetype (need / held / stockpile / shortfall) - click to show or hide its variants. */
 function groupTable(groups, tag, ctx, icons = {}) {
   let filter = '';
+  let current = groups;   // replaced by update() (live readings), filter and unfolded rows kept
   const open = new Set(JSON.parse(sessionStorage.getItem('hoi4dbg.eqOpen') ?? '[]'));
   const host = h('div');
   const toggle = (a) => {
@@ -53,12 +54,13 @@ function groupTable(groups, tag, ctx, icons = {}) {
     try { sessionStorage.setItem('hoi4dbg.eqOpen', JSON.stringify([...open])); } catch { /* convenience only */ }
     render();
   };
-  const head = h('thead', null, h('tr', null, ['Equipment', 'Needed', 'In divisions', 'Stockpile', 'Deficit', 'Covered'].map(
-    (t, i) => h('th', { class: i ? 'num' : '' }, t))));
   function render() {
+    const produced = current.some((g) => g.produced != null);   // live readings have it, the save has not
+    const cols = ['Equipment', 'Needed', 'In divisions', 'Stockpile', 'Deficit', ...(produced ? ['Produced / day'] : []), 'Covered'];
+    const head = h('thead', null, h('tr', null, cols.map((t, i) => h('th', { class: i ? 'num' : '' }, t))));
     const f = filter.toLowerCase();
     const rows = [];
-    for (const g of groups) {
+    for (const g of current) {
       const variants = g.variants.filter((v) => !f || `${v.archetype} ${v.archetype_name} ${v.variant ?? ''}`.toLowerCase().includes(f));
       if (f && !variants.length && !`${g.name} ${g.archetype}`.toLowerCase().includes(f)) continue;
       const isOpen = open.has(g.archetype);
@@ -72,6 +74,7 @@ function groupTable(groups, tag, ctx, icons = {}) {
         h('td', { class: 'num' }, g.need ? fmtInt(g.held) : '—'),
         h('td', { class: 'num' }, fmtInt(g.stockpile)),
         h('td', { class: `num ${g.shortfall > 0 ? 'bad-text' : 'good-text'}` }, g.shortfall > 0 ? `−${fmtInt(g.shortfall)}` : (g.need ? 'OK' : '')),
+        produced ? h('td', { class: 'num' }, g.produced ? formatValue(Math.round(g.produced * 10) / 10, 'number') : '—') : null,
         h('td', { class: 'eq-cover' }, g.need ? [meter(coverage(g), g.shortfall > 0 ? 'meter-bad' : 'meter-good'),
           h('span', { class: 'muted' }, `${Math.round(coverage(g) * 100)}%`)] : null)));
       if (isOpen) {
@@ -79,18 +82,49 @@ function groupTable(groups, tag, ctx, icons = {}) {
           rows.push(h('tr', { class: 'eq-variant' },
             h('td', null, h('span', { class: 'eq-indent' }), v.variant ?? h('span', { class: 'muted' }, `${v.archetype_name} (base)`),
               h('span', { class: 'muted' }, ` · ${v.archetype}${v.creator ? ` · ${v.creator}` : ''}${v.obsolete ? ' · obsolete' : ''}`)),
-            h('td', null), h('td', null), h('td', { class: 'num' }, fmtInt(v.amount)), h('td', null), h('td', null)));
+            h('td', null), h('td', null), h('td', { class: 'num' }, fmtInt(v.amount)), h('td', null), produced ? h('td', null) : null, h('td', null)));
         }
       }
     }
     host.replaceChildren(h('div', { class: 'table-wrap' }, h('table', { class: 'table eq-table' }, head,
-      h('tbody', null, rows.length ? rows : h('tr', null, h('td', { colspan: '6', class: 'muted' }, `No equipment for ${tag}`))))));
+      h('tbody', null, rows.length ? rows : h('tr', null, h('td', { colspan: String(cols.length), class: 'muted' }, `No equipment for ${tag}`))))));
   }
   render();
-  return [h('p', { class: 'hint' }, 'Deficit = equipment missing in fielded divisions minus the stockpile (estimate: '
-    + 'divisions in training and production lines are not counted). Click a row to show its variants.'),
-  h('input', { class: 'input', type: 'search', placeholder: 'Filter equipment or variant…',
-    onInput: (e) => { filter = e.target.value; render(); } }), host];
+  return {
+    nodes: [h('p', { class: 'hint' }, 'Deficit = equipment missing in fielded divisions minus the stockpile (divisions in training '
+      + 'are not counted). Click a row to show its variants.'),
+    h('input', { class: 'input', type: 'search', placeholder: 'Filter equipment or variant…',
+      onInput: (e) => { filter = e.target.value; render(); } }), host],
+    update(next, nextIcons) { current = next; Object.assign(icons, nextIcons ?? {}); render(); },
+  };
+}
+
+/** Needs of the divisions: Live | On refresh from game memory (/api/live/equipment-needs); the newest save's table
+ * until the first reading, and when the game is not running. */
+function needsCard(ctx, tag, saveGroups, icons, onRead = null) {
+  const table = groupTable(saveGroups, tag, ctx, { ...icons });
+  const status = h('span', { class: 'hoi-status' }, 'newest save');
+  let lastKey = null;
+  let stopped = false;
+  async function read(force = false) {
+    if (stopped) return;
+    try {
+      const res = await ctx.api.get(`/api/live/equipment-needs?tag=${encodeURIComponent(tag)}`);
+      const key = JSON.stringify(res.data.groups);
+      status.textContent = `game memory · read ${new Date().toLocaleTimeString()}`;
+      status.className = 'hoi-status hoi-status-on';
+      if (force || key !== lastKey) { lastKey = key; table.update(res.data.groups, res.data.icons); onRead?.(res.data.groups); }
+    } catch (err) {
+      status.textContent = `newest save · live not read: ${err.message}`;
+      status.className = 'hoi-status';
+    }
+  }
+  const control = refreshControl('equipment-needs', 'Needs of the divisions', read);
+  read(true);
+  return {
+    el: card(`Needs of the divisions of ${tag}`, table.nodes, { extra: h('span', { class: 'hoi-head-right' }, status, control.el) }),
+    stop: () => { stopped = true; control.stop(); },
+  };
 }
 
 const DIRECT_PREF = 'hoi4dbg.directWrite'; // shared with the Country Editor
@@ -294,20 +328,28 @@ export default {
     const icons = res.data.icons ?? {};
     const adder = fromSave ? addCard(ctx, tag, res.data.items, res.data.designs ?? []) : null;
     // summary: kinds, shortages in divisions (save), stockpile (live once read, else the save's)
-    const short = groups.filter((g) => g.shortfall > 0);
     const stat = (label, value, sub, cls = '') => {
       const v = h('span', { class: `stat-value ${cls}`.trim() }, value);
       const s = h('span', { class: 'muted eq-stat-sub' }, sub);
       return { el: h('div', { class: 'stat-tile' }, h('span', { class: 'stat-label' }, label), v, s), v, s };
     };
     const stockTile = stat('Stockpile', fmtInt(groups.reduce((n, g) => n + (g.stockpile ?? 0), 0)), 'units · newest save');
-    const summary = fromSave ? h('div', { class: 'tile-grid eq-summary' },
-      stat('Equipment kinds', String(groups.length), `${groups.filter((g) => g.need).length} used by divisions`).el,
-      stat('Short in divisions', String(short.length), short.length
-        ? `${fmtInt(short.reduce((n, g) => n + g.shortfall, 0))} units missing` : 'nothing missing',
-      short.length ? 'bad-text' : 'good-text').el,
-      stockTile.el,
-      stat('Most needed', short[0]?.name ?? '—', short[0] ? `−${fmtInt(short[0].shortfall)}` : 'all covered').el) : null;
+    const kindsTile = stat('Equipment kinds', String(groups.length), `${groups.filter((g) => g.need).length} used by divisions`);
+    const shortTile = stat('Short in divisions', '', '');
+    const mostTile = stat('Most needed', '', '');
+    const showNeeds = (list, source) => {   // the needs tiles: the save first, then each live reading
+      const missing = list.filter((g) => g.shortfall > 0).sort((a, b) => b.shortfall - a.shortfall);
+      kindsTile.v.textContent = String(list.length);
+      kindsTile.s.textContent = `${list.filter((g) => g.need).length} used by divisions · ${source}`;
+      shortTile.v.textContent = String(missing.length);
+      shortTile.v.className = `stat-value ${missing.length ? 'bad-text' : 'good-text'}`;
+      shortTile.s.textContent = missing.length ? `${fmtInt(missing.reduce((n, g) => n + g.shortfall, 0))} units missing` : 'nothing missing';
+      mostTile.v.textContent = missing[0]?.name ?? '—';
+      mostTile.s.textContent = missing[0] ? `−${fmtInt(missing[0].shortfall)}` : 'all covered';
+    };
+    showNeeds(groups, 'newest save');
+    const summary = fromSave ? h('div', { class: 'tile-grid eq-summary' }, kindsTile.el, shortTile.el, stockTile.el, mostTile.el) : null;
+    const needs = fromSave ? needsCard(ctx, tag, groups, icons, (live) => showNeeds(live, 'game memory')) : null;
     const liveStock = fromSave ? liveStockpileCard(ctx, tag, { groups, icons, onRead: (entries) => {
       stockTile.v.textContent = fmtInt(entries.reduce((n, e) => n + e.amount, 0));
       stockTile.s.textContent = `units · game memory ${new Date().toLocaleTimeString()}`;
@@ -321,9 +363,9 @@ export default {
         + 'implemented and tested.'),
       summary,
       liveStock?.el,
-      card(fromSave ? `Needs of the divisions of ${tag}` : 'Stockpile', fromSave ? groupTable(groups, tag, ctx, icons) : demoTable(res, tag)),
+      needs ? needs.el : card('Stockpile', demoTable(res, tag)),
       adder?.el,
     ].filter(Boolean));
-    return () => { adder?.stop(); liveStock?.stop(); };
+    return () => { adder?.stop(); liveStock?.stop(); needs?.stop(); };
   },
 };

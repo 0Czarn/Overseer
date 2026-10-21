@@ -670,6 +670,12 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
 .mil-pdg-blueprint { position: relative; aspect-ratio: 508 / 248; border-radius: 3px; border: 1px solid #10161d; overflow: hidden;
   background-color: #3b4a5a; background-size: cover; background-position: center; }
 .mil-pdg-plane { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+/* tank designer: chassis drawing between the module rows, slot names under the modules */
+.mil-td-tank { position: absolute; inset: 6% 8%; width: 84%; height: 88%; object-fit: contain; }
+.mil-tdg .mil-pd-slot { position: relative; height: 54px; }
+.mil-td-caption { position: absolute; left: 0; right: 0; bottom: 1px; font-size: 9.5px; text-align: center; color: #9a9077;
+  text-transform: uppercase; letter-spacing: 0.04em; pointer-events: none; }
+.mil-td-special-title { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: #a8925a; margin-top: 2px; }
 .mil-pdg-caption { position: absolute; top: 8px; left: 0; right: 0; text-align: center; font-size: 12px; color: #e9f0f7;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); z-index: 1; }
 .mil-pdg-stats { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -1022,6 +1028,10 @@ body[data-loading="1"] #view { opacity: 0.55; transition: opacity 0.2s ease 0.3s
 .lc-cross { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; }
 .lc-dot { stroke: var(--bg-elev); stroke-width: 2; }
 .lc-hit { fill: transparent; cursor: crosshair; }
+.lc-hit-pick { cursor: copy; }
+.lc-note-line { stroke: var(--warn); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.lc-note-flag { fill: var(--warn); }
+.lc-tip-note { color: var(--warn); max-width: 280px; white-space: normal; margin: 2px 0; }
 .lc-tip { position: absolute; top: 8px; pointer-events: none; background: var(--bg-elev-2); border: 1px solid var(--border);
   border-radius: 6px; padding: 6px 8px; font-size: 12px; min-width: 150px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); }
 .lc-tip-date { color: var(--text-muted); margin-bottom: 3px; }
@@ -1210,3 +1220,132 @@ body.compact .nav-pinned .nav-label { display: none; }
 .gs-eq-kind-on { border-color: var(--accent); background: var(--accent-soft); }
 .gs-eq-body { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .gs-eq-table { max-width: 900px; }
+
+/* Compare tile (Army/Air/Navy, bottom): templates / designs of several countries side by side */
+.cmp-kinds { margin-bottom: 4px; }
+.cmp-table th.cmp-col { vertical-align: top; text-align: left; min-width: 180px; }
+.cmp-table th.cmp-col > * { display: block; width: 100%; margin-bottom: 4px; }
+.cmp-table th.cmp-col > button { width: auto; }
+.cmp-ref { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--hoi-trim-hi, #a8925a); }
+.cmp-note { font-size: 11.5px; font-weight: 400; }
+.cmp-group th { text-align: left; text-transform: uppercase; letter-spacing: 0.05em; font-size: 11px; color: var(--hoi-trim-hi, #a8925a); padding-top: 10px; }
+.cmp-label { text-align: left; font-weight: 400; white-space: nowrap; }
+.cmp-label-in { display: inline-flex; align-items: center; gap: 6px; }
+.cmp-label-in .tx-icon { width: 18px; height: 18px; object-fit: contain; }
+.cmp-diff { font-size: 11.5px; color: var(--hoi-muted, #9a9077); margin-left: 6px; display: inline-flex; gap: 2px; align-items: baseline; }
+.cmp-arrow { font-size: 11px; }
+.cmp-good .cmp-diff { color: var(--ok, #4cc38a); }
+.cmp-bad .cmp-diff { color: var(--bad, #ef6461); }
+.cmp-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Collapsible tiles (lib/collapse.js): a folded tile keeps only its head */
+.tile-toggle { flex: none; margin-left: 8px; width: 26px; height: 22px; display: inline-grid; place-items: center; cursor: pointer;
+  background: transparent; color: var(--text-muted); border: 1px solid var(--border); border-radius: 4px; font-size: 12px; line-height: 1; }
+.hoi-panel .tile-toggle { color: var(--hoi-muted, #9a9077); border-color: #3c3826; }
+.tile-toggle:hover { color: var(--text); border-color: var(--accent); }
+.card-head > .tile-toggle, .hoi-head > .tile-toggle { order: 99; }
+/* with the fold button the head keeps title left, the tile's own controls and the button right */
+.card-head:has(> .tile-toggle), .hoi-head:has(> .tile-toggle) { justify-content: flex-start; }
+.card-head:has(> .tile-toggle) > :nth-child(2):not(.tile-toggle), .hoi-head:has(> .tile-toggle) > :nth-child(2):not(.tile-toggle) { margin-left: auto; }
+.card-head > h2 + .tile-toggle, .hoi-head > .hoi-head-title + .tile-toggle { margin-left: auto; }
+/* the tile's controls (with the fold button) stay at the right, also when a narrow head wraps them to a new line */
+.hoi-head > .hoi-head-right { margin-left: auto; justify-content: flex-end; }
+.tile-collapsed > :not(.card-head):not(.hoi-head) { display: none !important; }
+.tile-collapsed > .card-head { border-bottom: none; }
+.tile-collapsed > .hoi-head { border-bottom: none; padding-bottom: 0; }
+.tile-all { display: inline-flex; gap: 4px; }
+
+/* the MIO of a design (tank / plane designer title) */
+.mil-mio { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #a8925a; margin-top: 2px; }
+.mil-mio img { width: 26px; height: 26px; object-fit: contain; }
+
+/* MIO window (Country Editor, 2026-10-20): trait tree in the game's grid */
+.mio-open { cursor: pointer; }
+.mio-selected .spirit-icon { border-color: var(--hoi-trim-hi); box-shadow: 0 0 0 2px #14130e, 0 0 8px rgba(201, 165, 90, 0.6); }
+.mio-tree-host:empty { display: none; }
+.mio-tree-host { margin-top: 8px; }
+.mio-window { display: flex; gap: 10px; align-items: flex-start; background: #15160f; border: 1px solid var(--hoi-trim);
+  border-radius: 3px; padding: 8px; }
+.mio-side { flex: 0 0 230px; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
+.mio-side-head { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
+.mio-side-icon { width: 54px; height: 58px; object-fit: contain; }
+.mio-side-name { font-size: 15px; font-weight: 700; letter-spacing: 0.06em; color: var(--hoi-text); }
+.mio-side-level { color: var(--hoi-muted); display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.mio-level-inline { position: static; display: inline-flex; }
+.mio-side-title { color: var(--hoi-trim-hi); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  margin-top: 8px; border-bottom: 1px solid #3c3826; padding-bottom: 2px; }
+.mio-progress { position: relative; height: 16px; background: #0c0d09; border: 1px solid #3c3826; border-radius: 2px; overflow: hidden; }
+.mio-progress-bar { position: absolute; inset: 0 auto 0 0; background: linear-gradient(180deg, #7ccf4a, #3f8a25); }
+.mio-progress span { position: relative; display: block; text-align: center; font-size: 11px; line-height: 16px; color: #fff;
+  text-shadow: 0 1px 2px #000; }
+.mio-initial { color: #e0c070; font-weight: 700; }
+.mio-policy { display: flex; gap: 8px; align-items: flex-start; }
+.mio-policy img { width: 48px; height: 48px; object-fit: contain; }
+.mio-policy > div { flex: 1; min-width: 0; }
+.mio-policy-name { font-weight: 700; color: var(--hoi-text); }
+.mio-main { flex: 1; min-width: 0; }
+.mio-tree-scroll { overflow: auto; cursor: grab; user-select: none; max-height: 70vh;
+  background: radial-gradient(ellipse at 50% 40%, #2a2c22 0%, #17180f 75%); border: 1px solid #3c3826; border-radius: 2px; }
+.mio-tree { position: absolute; left: 0; top: 0; }
+.mio-tree-scroll.tech-dragging { cursor: grabbing; }
+.mio-tree-wrap .zoom-bar { margin-top: 0; }
+.mio-tree-heads { position: absolute; top: 0; left: 0; height: 26px; background: linear-gradient(180deg, #23251c, #121309);
+  border-bottom: 1px solid #3c3826; }
+.mio-tree-head { position: absolute; top: 5px; transform: translateX(-50%); white-space: nowrap; font-size: 12.5px; font-weight: 700;
+  color: var(--hoi-text); }
+.mio-tree-grid { position: absolute; left: 0; }
+.mio-tree-lines { position: absolute; inset: 0; pointer-events: none; }
+.mio-excl { position: absolute; transform: translate(-50%, -50%); width: 14px; height: 18px; display: grid; place-items: center;
+  color: #ff3b2f; font-weight: 900; font-size: 18px; text-shadow: 0 0 3px #000, 0 0 2px #000; pointer-events: none; }
+.mio-trait { position: absolute; width: 64px; height: 80px; outline: none; }
+.mio-trait-frame { position: absolute; inset: 0; width: 64px; height: 80px; }
+.mio-trait-noframe { border-radius: 50%; border: 2px solid #4b7ab0; height: 64px; }
+.mio-trait-icon { position: absolute; left: 8px; top: 8px; width: 48px; height: 48px; object-fit: contain; }
+.mio-trait-kinds { position: absolute; left: 7px; top: 57px; width: 50px; height: 20px; display: flex; justify-content: center;
+  align-items: center; gap: 2px; }
+.mio-trait-kinds img { width: 18px; height: 18px; object-fit: contain; }
+.mio-trait-done { position: absolute; right: -8px; top: 56px; width: 17px; height: 17px; border-radius: 50%; display: grid;
+  place-items: center; font-size: 11px; font-weight: 900; color: #b8f59a; background: #1f3a1f; border: 1px solid #6fbf4f; }
+.mio-trait-locked .mio-trait-icon { filter: saturate(0.5) brightness(0.8); }
+.mio-trait-excluded .mio-trait-icon { filter: grayscale(1) brightness(0.55); }
+.mio-trait:hover .mio-trait-frame, .mio-trait:focus .mio-trait-frame { filter: brightness(1.25) drop-shadow(0 0 4px rgba(255, 230, 140, 0.7)); }
+.mio-trait .spirit-tip, .mio-trait:hover .spirit-tip, .mio-trait:focus .spirit-tip { display: none; }
+.mio-float-tip { display: block; position: fixed; z-index: 300; pointer-events: none; }
+.mio-float-tip[hidden] { display: none; }
+@media (max-width: 720px) { .mio-window { flex-direction: column; align-items: stretch; } .mio-side { flex-basis: auto; width: auto; }
+  .mio-main { width: 100%; } }
+
+/* Game summary - production forecast, notes, ranking, sessions, campaign map (2026-10-21) */
+.gs-forecast { margin-top: 12px; }
+.gs-forecast-icon { width: 28px; height: 18px; object-fit: contain; vertical-align: middle; margin-right: 6px; }
+.gs-forecast-on td { background: var(--accent-soft); }
+.gs-report-btn { align-self: flex-end; }
+.gs-note-new { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.gs-note-day { font-family: var(--mono); color: var(--warn); min-width: 88px; }
+.gs-note-text { flex: 1 1 260px; min-width: 0; background: var(--bg-elev-2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 5px 8px; font: inherit; }
+.gs-note-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.gs-note-list li { display: flex; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.gs-note-date { font-family: var(--mono); color: var(--warn); min-width: 88px; }
+.gs-note-body { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+.gs-rank-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.gs-rank-title { font-family: var(--display); text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); margin-bottom: 2px; }
+.gs-rank-table td { padding: 3px 6px; }
+.gs-rank-place { width: 2em; font-weight: 600; }
+.gs-up { color: var(--ok); }
+.gs-down { color: var(--bad); }
+.gs-sessions { overflow-x: auto; }
+.gs-sess-table td, .gs-sess-table th { white-space: nowrap; }
+.gs-sess-table td:nth-last-child(-n+2) { white-space: normal; min-width: 160px; }
+.gs-map-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.gs-map-options { display: flex; gap: 8px; flex-wrap: wrap; }
+.gs-map-date { font-family: var(--mono); min-width: 92px; }
+.gs-map-slider { flex: 1 1 220px; min-width: 120px; accent-color: var(--accent); }
+.gs-map-wrap { position: relative; }
+.gs-map-scroll { max-height: min(560px, 62vh); overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: #18263a; cursor: grab; }
+.gs-map-canvas { display: block; image-rendering: pixelated; }
+.gs-map-tip { position: absolute; z-index: 5; pointer-events: none; background: var(--bg-elev-2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 9px; font-size: 12px; max-width: 220px; box-shadow: 0 4px 14px rgba(0, 0, 0, .5); }
+.gs-map-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; font-size: 12px; }
+.gs-map-legend-item { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); }
+.gs-map-swatch { width: 12px; height: 12px; border-radius: 2px; border: 1px solid rgba(0, 0, 0, .5); }

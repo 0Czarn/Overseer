@@ -660,6 +660,21 @@ def read_researched(memory, country: int) -> list[str]:
     return out
 
 
+def researched_count(memory, country: int) -> int:
+    """Number of researched technologies (the size of the array read_researched reads, without the names - Game summary
+    records it for every country every day)."""
+    status = _ptr(memory, country + TECHNOLOGY_STATUS)
+    if status is None:
+        raise PointerError("no_research", "The country's technology status is not readable")
+    raw = memory.read(status + RESEARCHED, 16)
+    if not raw:
+        raise PointerError("unreadable", "The researched technologies are not readable")
+    _data, capacity, size = struct.unpack("<Qii", raw)
+    if not 0 <= size <= min(max(capacity, 0), 5000):
+        raise PointerError("implausible", f"{size} researched technologies - layout does not match")
+    return size
+
+
 def read_date(memory, module_base: int) -> dict:
     """{"year", "day" (0-based day of the year), "hour"} of the running game."""
     table = _ptr(memory, module_base + COUNTRY_TABLE[0])
@@ -1556,6 +1571,27 @@ def read_states(memory, module_base: int, tags: list[str], buildings: list[str],
     return out
 
 
+def read_state_control(memory, module_base: int, tags: list[str]) -> dict[int, tuple[str | None, str | None, int]]:
+    """{state id: (owner, controller, available manpower)} of every state - the light part of read_states the Game
+    summary records every day (territory, the campaign map, free manpower)."""
+    table = _ptr(memory, module_base + COUNTRY_TABLE[0])
+    if table is None:
+        raise PointerError("no_country_table", "The game state is not readable")
+    tag_of = lambda slot: tags[slot - 1] if 0 < slot <= len(tags) else None  # noqa: E731
+    out = {}
+    for sid, state in enumerate(read_array(memory, table + STATES, 5000)):
+        head = memory.read(state + STATE["owner"], 8) if state else None
+        men = memory.read(state + STATE["available"], 4) if head else None
+        if not head or not men:
+            continue
+        owner, controller = struct.unpack("<ii", head)
+        available = struct.unpack("<i", men)[0]
+        if not 0 <= available < 10**9:
+            raise PointerError("implausible", "State manpower out of range - layout does not match")
+        out[sid] = (tag_of(owner), tag_of(controller), available)
+    return out
+
+
 def read_free_manpower(memory, module_base: int, tags: list[str], tag: str) -> int:
     """Free manpower of `tag`: the available manpower of the states it controls (game memory)."""
     table = _ptr(memory, module_base + COUNTRY_TABLE[0])
@@ -1669,30 +1705,154 @@ def is_plane_type(type_id: str) -> bool:
     return "airframe" in type_id or "plane" in type_id
 
 
+# Land stats of a variant (2026-10-20, user's request: tank designs drawn like the game's tank designer), fixed64 like
+# PLANE_STATS: infantry_equipment_1 of Road to 56 = its file (defense 22, breakthrough 3, soft attack 6, hard attack 1,
+# ap_attack 4, speed 4, reliability 0.9, cost 0.5); SOV BT-7: 4 / 16.5 / hardness 0.8 / 15 / 15, armor 31.25,
+# piercing 50, speed 10.44, reliability 0.77, fuel 2.5, cost 10.35.
+TANK_STATS = {"soft_attack": 0x120, "hard_attack": 0x128, "air_attack": 0x280, "defense": 0x108, "breakthrough": 0x110,
+              "armor_value": 0x2F8, "ap_attack": 0x300, "hardness": 0x118, "maximum_speed": 0x2F0, "reliability": 0x308,
+              "fuel_consumption": 0x328, "build_cost_ic": 0x368}
+
+
+def is_tank_type(type_id: str) -> bool:
+    """A tank designer chassis: light_tank_chassis_1, also the variants (2026-10-20, user: tank destroyers, anti-air,
+    artillery and flame tanks were missing) heavy_tank_destroyer_chassis, light_tank_aa_chassis,
+    medium_tank_artillery_chassis, medium_tank_flame_chassis, *_tank_amphibious_chassis, amphibious_tank_chassis,
+    land_cruiser_chassis."""
+    return bool(re.fullmatch(r"(?:\w*tank\w*|land_cruiser)_chassis(?:_\d+)?", type_id))
+
+
+def read_tank_designs(memory, country: int) -> list[dict]:
+    """Like read_plane_designs for tank chassis designs, with TANK_STATS."""
+    return _read_designs(memory, country, is_tank_type, TANK_STATS,
+                         lambda s: s["reliability"] <= 2 and s["build_cost_ic"] >= 0)
+
+
 def read_plane_designs(memory, country: int) -> list[dict]:
     """[{"id", "type", "name", "family" (the name without the version), "outdated", "parent" (equipment id or None),
     "stats" (PLANE_STATS)}] - every plane
     design of the country, the outdated ones too."""
+    return _read_designs(memory, country, is_plane_type, PLANE_STATS, lambda s: 0 <= s["reliability"] <= 2)
+
+
+# The MIO of a design (2026-10-20, user's request): CEquipmentVariant + 0x488 = {int32 79 (the id type of MIOs),
+# int32 MIO id} (the save's design_team = { id type = 79 }); GER: Bf 109 D and FW 190 B 16 = Messerschmitt, every
+# Sturer Emil 6 = Henschel, as the game's designer. The country's MIOs: [production + 0x130] = array of
+# NIndustrialOrganisation::COrganisation* (read_array; GER 29, ids 1..29); organisation + 0xc = id, + 0x60 = its own
+# name (a localisation key, often empty), + 0x80 = icon sprite (GFX_idea_messerschmitt).
+DESIGN_MIO = 0x488
+MIO_ID_TYPE = 79
+COUNTRY_MIOS = 0x130
+MIO = {"id": 0xC, "name": 0x60, "icon": 0x80}
+
+
+def read_mios(memory, country: int) -> dict[int, dict]:
+    """{MIO id: {"name": own name key or None, "icon": sprite}} of the country's military industrial organisations."""
+    production = _ptr(memory, country + STOCKPILE["production"])
+    out = {}
+    for org in read_array(memory, production + COUNTRY_MIOS, 2000) if production else []:
+        raw = memory.read(org + MIO["id"] - 4, 8) if org else None
+        if not raw or struct.unpack_from("<i", raw)[0] != MIO_ID_TYPE:
+            continue
+        out[struct.unpack_from("<i", raw, 4)[0]] = {"name": _msvc_string(memory, org + MIO["name"], 120) or None,
+                                                     "icon": _msvc_string(memory, org + MIO["icon"], 120) or None}
+    return out
+
+
+
+# Names of interned tokens (2026-10-20, MIO tree: the key of a MIO, its unlocked traits and its policy): [hoi4.exe +
+# 0x35E1AB0] block of the token table - + 0x4 = int32 last token, + 0xc = int32 token before the first one, + 0x10 =
+# pointer to the token field of the first entry; entries of 0x48 bytes: + 0x8 = token (int64), + 0x10 = pointer to the
+# text, + 0x18 = int32 length (not a std::string). GER 1.19.3: 0x4E1F aluminium .. 0x12D2B, 0x8EAE =
+# GER_henschel_organization, 0x8B8D = generic_mio_trait_adaptable_chassis, 0x952D = mio_policy_land_heavy_gantry_cranes.
+TOKEN_TABLE = {"rva": 0x35E1AB0, "last": 0x4, "before_first": 0xC, "first": 0x10}
+TOKEN_ENTRY = {"size": 0x48, "token": 0x8, "text": 0x10, "length": 0x18}
+
+
+def token_names(memory, module_base: int):
+    """Function token -> its text (None outside the table or when the entry does not hold that token)."""
+    raw = memory.read(module_base + TOKEN_TABLE["rva"], 0x18)
+    if not raw:
+        raise PointerError("unreadable", "Token table is not readable")
+    last, before = struct.unpack_from("<i", raw, TOKEN_TABLE["last"])[0], struct.unpack_from("<i", raw, TOKEN_TABLE["before_first"])[0]
+    first = struct.unpack_from("<Q", raw, TOKEN_TABLE["first"])[0] - TOKEN_ENTRY["token"]
+    if not (0 <= before < last < 1_000_000 and 0x10000 <= first < 0x7FFF_FFFF_FFFF):
+        raise PointerError("implausible", "Token table out of range - layout does not match")
+    cache: dict[int, str | None] = {}
+
+    def name(token: int) -> str | None:
+        if token in cache:
+            return cache[token]
+        out = None
+        if before < token <= last:
+            entry = memory.read(first + (token - before - 1) * TOKEN_ENTRY["size"], TOKEN_ENTRY["size"])
+            if entry and struct.unpack_from("<q", entry, TOKEN_ENTRY["token"])[0] == token:
+                ptr, length = struct.unpack_from("<Q", entry, TOKEN_ENTRY["text"])[0], struct.unpack_from("<i", entry, TOKEN_ENTRY["length"])[0]
+                text = memory.read(ptr, length) if 0 < length < 300 else None
+                out = text.split(b"\0")[0].decode("utf-8", "replace") if text else None
+        cache[token] = out
+        return out
+    return name
+
+
+# State of a MIO (2026-10-20, user's request: level, bonuses and the trait tree live; GER Henschel 1940: level 12,
+# 6 traits, Heavy Gantry Cranes as the game's MIO window): organisation + 0x38 = token of its key, + 0x128 = funds
+# (fixed64), + 0x130 = level (int32), + 0x150 = unlocked traits {pointer, int32 capacity, int32 size} of 16-byte
+# entries {vtable, int32 trait token}, + 0x188 = token of the active policy (a token below the table = none); fixed64:
+# + 0xa0 = research bonus of the MIO itself (0.05; Henschel 0.10 after a focus: + 0.15 of the spirits = the window's
+# 25%), + 0xb0 = design team assign cost a day (0.10), + 0xc8 = funds gain factor (1.25: x 1.15 of the spirits = +43%).
+MIO_STATE = {"key": 0x38, "funds": 0x128, "size": 0x130, "traits": 0x150, "trait_entry": 16, "trait_token": 8, "policy": 0x188,
+             "research_bonus": 0xA0, "assign_cost": 0xB0, "funds_factor": 0xC8}
+
+
+def read_mio_states(memory, module_base: int, country: int) -> list[dict]:
+    """[{"id": MIO key, "size", "funds", "traits": [unlocked trait tokens], "policy": policy key or None, "icon",
+    "research_bonus", "assign_cost", "funds_factor"}]."""
+    name = token_names(memory, module_base)
+    production = _ptr(memory, country + STOCKPILE["production"])
+    out = []
+    for org in read_array(memory, production + COUNTRY_MIOS, 2000) if production else []:
+        raw = memory.read(org, MIO_STATE["policy"] + 4) if org else None
+        if not raw or struct.unpack_from("<i", raw, MIO["id"] - 4)[0] != MIO_ID_TYPE:
+            continue
+        key = name(struct.unpack_from("<i", raw, MIO_STATE["key"])[0])
+        size = struct.unpack_from("<i", raw, MIO_STATE["size"])[0]
+        data, capacity, count = struct.unpack_from("<Qii", raw, MIO_STATE["traits"])
+        if key is None or not 0 <= size <= 1000 or not 0 <= count <= min(capacity, 200) and count:
+            raise PointerError("implausible", "MIO out of range - layout does not match")
+        blob = memory.read(data, MIO_STATE["trait_entry"] * count) if count else b""
+        traits = [name(struct.unpack_from("<i", blob, i * MIO_STATE["trait_entry"] + MIO_STATE["trait_token"])[0])
+                  for i in range(count)] if blob else []
+        out.append({"id": key, "size": size, "funds": round(struct.unpack_from("<q", raw, MIO_STATE["funds"])[0] / 100000, 5),
+                    "traits": [t for t in traits if t], "policy": name(struct.unpack_from("<i", raw, MIO_STATE["policy"])[0]),
+                    "icon": _msvc_string(memory, org + MIO["icon"], 120) or None,
+                    **{k: round(struct.unpack_from("<q", raw, MIO_STATE[k])[0] / 100000, 5)
+                       for k in ("research_bonus", "assign_cost", "funds_factor")}})
+    return out
+
+def _read_designs(memory, country: int, wanted, stat_offsets: dict, plausible) -> list[dict]:
     production = _ptr(memory, country + STOCKPILE["production"])
     if production is None:
         raise PointerError("unreadable", "Production object of the country is not readable")
     out, ids = [], {}
     for variant in read_array(memory, production + DESIGNS["all"], 5000):
         tid = _type_id(memory, variant) if variant else None
-        raw = memory.read(variant, DESIGN["outdated"] + 1) if tid and is_plane_type(tid) else None
+        raw = memory.read(variant, max(DESIGN["outdated"] + 1, max(stat_offsets.values()) + 8, DESIGN_MIO + 8)) if tid and wanted(tid) else None
         if not raw:
             continue
         vid = struct.unpack_from("<i", raw, DESIGN["id"])[0]
         ids[variant] = vid
-        stats = {k: round(struct.unpack_from("<q", raw, off)[0] / 100000, 4) for k, off in PLANE_STATS.items()}
+        stats = {k: round(struct.unpack_from("<q", raw, off)[0] / 100000, 4) for k, off in stat_offsets.items()}
         slots = _plane_slots(memory, variant)
-        if raw[DESIGN["outdated"]] > 1 or not 0 <= stats["reliability"] <= 2:
-            raise PointerError("implausible", "Plane design out of range - layout does not match")
+        if raw[DESIGN["outdated"]] > 1 or not plausible(stats):
+            raise PointerError("implausible", "Design out of range - layout does not match")
         name = _msvc_string(memory, variant + VARIANT["name"], 120) or ""
         version = _msvc_string(memory, variant + DESIGN["version_name"], 60) if name else None
         out.append({"id": vid, "type": tid, "name": f"{name} {version}" if version else name, "family": name,
                     "outdated": bool(raw[DESIGN["outdated"]]), "parent": struct.unpack_from("<Q", raw, DESIGN["parent"])[0],
-                    "stats": stats, "slots": slots})
+                    "stats": stats, "slots": slots,
+                    "mio": struct.unpack_from("<i", raw, DESIGN_MIO + 4)[0]
+                    if struct.unpack_from("<i", raw, DESIGN_MIO)[0] == MIO_ID_TYPE else None})
     for d in out:   # the parent as an equipment id (a design of another country, e.g. licensed: its address only)
         d["parent"] = ids.get(d["parent"]) if d["parent"] else None
     return out

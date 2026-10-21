@@ -1,8 +1,9 @@
 // National spirits of the selected country (newest save): HOI4-like icon row; modifiers show on hover / focus.
 import { h, notice } from '../lib/dom.js';
 import { livePanel } from '../lib/refresh.js';
-import { modifierIcon } from '../lib/icons.js';
+import { mioIcon, modifierIcon } from '../lib/icons.js';
 import { numberLocale } from '../lib/options.js';
+import { showMioTree } from './mio-tree.js';
 
 // Modifiers where a higher value is worse for the country (shown red when positive), as in the game's tooltips.
 const BAD_WHEN_HIGH = /cost|penalty|accident|consumption|losses|attrition|requirement|need|to_others|weekly_casualties|enemy_|weight/;
@@ -66,26 +67,32 @@ export function spiritsPanel(ctx, tag) {
 const pctText = (v) => `${v > 0 ? '+' : ''}${+(v * 100).toFixed(2)}%`;
 const MIO_SLOTS = new Set(['tank_manufacturer', 'naval_manufacturer', 'aircraft_manufacturer', 'materiel_manufacturer']);
 
-/** One MIO with its level badge; tooltip: level, funds, policy, traits and the bonuses they give now. */
-export function mioTile(m) {
-  return h('div', { class: 'spirit mio', tabindex: 0, 'aria-label': `${m.name}, level ${m.size}` },
+/** One MIO with its level badge; tooltip: level, funds, policy, traits and the bonuses they give now. A click (Enter)
+ * calls onOpen (the trait tree). */
+export function mioTile(m, onOpen = null) {
+  const open = onOpen ? (e) => onOpen(m, e.currentTarget) : null;
+  return h('div', { class: `spirit mio${onOpen ? ' mio-open' : ''}`, tabindex: 0, 'aria-label': `${m.name}, level ${m.size}`, 'data-mio': m.id,
+    role: onOpen ? 'button' : null, onClick: open,
+    onKeydown: open ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e); } } : null },
     m.icon ? h('img', { class: 'spirit-icon', src: m.icon, alt: '' }) : h('div', { class: 'spirit-icon spirit-noicon' }, '?'),
     h('span', { class: 'mio-level' }, String(m.size ?? 0)),
     h('div', { class: 'spirit-tip', role: 'tooltip' },
       h('div', { class: 'spirit-tip-name' }, m.name),
       h('div', { class: 'spirit-tip-kind' }, `Level ${m.size ?? 0}`
         + (Number.isFinite(m.funds) ? ` · funds ${Math.round(m.funds).toLocaleString(numberLocale())}` : '')
-        + (Number.isFinite(m.research_bonus) ? ` · research bonus ${pctText(m.research_bonus)}` : '')),
+        + (Number.isFinite(m.research_bonus) ? ` · research bonus ${pctText(m.research_bonus)}` : '')
+        + (m.attributes?.funds_gain ? ` · funds gain ${pctText(m.attributes.funds_gain)}` : '')),
       m.policy ? h('div', { class: 'spirit-tip-traits' }, `Policy: ${m.policy}`) : null,
       m.bonuses.length
         ? m.bonuses.map((g) => h('div', { class: 'spirit-tip-mods' }, h('div', { class: 'mio-group' }, g.group),
-          g.entries.map((e) => h('div', { class: 'hoi-line' }, h('span', null, e.label),
+          g.entries.map((e) => h('div', { class: 'hoi-line' }, h('span', { class: 'hoi-mod' }, mioIcon(e.key), e.label),
             h('span', { class: `hoi-num ${modifierClass(e.key, e.value)}` }, pctText(e.value))))))
         : h('div', { class: 'muted' }, 'No bonuses yet'),
       h('div', { class: 'spirit-tip-desc' }, [
         m.initial_trait ? `Initial trait: ${m.initial_trait}` : null,
         m.traits.length ? `Unlocked traits (${m.traits.length}): ${m.traits.join(', ')}` : 'No traits unlocked yet',
-      ].filter(Boolean).join('\n'))));
+      ].filter(Boolean).join('\n')),
+      onOpen ? h('div', { class: 'muted' }, 'Click to show the trait tree') : null));
 }
 
 /** Design slot tile that opens the list of the country's MIOs of that kind. */
@@ -120,12 +127,16 @@ function sectionIcon(name) {
   return svg;
 }
 
-/** Laws & Government, Research & Production, Military Staff (refreshable), like the game's politics screen. */
+/** Laws & Government, Research & Production, Military Staff (refreshable), like the game's politics screen. An open MIO
+ * list and trait tree stay open when the tile reads the game again. */
 export function governmentPanel(ctx, tag) {
+  let openSlot = null;
+  let openMio = null;
+  const treeHost = h('div', { class: 'mio-tree-host' });   // kept between reads: no flicker, its scroll stays
   return livePanel(ctx, {
     title: 'Government & staff', cls: 'gov-panel', url: `/api/countries/${encodeURIComponent(tag)}/government`,
     liveParts: (res) => [res.data?.ideas_source === 'live' && 'laws, companies',
-      res.data?.advisors_source === 'live' && 'advisors, staff'].filter(Boolean),
+      res.data?.advisors_source === 'live' && 'advisors, staff', res.data?.mios_source === 'live' && 'MIOs'].filter(Boolean),
     unavailable: 'Government & staff',
     render(body, res) {
       if (!res.data?.laws) {
@@ -134,28 +145,45 @@ export function governmentPanel(ctx, tag) {
       }
       const rows = Object.fromEntries(SECTIONS.map(([id]) => [id, h('div', { class: 'spirit-row gov-row' })]));
       const mioList = h('div', { class: 'mio-list', hidden: true });
-      let openSlot = null;
-      const toggle = (slot, tile) => {
-        const same = openSlot === slot;
+      const slotTiles = new Map();
+      const openTree = (m, tile) => {
+        mioList.querySelectorAll('.mio-open').forEach((t) => t.classList.remove('mio-selected'));
+        if (openMio === m.id && tile) { openMio = null; treeHost.replaceChildren(); delete treeHost.dataset.mio; return; }
+        openMio = m.id;
+        mioList.querySelector(`.mio-open[data-mio="${CSS.escape(m.id)}"]`)?.classList.add('mio-selected');
+        showMioTree(ctx, tag, m.id, treeHost);
+      };
+      const show = (slot) => {
+        const tile = slotTiles.get(slot);
         rows.research.querySelectorAll('.mio-slot').forEach((t) => t.setAttribute('aria-expanded', 'false'));
-        openSlot = same ? null : slot;
-        mioList.hidden = same;
-        if (!same) {
-          tile.setAttribute('aria-expanded', 'true');
-          mioList.replaceChildren(h('div', { class: 'mio-list-title' }, tile.getAttribute('aria-label')),
-            h('div', { class: 'spirit-row' }, res.data.mios[slot].map(mioTile)));
-        }
+        openSlot = slot;
+        mioList.hidden = !slot || !tile;
+        if (mioList.hidden) return;
+        tile.setAttribute('aria-expanded', 'true');
+        mioList.replaceChildren(h('div', { class: 'mio-list-title' }, tile.getAttribute('aria-label')),
+          h('div', { class: 'spirit-row' }, res.data.mios[slot].map((m) => mioTile(m, openTree))), treeHost);
+      };
+      const toggle = (slot) => {
+        openMio = null;
+        treeHost.replaceChildren(); delete treeHost.dataset.mio;
+        show(openSlot === slot ? null : slot);
       };
       for (const [id] of SECTIONS) {
         rows[id].replaceChildren(...res.data[id].map((item) => {
           const mios = MIO_SLOTS.has(item.slot) && item.kind === 'empty' ? res.data.mios?.[item.slot] ?? [] : [];
-          return mios.length ? mioSlotTile(item, mios, (tile) => toggle(item.slot, tile))
-            : iconTile(item, { round: item.kind === 'law' || item.kind === 'company' });
+          if (!mios.length) return iconTile(item, { round: item.kind === 'law' || item.kind === 'company' });
+          const tile = mioSlotTile(item, mios, () => toggle(item.slot));
+          slotTiles.set(item.slot, tile);
+          return tile;
         }));
       }
       body.replaceChildren(...SECTIONS.map(([id, title]) => h('div', { class: 'gov-section' },
         h('div', { class: 'gov-bar' }, sectionIcon(id), h('span', null, title)), rows[id],
         id === 'research' ? mioList : null)));
+      if (openSlot) show(openSlot);
+      const again = openMio && res.data.mios?.[openSlot]?.find((m) => m.id === openMio);
+      if (again) openTree(again, null);
+      else if (openMio) { openMio = null; treeHost.replaceChildren(); delete treeHost.dataset.mio; }
     },
   });
 }

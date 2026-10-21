@@ -5,6 +5,8 @@ import { startFocusWatch } from './lib/focus-watch.js';
 import { sortMessage, startConstructionSort } from './lib/construction-sort.js';
 import { autostartMessage, startFocusAutostart } from './lib/focus-autostart.js';
 import { startTradeWatch } from './lib/trade-watch.js';
+import { watchTiles } from './lib/collapse.js';
+import { keepTooltipsInWindow } from './lib/tooltips.js';
 import dashboard from './views/dashboard.js';
 import countries from './views/countries.js';
 import countryEditor from './views/country-editor.js';
@@ -33,6 +35,8 @@ const PREFS_KEY = 'hoi4dbg.prefs';
 const bridge = globalThis.hoi4dbg;
 const api = createApi(bridge);
 const viewEl = document.getElementById('view');
+watchTiles(viewEl, () => document.body.dataset.view ?? '');   // every tile can be folded (lib/collapse.js)
+keepTooltipsInWindow();   // tooltips open above / to the left when they would leave the window
 const statusListeners = new Set();
 
 function loadPrefs() {

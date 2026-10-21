@@ -2,10 +2,13 @@
 // construction per country, summed per faction or per player (with or without the player's subjects), daily and cumulative, the number of factories, the IC idle factories
 // waste and the IC of equipment lost in combat and to attrition, optionally against a second campaign. The backend
 // records every country once per game day while the app runs (ic_history.py).
-import { h, notice, viewHeader } from '../lib/dom.js';
+import { card, h, notice, viewHeader } from '../lib/dom.js';
 import { compact, dayText, hoverSync, lineChart } from '../lib/linechart.js';
 import { refreshMs } from '../lib/options.js';
 import { equipmentSection } from './summary-equipment.js';
+import { notesSection, rankingSection, sessionsSection } from './summary-extra.js';
+import { mapSection } from './summary-map.js';
+import { REPORT_METRICS, download, reportHtml, reportName } from './summary-report.js';
 import { numberLocale } from '../lib/options.js';
 
 // categorical slots in fixed order (dark steps of the validated reference palette); a colour follows its series
@@ -20,16 +23,58 @@ const WASTED_METRICS = [['wmil', 'IC wasted by idle military factories', 'Milita
   ['wall', 'IC wasted by idle factories', 'All']];
 const LOSS_METRICS = [['lcom', 'IC of equipment lost in combat', 'Combat'], ['latt', 'IC of equipment lost to attrition', 'Attrition'],
   ['lall', 'IC of equipment lost', 'All'], ['lenemy', 'IC of enemy equipment destroyed', 'Enemy']];
+// recorded from 2026-10-21 (user's request) - states of a day, not flows
+const KD_METRICS = [['kd', 'Enemy equipment destroyed per equipment lost (IC, running sums)', 'Destroyed / lost']];
+const POLITICS_METRICS = [['pp', 'Political power', 'PP'], ['stab', 'Stability', 'Stability'], ['ws', 'War support', 'War support'],
+  ['cp', 'Command power', 'CP'], ['fuel', 'Fuel', 'Fuel']];
+const ARMY_METRICS = [['divs', 'Divisions', 'Divisions'], ['bat', 'Battalions in divisions', 'Battalions'],
+  ['cover', 'Equipment of the divisions (% of what the templates need)', 'Equipped %']];
+const TERRITORY_METRICS = [['sown', 'States owned', 'Owned'], ['sctl', 'States controlled', 'Controlled'],
+  ['vp', 'Victory points controlled', 'Victory points']];
+const RESEARCH_METRICS = [['tech', 'Technologies researched', 'Technologies']];
+const MANPOWER_METRICS = [['mpf', 'Free manpower', 'Free'], ['mpa', 'Manpower in the field', 'In the field'],
+  ['mpt', 'Manpower in training', 'Training'], ['mpall', 'All manpower (free + field + training)', 'All']];
+const EXTRA_METRICS = [...KD_METRICS, ...POLITICS_METRICS, ...ARMY_METRICS, ...TERRITORY_METRICS, ...RESEARCH_METRICS, ...MANPOWER_METRICS];
+export const PERCENT_METRICS = ['stab', 'ws', 'cover'];
+// groups of buttons: [label, metrics]
+export const METRIC_GROUPS = [['IC a day', null], ['Factories', null], ['IC per factory', null], ['Wasted IC', null],
+  ['IC lost', null], ['Politics', POLITICS_METRICS], ['Army', ARMY_METRICS], ['Territory', TERRITORY_METRICS],
+  ['Research', RESEARCH_METRICS], ['Manpower', MANPOWER_METRICS]];
 // IC a day per factory working on a line (efficiency, output and construction bonuses); groups: their IC / their factories
 const PER_FACTORY_METRICS = [['pmil', 'Military IC per military factory', 'Military'],
   ['pnav', 'Naval IC per dockyard', 'Naval'], ['pciv', 'Construction IC per civilian factory', 'Civilian']];
-const METRICS = [...IC_METRICS, ...FACTORY_METRICS, ...PER_FACTORY_METRICS, ...WASTED_METRICS, ...LOSS_METRICS];
+const METRICS = [...IC_METRICS, ...FACTORY_METRICS, ...PER_FACTORY_METRICS, ...WASTED_METRICS, ...LOSS_METRICS, ...EXTRA_METRICS];
+export const isExtraMetric = (m) => EXTRA_METRICS.some(([k]) => k === m);
 export const isLossMetric = (m) => LOSS_METRICS.some(([k]) => k === m);
 /** Factory counts are a level, not a flow: no cumulative chart, whole numbers. */
 export const isFactoryMetric = (m) => FACTORY_METRICS.some(([k]) => k === m);
 export const isPerFactoryMetric = (m) => PER_FACTORY_METRICS.some(([k]) => k === m);
 /** A state of the day (factories, IC per factory), not a flow: no cumulative chart. */
-export const isLevelMetric = (m) => isFactoryMetric(m) || isPerFactoryMetric(m);
+export const isLevelMetric = (m) => isFactoryMetric(m) || isPerFactoryMetric(m) || isExtraMetric(m);
+
+/** How a value of `metric` is written: whole numbers for counts, % for stability / war support / coverage. */
+export function metricFormat(m) {
+  if (PERCENT_METRICS.includes(m)) return (v) => `${v.toFixed(1)}%`;
+  if (m === 'kd') return (v) => v.toFixed(2);
+  if (isPerFactoryMetric(m)) return (v) => v.toFixed(2);
+  if (isFactoryMetric(m) || ['divs', 'bat', 'sown', 'sctl', 'tech'].includes(m)) return (v) => String(Math.round(v));
+  return compact;
+}
+/** What a value recorded from 2026-10-21 is, shown above its chart. */
+export function extraNote(m) {
+  const what = {
+    kd: 'IC of enemy equipment destroyed divided by the IC of equipment lost, both summed from the first known day - above 1: '
+      + 'the enemy loses more. Only countries with a combat log (see IC lost).',
+    cover: 'Equipment in the divisions of what their templates need, each kind up to its need (pieces), summed over all kinds.',
+    vp: 'Victory points of the states the country controls (state history files of the game and the mods); a state counts '
+      + 'whole for its controller.',
+    mpf: 'Free manpower: the available manpower of the states the country controls, as the game counts it.',
+    stab: 'A group shows the mean of its countries.', ws: 'A group shows the mean of its countries.',
+    bat: 'Battalions of all divisions (templates x divisions), without support companies.',
+  }[m];
+  return `${what ? `${what} ` : ''}Recorded once a game day from 2026-10-21 - older days have no value.`;
+}
+
 const PREFS_KEY = 'hoi4dbg.summary';
 const REFRESH_MS = 5000;
 
@@ -132,12 +177,19 @@ export default {
     const picker = h('div', { class: 'gs-picker' }, pickerHead, searchInput, pickerList);
     const charts = h('div', { class: 'gs-charts' });
     const equipment = equipmentSection(ctx);   // the separate equipment chart at the bottom
+    const notesBox = notesSection(ctx, () => renderCharts());
+    const ranking = rankingSection(ctx);
+    const campaignMap = mapSection(ctx);
+    const sessions = sessionsSection(ctx);
+    const pickDay = (t) => notesBox.pick(t);
     root.append(viewHeader('Game summary', 'IC a day per country over the campaign, recorded from game memory while the app runs.'),
-      status, controls, h('div', { class: 'gs-body' }, picker, charts), equipment.el);
+      status, card('IC a day', [controls, h('div', { class: 'gs-body' }, picker, charts)], { cls: 'gs-main' }), notesBox.el,
+      ranking.el, campaignMap.el, equipment.el, sessions.el);
 
     let games = [];
     let recorder = {};
     let running = null;   // the running game: {campaign, player, date, known}
+    let knownActive;      // id of the campaign being recorded at the last load (watch)
     let main = null;
     let other = null;
     let stopped = false;
@@ -309,7 +361,7 @@ export default {
       const known = (running?.known ?? []).map(byId).filter(Boolean);
       const live = running && running.date;
       const on = live && rec && (!running.campaign || running.campaign === recorder.campaign);
-      const state = on ? ['gs-rec-on', 'Recording'] : live ? ['gs-rec-wait', 'Waiting for the next game day']
+      const state = on ? ['gs-rec-on', 'Recording'] : live ? ['gs-rec-wait', 'Waiting for the game (in the menu, or the next game day)']
         : ['gs-rec-off', 'Not recording'];
       const target = on ? `${gameLabel(rec)} · started ${startedText(rec.created)}`
         : known.length ? `${gameLabel(known[0])} (continues - recognised by the campaign id)`
@@ -399,10 +451,14 @@ export default {
         h('div', { class: 'gs-row' },
           h('div', { class: 'gs-field' }, h('span', { class: 'gs-seg-label' }, 'Campaign'), campaignPicker()),
           h('label', { class: 'gs-field' }, h('span', { class: 'gs-seg-label' }, 'Compare with'),
-            select(opts.filter(([v]) => v !== prefs.game), prefs.compare, pick((v) => { prefs.compare = v || null; }), '-'))),
+            select(opts.filter(([v]) => v !== prefs.game), prefs.compare, pick((v) => { prefs.compare = v || null; }), '-')),
+          prefs.game ? h('button', { class: 'btn btn-small gs-report-btn', disabled: reporting || null,
+            title: 'One HTML file with the charts of the lines shown, the ranking, the sessions, the notes and the map - to send to the other players',
+            onclick: exportReport }, reporting ? 'Making the report…' : 'Export report') : null),
         h('div', { class: 'gs-row' },
           ...[['IC a day', IC_METRICS], ['Factories', FACTORY_METRICS], ['IC per factory', PER_FACTORY_METRICS],
-            ['Wasted IC', WASTED_METRICS], ['IC lost', LOSS_METRICS]]
+            ['Wasted IC', WASTED_METRICS], ['IC lost', [...LOSS_METRICS, ...KD_METRICS]],
+            ...METRIC_GROUPS.filter(([, list]) => list)]
             .map(([label, list]) => h('div', { class: 'gs-field' }, h('span', { class: 'gs-seg-label' }, label),
               seg(list.map(([k, , b]) => [k, b]), prefs.metric, pick((v) => { prefs.metric = v; })))),
           h('div', { class: 'gs-field' }, h('span', { class: 'gs-seg-label' }, 'Show'),
@@ -517,26 +573,57 @@ export default {
             h('th', null, `${isLevelMetric(prefs.metric) ? metric : 'IC a day'} (${dayText(main.t[last])})`),
             isLevelMetric(prefs.metric) ? null : h('th', null, 'Cumulative IC'))),
           h('tbody', null, main.series.filter((s) => keys.includes(s.key)).map((s) => h('tr', null, h('td', null, s.key),
-            h('td', { class: 'num' }, s.values[last] == null ? '—' : s.values[last].toLocaleString(numberLocale(),
-              { maximumFractionDigits: isPerFactoryMetric(prefs.metric) ? 2 : 1 })),
+            h('td', { class: 'num' }, s.values[last] == null ? '—' : PERCENT_METRICS.includes(prefs.metric) || prefs.metric === 'kd'
+              ? metricFormat(prefs.metric)(s.values[last]) : s.values[last].toLocaleString(numberLocale(),
+                { maximumFractionDigits: isPerFactoryMetric(prefs.metric) ? 2 : 1 })),
             isLevelMetric(prefs.metric) ? null
               : h('td', { class: 'num' }, cumulative(main.t, s.values)[last]?.toLocaleString(numberLocale(), { maximumFractionDigits: 0 }) ?? '—'))))));
-      const factories = isFactoryMetric(prefs.metric);
       const level = isLevelMetric(prefs.metric);
+      const markers = notesBox.notes.map((n) => ({ t: n.t, label: n.text }));
       const sync = hoverSync();   // the hovered day shows in both charts
       charts.replaceChildren(...[   // replaceChildren would print a null
-        isLossMetric(prefs.metric) ? patchBar() : null,
+        isLossMetric(prefs.metric) || prefs.metric === 'kd' ? patchBar() : null,
         isLossMetric(prefs.metric) ? lossNotice(keys) : null,
+        isExtraMetric(prefs.metric) ? notice('info', extraNote(prefs.metric)) : null,
         prefs.metric.startsWith('w') ? notice('info', 'Factories without a production or construction line, at the '
           + 'country\'s own IC per assigned factory that day (a construction line takes at most 15 factories).') : null,
         isPerFactoryMetric(prefs.metric) ? notice('info', 'IC a day the game produced per factory working on a line - '
           + 'production efficiency, factory / dockyard output and construction speed bonuses, resource shortages. Idle '
           + 'factories do not count; a group is its IC divided by its factories. Civilian: construction only (not consumer '
           + 'goods or trade), on days recorded from 2026-10-20.') : null,
-        lineChart({ title: level ? metric : `Daily ${metric}`, series: sets(false), sync,
-          format: factories ? (v) => String(Math.round(v)) : isPerFactoryMetric(prefs.metric) ? (v) => v.toFixed(2) : compact }),
-        level ? null : lineChart({ title: `Cumulative ${metric}`, series: sets(true), sync }),
+        lineChart({ title: level ? metric : `Daily ${metric}`, series: sets(false), sync, format: metricFormat(prefs.metric),
+          markers, onPick: pickDay }),
+        level ? null : lineChart({ title: `Cumulative ${metric}`, series: sets(true), sync, markers, onPick: pickDay }),
         table].filter(Boolean));
+    }
+
+    let reporting = false;
+    async function exportReport() {
+      if (!main || reporting) return;
+      reporting = true;
+      renderControls();
+      try {
+        const keys = mode() === 'players' ? visiblePlayers() : prefs.factions ? visibleGroups() : prefs.tags.slice(0, MAX_SERIES);
+        const slots = colorSlots();
+        const colorOf = (k) => colorMap()[k] ?? SERIES_COLORS[slots[k] ?? keys.indexOf(k) % SERIES_COLORS.length];
+        const series = {};
+        for (const [metric] of REPORT_METRICS) {
+          const p = new URLSearchParams(query());
+          p.set('metric', metric);
+          series[metric] = (await ctx.api.get(`${gameUrl(prefs.game)}?${p}`)).data;
+        }
+        const get = (part) => ctx.api.get(`${gameUrl(prefs.game)}/${part}`).then((r) => r.data, () => null);
+        const [rank, sess] = await Promise.all([get(`ranking?subjects=${prefs.subjects ? 1 : 0}`), get('sessions')]);
+        const g = games.find((x) => x.id === prefs.game);
+        const html = reportHtml({ title: `Campaign ${gameLabel(g)}`, subtitle: `Recording started ${startedText(g.created)} · report made `
+          + `${new Date().toLocaleString()}`, series, keys, colorOf, ranking: rank, sessions: sess, notes: notesBox.notes,
+        map: campaignMap.snapshot(), mode: { players: 'players', factions: 'groups', countries: 'countries' }[mode()] });
+        download(reportName(prefs.game), html);
+      } catch (err) {
+        charts.prepend(notice('warn', `Report not made: ${err.message}`));
+      }
+      reporting = false;
+      renderControls();
     }
 
     async function load() {
@@ -559,7 +646,7 @@ export default {
         }
         other = prefs.compare ? await fetchGame(prefs.compare, prefs.game) : null;
         groups = main ? (await ctx.api.get(`${gameUrl(prefs.game)}/groups`)).data : { custom: [], assign: {} };
-        if (isLossMetric(prefs.metric) && !patchBusy) {
+        if ((isLossMetric(prefs.metric) || prefs.metric === 'kd') && !patchBusy) {
           patch = await ctx.api.get('/api/live/combat-log-patch').then((r) => r.data, (err) => ({ ...(patch ?? {}), error: err.message }));
         }
         if (stopped) return;
@@ -567,17 +654,41 @@ export default {
         if (!(pickerList.contains(a) && (a.tagName === 'SELECT' || a.type === 'text'))) renderPicker();
         renderCharts();
         if (main) equipment.update(prefs.game, main.countries, main.player);
+        notesBox.update(main ? prefs.game : null, main?.t[main.t.length - 1] ?? null);
+        ranking.update(main ? prefs.game : null, prefs.subjects);
+        campaignMap.update(main ? prefs.game : null);
+        sessions.update(main ? prefs.game : null);
       } catch (err) {
         if (!stopped) charts.replaceChildren(notice('warn', `Game summary unavailable: ${err.message}`));
       }
       clearTimeout(timer);
-      if (!stopped && games.find((g) => g.id === prefs.game)?.active) timer = setTimeout(load, refreshMs(REFRESH_MS));
+      knownActive = games.find((g) => g.active)?.id ?? null;
+      // the campaign being recorded is read again; otherwise only the list is watched for a new recording
+      if (!stopped) timer = setTimeout(games.find((g) => g.id === prefs.game)?.active ? load : watch, refreshMs(REFRESH_MS));
+    }
+
+    /** Light check while an old campaign (or none) is shown: a new recording (a game started, 2026-10-20 user's
+     * report: the view stayed on "No campaign recorded yet") is opened, another change of the list shown. */
+    async function watch() {
+      if (stopped) return;
+      try {
+        const list = (await ctx.api.get('/api/summary/games')).data.games;
+        if (stopped) return;
+        const active = list.find((g) => g.active)?.id ?? null;
+        if (active !== knownActive || list.length !== games.length) {
+          if (active && active !== knownActive) prefs.game = active;
+          load();
+          return;
+        }
+      } catch { /* the backend is restarting: try again */ }
+      timer = setTimeout(watch, refreshMs(REFRESH_MS));
     }
 
     await load();
     return () => {
       stopped = true;
       clearTimeout(timer);
+      campaignMap.stop();
       document.removeEventListener('click', closeCampaigns);
       document.removeEventListener('keydown', closeCampaigns);
     };

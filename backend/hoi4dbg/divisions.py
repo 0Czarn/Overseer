@@ -113,6 +113,42 @@ def tables(roots: tuple[str, ...]) -> dict:
             "doctrines": {d: _unit_blocks(b, units) for d, b in raw_doctrines.items()}}
 
 
+# stats the role sub-unit's own factor multiplies too (tank destroyer brigade: breakthrough -0.25, ap_attack +0.15)
+DESIGN_FACTORS = ATTACKS + ("ap_attack", "armor_value", "maximum_speed")
+# sub-units that use a chassis but are not the role the designer shows (HQ tanks, support companies, recon, airborne)
+NOT_A_ROLE = re.compile(r"^hq_|_support$|recon|airborne")
+
+
+def design_role(units: dict, type_id: str) -> str | None:
+    """The sub-unit a design's equipment type is made for: fighter for small_plane_airframe, heavy_tank_destroyer_brigade
+    for heavy_tank_destroyer_chassis (not the HQ, support company or recon version)."""
+    arch = re.sub(r"_\d+$", "", type_id)
+    found = [u for u, v in units.items() if arch and arch in v.get("need", {})]
+    return next((u for u in found if not NOT_A_ROLE.search(u)), found[0] if found else None)
+
+
+def design_with_bonuses(units: dict, mods: list, type_id: str, stats: dict[str, float]) -> tuple[str | None, dict, dict]:
+    """(role sub-unit, stats, {stat: factor}) of an equipment design as its designer shows it (2026-10-20: FW 190 B air
+    attack 56.7 -> 59.5 with category_fighter +5 %; Sturer Emil Ausf. G hard attack 49.28 -> 73.9 with
+    category_tank_destroyers +50 %): stat x (1 + the role sub-unit's own factor + every bonus of `mods` (bonuses())
+    for it or its categories); the tank designer also shows the role's supply use and suppression. The bonus key
+    air_range is the design's "range"."""
+    unit = design_role(units, type_id)
+    cats = units[unit]["cats"] if unit else set()
+    own = units[unit].get("stats", {}) if unit else {}
+    add: dict[str, float] = {k: own[k] for k in DESIGN_FACTORS if k in stats and own.get(k)}
+    for target, stat, value in mods:
+        key = {"air_range": "range"}.get(stat, stat)
+        if target in cats and key in stats:
+            add[key] = add.get(key, 0.0) + value
+    out = {k: round(v * (1 + add.get(k, 0.0)), 4) for k, v in stats.items()}
+    if "armor_value" in stats:   # a tank design: the role's own supply use and suppression as the designer
+        for k in ("supply_consumption", "suppression"):
+            if own.get(k) is not None:
+                out[k] = round(own[k], 4)
+    return unit, out, {k: round(v, 4) for k, v in add.items() if v}
+
+
 def bonuses(tabs: dict, researched: list[str], doctrine_state: list[dict], defs: dict) -> tuple[list, list]:
     """All sub-unit bonuses of a country: researched technologies + grand doctrines, subdoctrines and their unlocked
     rewards (doctrine_state from game memory, defs = doctrines.definitions)."""

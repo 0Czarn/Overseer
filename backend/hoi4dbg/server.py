@@ -115,6 +115,7 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("GET", f"/api/countries/{tag}/stability", lambda q, b, tag: svc.stability(tag)),
         r("GET", f"/api/countries/{tag}/spirits", lambda q, b, tag: svc.spirits(tag)),
         r("GET", f"/api/countries/{tag}/government", lambda q, b, tag: svc.government(tag)),
+        r("GET", f"/api/countries/{tag}/mios/(?P<mio>[A-Za-z0-9_.-]+)", lambda q, b, tag, mio: svc.mio_tree(tag, mio)),
         r("GET", f"/api/countries/{tag}/overview", lambda q, b, tag: svc.overview(tag)),
         r("GET", f"/api/countries/{tag}/resources", lambda q, b, tag: svc.resources(tag)),
         r("GET", f"/api/countries/{tag}/research", lambda q, b, tag: svc.research(tag)),
@@ -125,7 +126,8 @@ def build_routes(svc: DebuggerService) -> list[Route]:
             [u for u in (q.get("units") or [""])[0].split(",") if u],
             [int(n) for n in (q.get("templates") or [""])[0].split(",") if n.isdigit()],
             [m for m in (q.get("modules") or [""])[0].split(",") if m],
-            [b for b in (q.get("blueprints") or [""])[0].split(",") if b])),
+            [b for b in (q.get("blueprints") or [""])[0].split(",") if b],
+            [t for t in (q.get("tanks") or [""])[0].split(",") if t], _str(q, "tag").upper())),
         r("GET", "/api/summary/games", lambda q, b: svc.summary_games()),
         r("POST", "/api/summary/recording", lambda q, b: svc.summary_recording(b)),
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})", lambda q, b, gid: svc.summary_game(
@@ -140,6 +142,13 @@ def build_routes(svc: DebuggerService) -> list[Route]:
             gid, [t for t in _str(q, "tag").upper().split(",") if t][:50], _str(q, "archetype") or None)),
         r("POST", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/delete", lambda q, b, gid: svc.summary_delete(gid)),
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/groups", lambda q, b, gid: svc.summary_groups(gid)),
+        r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/map", lambda q, b, gid: svc.summary_map(
+            gid, _str(q, "raster") == "1")),
+        r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/notes", lambda q, b, gid: svc.summary_notes(gid)),
+        r("POST", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/notes", lambda q, b, gid: svc.summary_notes(gid, b)),
+        r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/sessions", lambda q, b, gid: svc.summary_sessions(gid)),
+        r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/ranking", lambda q, b, gid: svc.summary_ranking(
+            gid, _str(q, "subjects", "1") != "0")),
         r("POST", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/groups", lambda q, b, gid: svc.summary_groups(gid, b)),
         r("GET", f"/api/countries/{tag}/doctrines", lambda q, b, tag: svc.doctrines(tag)),
         r("GET", f"/api/countries/{tag}/factories", lambda q, b, tag: svc.factories(tag)),
@@ -184,6 +193,7 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("GET", "/api/live/construction/sort", lambda q, b: svc.construction_sort(apply=False, kind=_str(q, "kind") or "civ")),
         r("POST", "/api/live/construction/sort", lambda q, b: construction_sort(b)),
         r("GET", "/api/live/stockpile", lambda q, b: svc.live_stockpile(_str(q, "tag").upper() or None)),
+        r("GET", "/api/live/equipment-needs", lambda q, b: svc.live_equipment_needs(_str(q, "tag") or "")),
         r("POST", "/api/live/stockpile", lambda q, b: stockpile_write(b)),
         r("POST", "/api/live/operations", lambda q, b: live().create_operation(
             str(b.get("field", "")), str(b.get("mode", "")), _number(b.get("amount")))),

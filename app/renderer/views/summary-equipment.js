@@ -2,7 +2,7 @@
 // one kind of equipment over the campaign: needed by its divisions, in its divisions, in its stockpile (one chart) and
 // produced a day (a second chart, its own scale). Recorded once a game day from game memory (live/service._equipment_day).
 import { h, notice } from '../lib/dom.js';
-import { compact, hoverSync, lineChart } from '../lib/linechart.js';
+import { compact, dayText, hoverSync, lineChart } from '../lib/linechart.js';
 import { numberLocale } from '../lib/options.js';
 
 const PREFS_KEY = 'hoi4dbg.summaryEquipment';
@@ -21,6 +21,20 @@ function savePrefs(p) {
 export function equipmentSets(data) {
   return EQUIPMENT_LINES.map(([key, label, color]) => ({ label, color,
     points: (data.series?.[key] ?? []).map((v, i) => [data.t[i], v]) }));
+}
+
+/** Production forecast (2026-10-21, user's request) of every kind of equipment on the last recorded day: missing =
+ * needed - in divisions - stockpile, days = missing / produced a day (null: nothing produced), the game day it is
+ * filled. Missing ones first, the longest wait on top. */
+export function forecast(last, archetypes, t) {
+  const info = new Map((archetypes ?? []).map((a) => [a.key, a]));
+  return Object.entries(last ?? {}).map(([key, [needed, held, stockpile, produced]]) => {
+    const missing = Math.max(0, needed - held - stockpile);
+    const days = missing <= 0 ? 0 : produced > 0 ? Math.ceil(missing / produced) : null;
+    return { key, name: info.get(key)?.name ?? key, icon: info.get(key)?.icon ?? null, needed, held, stockpile, produced,
+      missing, days, ready: days == null || t == null ? null : dayText(t + days) };
+  }).filter((r) => r.needed > 0 || r.produced > 0)
+    .sort((a, b) => (b.missing > 0) - (a.missing > 0) || (b.days ?? Infinity) - (a.days ?? Infinity) || b.missing - a.missing);
 }
 
 /** The section: el, update(gameId, countries, player) - call it whenever the summary has read its campaign again. */
@@ -65,9 +79,27 @@ export function equipmentSection(ctx) {
           ...EQUIPMENT_LINES.map(([key]) => h('td', { class: 'num' }, fmt(data.series[key][last]))),
           h('td', { class: 'num' }, fmt(data.series.produced[last], 1)),
           h('td', { class: 'num bad-text' }, fmt(Math.max(0, data.series.needed[last] - data.series.held[last] - data.series.stockpile[last])))))),
+      forecastTable(data),
       h('p', { class: 'hint' }, 'Needed = divisions of each template x the equipment of its battalions and companies; in divisions and '
         + 'stockpile as the game holds them; produced = the production lines\' output of the day divided by the cost of one unit. '
         + 'All variants of a kind summed (designs, older models).'));
+  }
+
+  function forecastTable(data) {
+    const rows = forecast(data.last, data.archetypes, data.t[data.t.length - 1]);
+    if (!rows.length) return null;
+    const fmt = (v, d = 0) => (v == null ? '—' : v.toLocaleString(numberLocale(), { maximumFractionDigits: d }));
+    return h('div', { class: 'gs-forecast' },
+      h('div', { class: 'lc-title' }, 'Production forecast - every kind of equipment at today\'s production'),
+      h('table', { class: 'table gs-eq-table' },
+        h('thead', null, h('tr', null, h('th', null, 'Equipment'), h('th', { class: 'num' }, 'Missing'),
+          h('th', { class: 'num' }, 'Produced a day'), h('th', { class: 'num' }, 'Days to fill'), h('th', null, 'Filled on'))),
+        h('tbody', null, rows.map((r) => h('tr', { class: r.key === data.archetype ? 'gs-forecast-on' : null },
+          h('td', null, r.icon ? h('img', { src: r.icon, alt: '', class: 'gs-forecast-icon', draggable: 'false' }) : null, r.name),
+          h('td', { class: `num ${r.missing > 0 ? 'bad-text' : ''}` }, fmt(r.missing)),
+          h('td', { class: 'num' }, fmt(r.produced, 1)),
+          h('td', { class: 'num' }, r.missing <= 0 ? 'enough' : r.days == null ? 'never (not produced)' : fmt(r.days)),
+          h('td', null, r.missing <= 0 ? '—' : r.ready ?? '—'))))));
   }
 
   async function refresh() {

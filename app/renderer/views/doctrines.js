@@ -5,7 +5,8 @@ import { h, notice, viewHeader } from '../lib/dom.js';
 import { livePanel } from '../lib/refresh.js';
 import { countryPicker, tagChip } from './shared.js';
 import { formatModifier } from './spirits.js';
-import { airPanel, armyPanel, navyPanel } from './military.js';
+import { airPanel, armyPanel, navyPanel, tankPanel } from './military.js';
+import { comparePanel } from './compare.js';
 
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'];
 const TAB_KEY = 'hoi4dbg.doctrineFolder';
@@ -125,7 +126,8 @@ export default {
   async render(root, ctx) {
     const tag = ctx.state.selectedCountry;
     const picker = await countryPicker(ctx);
-    const tiles = [armyPanel(ctx, tag), airPanel(ctx, tag), navyPanel(ctx, tag), doctrinesPanel(ctx, tag)];
+    const tiles = [armyPanel(ctx, tag), tankPanel(ctx, tag), airPanel(ctx, tag), navyPanel(ctx, tag), doctrinesPanel(ctx, tag),
+      comparePanel(ctx, tag)];   // compare stays at the bottom
     root.append(
       viewHeader('Army/Air/Navy', 'Divisions, air wings, ships and doctrines of the selected country (game memory).', picker),
       h('div', { class: 'country-head research-head' }, tagChip(tag, 'tag-chip-lg')),
