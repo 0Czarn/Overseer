@@ -1048,8 +1048,23 @@ DO ZROBIENIA (w tej kolejności)
             KONTROLA (2026-10-23): testy py 342 OK, js 118 OK. Smoke: działa na profilu użytkownika - zwinięte kafelki
                 ukrywały sloty badań; teraz smoke na czas testu rozwija wszystko (hoi4dbg.collapsed) i przywraca na końcu.
                 Bez gry zostają 2 błędy smoke (Research: sloty na żywo, Army/Air/Navy: Compare) - wymagają działającej gry.
-[ ] Krok G  Game Tools (narzędzia lokalne)
+[x] Krok G  Game Tools (narzędzia lokalne) - 2026-10-23, zakładka bez DEMO (smoke: demoBadges=0)
             (zakładka Intelligence Lab USUNIĘTA 2026-10-13 na prośbę użytkownika - była tylko na danych DEMO)
+            backend/hoi4dbg/game_tools.py + GET /api/tools/changes, GET/POST /api/tools/checkpoints, GET /api/tools/live-check.
+            - "Changes to the game" zamiast atrapy "Shared value change (PLANNED)": każda zmiana, którą robi aplikacja
+              (komendy konsoli, add_equipment, zapis wartości / magazynu, sortowanie budowy, start focusa, łatka logu
+              walk, mgła wojny) - zakładka, metoda, LOCAL/SHARED i "teraz": Allowed / Blocked / Not tested / Unknown
+              z powodem. Reguły = te same co strażnicy w live/service.py (_require_single_player, fog_of_war,
+              _apply_patch); komendy konsoli w MP = "Not tested" do Kroku H.
+            - Campaign checkpoints: zapisy (najnowsze 300) z datą gry, państwem, SP/MP z pierwszych 256 KB pliku
+              (246 zapisów użytkownika: 0,06 s, wszystkie czytelne), notatka użytkownika (<dane>/checkpoints.json,
+              ostrzeżenie gdy zapis nadpisano po notatce), filtr. Zapisy tylko czytane.
+            - Live memory check: każdy czytnik pamięci raz dla państwa gracza (data, sesja, wartości, focus, badania,
+              fabryki, budowa, magazyn, wojsko, duchy, wojny, mgła, łatka) - wynik, szczegół, czas. Na przycisk.
+              [ ] sprawdzić z uruchomioną grą (testowane tylko na atrapie)
+            - Technical data: usunięte kafelki DEMO (bez zapisu tylko komunikat).
+            Testy py 362 / js 129 OK. Smoke: Game Tools OK w obu rozmiarach; padają tylko znane Research/Compare
+            (wymagają gry - gra nie działała).
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)
             -> wymaga drugiego komputera/konta
 [ ] Krok I  Raport kompatybilności, instrukcja użytkownika, narzędzie na aktualizację gry,

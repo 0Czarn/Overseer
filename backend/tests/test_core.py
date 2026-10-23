@@ -95,9 +95,9 @@ class ServiceTests(TempDirMixin, unittest.TestCase):
         svc = make_service(self.tmp)
         for tool in svc.tools()["data"]:
             self.assertIn(tool["scope"], ("local", "shared"))
-            self.assertIn(tool["status"], ("available", "planned"))
-        shared = [t for t in svc.tools()["data"] if t["scope"] == "shared"]
-        self.assertTrue(all(t["status"] == "planned" for t in shared))
+            self.assertEqual(tool["status"], "available")   # Krok G: no placeholders left
+        # changes of the shared game state are listed with their method and rule (game_tools.CHANGES)
+        self.assertTrue(any(c["scope"] == "shared" for c in svc.tool_changes()["data"]["changes"]))
 
     def test_create_report_attaches_environment(self):
         svc = make_service(self.tmp)

@@ -1423,3 +1423,6 @@ div.tm-path-row { cursor: default; }
 .gs-terrain-key { margin-top: 4px; }
 .gs-terrain-item { display: inline-flex; align-items: center; gap: 5px; margin-right: 12px; font-size: 12px; }
 .gs-terrain-item canvas { border-radius: 3px; border: 1px solid var(--border); }
+.gt-head-tools { display: flex; gap: 8px; align-items: center; }
+.gt-head-tools .input { width: min(220px, 40vw); }
+.gt-note-cell { min-width: 200px; }

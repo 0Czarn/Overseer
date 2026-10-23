@@ -19,6 +19,7 @@ import time
 from . import __version__, construction as construction_mod, doctrines as doctrines_mod, geography, trade as trade_mod, deficit, demo, equipment_changes, gamefiles, gfx, modifiers
 from . import government as government_mod
 from . import campaign_map
+from . import game_tools
 from . import mio as mio_mod
 from . import divisions as divisions_mod
 from . import ic_history as ic_history_mod
@@ -76,9 +77,10 @@ TOOLS: list[dict] = [
     {"id": "fog_of_war", "name": "Fog of war", "scope": "local", "status": "available",
      "description": "Turns the fog of war of your own client off and on, like the console command fow. In "
                     "multiplayer only when allowed in Options - it shows you what the other players cannot see."},
-    {"id": "value_edit", "name": "Shared value change", "scope": "shared", "status": "planned",
-     "description": "Changing country/state/equipment values. Requires a game-compatible sync method, "
-                    "verified on two clients before it is offered in multiplayer."},
+    {"id": "checkpoints", "name": "Campaign checkpoints", "scope": "local", "status": "available",
+     "description": "Your saves with game date, country and a note of your own (kept by the app). Saves are only read."},
+    {"id": "live_check", "name": "Live memory check", "scope": "local", "status": "available",
+     "description": "Runs every game-memory reader once and shows which work - after a game or mod update. Read-only."},
 ]
 
 
@@ -278,6 +280,7 @@ class DebuggerService:
         self.ic_history = IcHistory(Path(data_dir or ".") / "ic-history")
         self._where_cache: tuple | None = None   # (game roots, {province: state name})   # recorded campaigns (Game summary)
         self.backgrounds = Backgrounds(Path(data_dir or ".") / "backgrounds")   # the user's images (Options)
+        self._checkpoints = game_tools.Checkpoints(Path(data_dir or ".") / "checkpoints.json")   # notes on saves
         self.ic_recorder = None   # ic_history.IcRecorder when live access is on (started in __main__)
 
     # -- status ---------------------------------------------------------------------------
@@ -2857,6 +2860,43 @@ class DebuggerService:
 
     def tools(self) -> dict:
         return envelope(LIVE, TOOLS)
+
+    def tool_changes(self) -> dict:
+        """Every way the app changes the game, with its method and whether it is allowed now (game_tools.changes)."""
+        mode, mp, running, supported = None, {}, False, False
+        if self.live is not None:
+            process = self.live.status().get("process")
+            running = bool(process)
+            if running:
+                from .live import pointers   # live is optional (--no-game): imported only here
+                supported = pointers.supported(process.get("version"))
+                mp = self.live.multiplayer_writes()
+                mode = mp.get("mode")
+        return envelope(LIVE, {"mode": mode, "running": running, "version_supported": supported,
+                               "multiplayer_writes": {"enabled": bool(mp.get("enabled")), "fog": bool(mp.get("fog"))},
+                               "changes": game_tools.changes(mode, mp, running, supported)})
+
+    def checkpoints(self, data=None) -> dict:
+        """Campaign checkpoints: the saves with their header and the user's notes; with `data` {"name", "note"} the
+        note on one save is set (an empty note removes it)."""
+        directory = self.integration.saves_dir()
+        if data is not None:
+            try:
+                self._checkpoints.set_note(directory, str(data.get("name", "")), str(data.get("note", "")))
+            except LookupError as exc:
+                raise NotFound(str(exc)) from None
+            except ValueError as exc:
+                raise ReportError(str(exc)) from None
+        if directory is None:
+            return envelope(UNAVAILABLE, {"directory": None, "saves": [], "total": 0, "orphan_notes": []},
+                            "Save folder not found")
+        return envelope(SAVE, self._checkpoints.list(directory))
+
+    def live_check(self) -> dict:
+        """Every live memory reader once (game_tools.live_check), read-only."""
+        if self.live is None:
+            return envelope(UNAVAILABLE, {"running": False, "checks": []}, "Live game access is disabled (--no-game)")
+        return envelope(LIVE, game_tools.live_check(self.live))
 
     # -- Options: the app's data folder ------------------------------------------------------------------
     DATA_PARTS = {"ic-history": "Recorded campaigns (Game summary, Players actions)", "backgrounds": "Background images",

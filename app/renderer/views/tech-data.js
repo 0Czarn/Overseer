@@ -1,7 +1,7 @@
 // Technical data of a country (Game Tools, folded at the bottom): the raw values of the newest save with the save
 // field each one comes from, and the diagnostic political power change test (console command + verification by a
 // newer save). Moved from the Country Editor (2026-10-15) - they are for checking the readers, not for playing.
-import { h, card, demoBanner, notice, scopeBadge, sourceBadge, toast } from '../lib/dom.js';
+import { h, card, notice, scopeBadge, sourceBadge, toast } from '../lib/dom.js';
 import { formatAge, formatValue, freshnessInfo } from '../lib/format.js';
 import { ppCommand, verifyChange } from '../lib/verify.js';
 import { countryPicker } from './shared.js';
@@ -27,13 +27,6 @@ function valueTile(field, entry) {
     h('div', { class: 'stat-label' }, field.label),
     h('div', { class: 'stat-value' }, status === 'read' ? formatValue(entry.value, field.unit) : '—'),
     h('div', { class: 'stat-source muted' }, status === 'read' ? h('code', null, `${entry.path} = ${entry.raw}`) : STATUS_NOTE[status] ?? status));
-}
-
-function demoTile(field, value) {
-  return h('div', { class: 'stat-tile' },
-    h('div', { class: 'stat-label' }, field.label),
-    h('div', { class: 'stat-value' }, formatValue(value, field.unit)),
-    h('div', { class: 'stat-source muted' }, 'DEMO'));
 }
 
 /** Diagnostic PP change: console command + independent verification through a newer save. */
@@ -131,9 +124,7 @@ export async function techDataSection(ctx) {
       if (res.source === 'save') {
         return [snapshotBanner(res.data), h('div', { class: 'tile-grid' }, fields.map((f) => valueTile(f, res.data.values[f.key])))];
       }
-      return [notice('warn', `Save values unavailable: ${res.note ?? 'no save'}${res.data?.file ? ` (${res.data.file})` : ''}`),
-        meta.source === 'demo' ? demoBanner(meta.note) : null,
-        meta.source === 'demo' ? h('div', { class: 'tile-grid' }, fields.map((f) => demoTile(f, meta.data.values[f.key]))) : null];
+      return notice('warn', `Save values unavailable: ${res.note ?? 'no save'}${res.data?.file ? ` (${res.data.file})` : ''}`);
     }),
     foldTile('Political Power - change test (diagnostic)', async () => {
       const [, res] = await load();
