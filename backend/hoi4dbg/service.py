@@ -1930,6 +1930,8 @@ class DebuggerService:
         if raster:
             out["map"]["png"] = "data:image/png;base64," + base64.b64encode(image["png"]).decode("ascii")
             out["map"]["province_state"] = image["province_state"]
+            out["map"]["terrain_types"] = image["terrain_types"]   # province terrain (definition.csv): names
+            out["map"]["province_terrain"] = image["province_terrain"]
         return {"data": out}
 
     def game_borders(self) -> dict:

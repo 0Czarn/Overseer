@@ -1016,6 +1016,12 @@ DO ZROBIENIA (w tej kolejności)
                 kampanii GER i usuniętych po zrzucie). Testy py 351 / js 127, smoke OK (jeden przebieg padł na starcie
                 na kroku grup wykresu - "Cannot set properties of null", powtórka czysta; do obserwacji).
                 [ ] wymaga ponownego uruchomienia aplikacji (nowy rejestrator); sprawdzić wielkość plików po wojnie
+[x] TYPY TERENU NA MAPIE (2026-10-23, prośba użytkownika: pustynie, wzgórza, góry, bagna, lasy): teren prowincji z
+            map/definition.csv (7. kolumna; plains 3031, forest 2364, mountain 1708, hills 1352, desert 815, jungle 477,
+            urban 265, marsh 142) w odpowiedzi rastra (terrain_types + province_terrain). Mapa (z konturów): odcień
+            koloru na teren, od 45% symbole stałej wielkości na ekranie (drzewka las/dżungla, łuki wzgórza, szczyty
+            góry, kropki pustynia, kreski bagna, bloki miasta); dymek "Terrain: ..."; legenda pod mapą; przełącznik
+            Terrain types (domyślnie wł.). Też w State Editorze. Klatka bez zmian (5-9 ms). Testy py / js 129, smoke OK.
 [x] DYWIZJE NA MAPIE + TIME MACHINE (2026-10-23, prośba użytkownika; odpowiedzi: doświadczenie i dowódca, skład i staty
             szablonu, sprzęt i braki; Time machine = stan gry w chwili + historia dywizji + lista dywizji; pozycje co 6 h,
             staty raz dziennie; panel obok mapy + przycisk do Time machine).

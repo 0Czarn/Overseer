@@ -164,6 +164,22 @@ def _country_colors(roots: tuple[str, ...]) -> tuple:
     return tuple(out.items())
 
 
+def province_terrain(definition: Path) -> tuple[list[str], list[int]]:
+    """(terrain names, the index of each province id's terrain) of map/definition.csv's terrain column (2026-10-23,
+    user's request "deserts, hills, mountains, swamps, forests visible on the map"); index 0 = none (sea, lakes)."""
+    names, by_pid = [""], {}
+    for line in definition.read_text(encoding="utf-8-sig", errors="replace").splitlines():
+        parts = line.split(";")
+        if len(parts) < 7 or not parts[0].strip().isdigit() or parts[4].strip() != "land" or int(parts[0]) == 0:
+            continue
+        terrain = parts[6].strip().lower()
+        if terrain not in names:
+            names.append(terrain)
+        by_pid[int(parts[0])] = names.index(terrain)
+    top = max(by_pid, default=0)
+    return names, [by_pid.get(p, 0) for p in range(top + 1)]
+
+
 def _province_kinds(definition: Path) -> tuple[dict[int, int], dict[int, str]]:
     """({rgb colour: province id}, {province id: land / sea / lake}) of map/definition.csv."""
     colours, kinds = {}, {}
@@ -248,11 +264,13 @@ def raster(roots, cache_dir: Path | None = None) -> dict:
     colours, kinds = _province_kinds(definition)
     top = max(list(kinds) + list(state_of) + [0])
     province_state = [state_of.get(p, 0) for p in range(top + 1)]
+    terrain_types, province_terrain_ = province_terrain(definition)
+    extra = {"province_state": province_state, "terrain_types": terrain_types, "province_terrain": province_terrain_}
     cache = Path(cache_dir) / f"campaign_map_{key}.png" if cache_dir else None
     if cache and cache.is_file():
         data = cache.read_bytes()
         width, height = struct.unpack(">II", data[16:24])
-        return {"width": width, "height": height, "png": data, "key": key, "province_state": province_state}
+        return {"width": width, "height": height, "png": data, "key": key, **extra}
     import numpy as np
     ids = _province_ids(bmp, colours)
     kd = _kind_of(kinds, int(ids.max()))[ids]
@@ -267,7 +285,7 @@ def raster(roots, cache_dir: Path | None = None) -> dict:
             cache.write_bytes(data)
         except OSError:
             pass
-    return {"width": w, "height": h, "png": data, "key": key, "province_state": province_state}
+    return {"width": w, "height": h, "png": data, "key": key, **extra}
 
 
 def _simplify(xy, tol: float):

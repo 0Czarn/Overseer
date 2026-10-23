@@ -7,7 +7,7 @@
 // country (a counter per province, per state when zoomed out) and an approximate fog of war from a country's view.
 import { card, h, notice } from '../lib/dom.js';
 import { dayText } from '../lib/linechart.js';
-import { loadMap, mapView, placeLabels, provinceCentre, rgb, seenProvinces } from '../lib/mapview.js';
+import { TERRAIN_STYLES, loadMap, mapView, placeLabels, provinceCentre, rgb, seenProvinces, terrainSwatch } from '../lib/mapview.js';
 import { numberLocale } from '../lib/options.js';
 import { divisionCard, dropDivisions } from './division-card.js';
 
@@ -191,7 +191,7 @@ const mute = ([r, g, b]) => [Math.round(r * 0.45 + 50), Math.round(g * 0.45 + 50
 export function mapSection(ctx, { seriesColors = [] } = {}) {
   const prefs = { mode: 'owner', speed: 250, show: 'countries', colors: 'game', states: false, provinces: false,
     names: true, cities: true, units: true, fog: '', relief: true, rivers: true, rails: true, ports: true, forts: false,
-    hubs: false, battles: true, moves: true, ...loadPrefs() };
+    hubs: false, battles: true, moves: true, types: true, ...loadPrefs() };
   const body = h('div', { class: 'gs-map' }, h('p', { class: 'muted' }, 'Choose a campaign above.'));
   const el = card('Campaign map', body, { cls: 'gs-map-card' });
   let gid = null;
@@ -222,6 +222,7 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
   let dateLabel = null;
   let slider = null;
   let legend = null;
+  let terrainKey = null;   // what the terrain symbols mean
   let playBtn = null;
   let controls = null;
   let busy = false;
@@ -309,7 +310,7 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
       }
     }
     const keyText = (key) => (key.startsWith('#') ? tagName(key.slice(1)) : prefs.show === 'countries' ? tagName(key) : key);
-    view.terrain({ relief: prefs.relief, rivers: prefs.rivers });
+    view.terrain({ relief: prefs.relief, rivers: prefs.rivers, types: prefs.types });
     const marks = [];   // ports, forts, supply hubs (not in the fog of war)
     for (const [pid, levels] of Object.entries(built)) {
       if (visible && !visible.has(Number(pid))) continue;
@@ -334,6 +335,8 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
     readDivisions();
     const fmt = (v) => v.toLocaleString(numberLocale(), { maximumFractionDigits: 0 });
     const hex = (c) => `rgb(${c.join(',')})`;
+    terrainKey.replaceChildren(...(prefs.types ? Object.keys(TERRAIN_STYLES).map((t) => h('span', { class: 'gs-terrain-item' },
+      terrainSwatch(t), `${t[0].toUpperCase()}${t.slice(1)}`)) : []));
     legend.replaceChildren(...totals.slice(0, 14).map((s) => h('span', { class: 'gs-map-legend-item',
       title: `${keyText(s.key)}: ${s.owned} states owned, ${s.controlled} controlled, ${fmt(s.vp)} victory points` },
     h('span', { class: 'gs-map-swatch', style: { background: hex(keyColor(s.key)) } }),
@@ -354,7 +357,9 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
     const named = seen && divisionsAt ? divisionsAt[1][hit.pid] ?? [] : [];   // the divisions by name, when read
     const levels = seen ? built[hit.pid] ?? [] : [];
     const buildings = BUILDINGS.map(([kind], i) => (levels[i] ? `${BUILDING_NAMES[kind]} ${levels[i]}` : null)).filter(Boolean);
+    const terrain = map.terrainTypes?.[map.provTerrain?.[hit.pid]];
     view.setTip([h('strong', null, state.name), h('div', null, `Owner: ${name(owner)}`),
+      terrain ? h('div', { class: 'muted' }, `Terrain: ${terrain[0].toUpperCase()}${terrain.slice(1)}`) : null,
       controller && controller !== owner ? h('div', { class: seen ? 'bad-text' : 'muted' },
         seen ? `Controller: ${name(controller)}` : 'Controller: not seen (fog of war)') : null,
       group, state.vp ? h('div', { class: 'muted' }, `Victory points: ${state.vp}`) : null,
@@ -401,9 +406,10 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
     playBtn = h('button', { class: 'btn btn-small', onclick: play }, timer ? '❚❚ Pause' : '▶ Play');
     controls = h('div', { class: 'gs-map-options' });
     legend = h('div', { class: 'gs-map-legend' });
+    terrainKey = h('div', { class: 'gs-map-legend gs-terrain-key' });
     body.replaceChildren(
       h('div', { class: 'gs-map-controls' }, playBtn, dateLabel, slider), controls,
-      h('div', { class: 'gs-map-main' }, view.el, panel), legend,
+      h('div', { class: 'gs-map-main' }, view.el, panel), legend, terrainKey,
       h('p', { class: 'hint' }, 'The game\'s map with the mods it runs with. Owner and controller of every state, recorded once a '
         + 'game day from game memory (from 2026-10-21); from 2026-10-23 also each province held by another country than '
         + 'its state\'s controller - the front inside states (older days show whole states). Factions: the groups of the '
@@ -414,6 +420,8 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
         + 'and strength. Fog of war: only what the chosen country, its faction and subjects hold and the provinces next '
         + 'to it - an approximation (the game also counts intelligence, radar, planes and ships). Terrain: the relief and '
         + 'the rivers of the game map (wider rivers from further away); from 100% the borders are drawn as smooth lines. '
+        + 'Terrain types: each province as the game counts it in battle (map/definition.csv) - a tint, and symbols '
+        + 'from 45% zoom. '
         + 'Infrastructure (from 2026-10-23, read every 3 game days): railways by level (thicker = higher; the low ones '
         + 'when zoomed in), and from 70% the ports (blue circle), forts (grey square; blue edge: coastal) and supply hubs '
         + '(orange) with their level. Front (from 2026-10-23): battles (crossed swords; the bar: the attacker share '
@@ -448,7 +456,7 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
         (v) => { prefs.mode = v; redraw(); })),
       field('Borders', toggles([['states', 'States'], ['provinces', 'Provinces']])),
       field('Names', toggles([['names', 'Countries'], ['cities', 'Cities'], ['units', 'Units']])),
-      field('Terrain', toggles([['relief', 'Relief'], ['rivers', 'Rivers']])),
+      field('Terrain', toggles([['types', 'Terrain types'], ['relief', 'Relief'], ['rivers', 'Rivers']])),
       field('Infrastructure', toggles([['rails', 'Railways'], ['ports', 'Ports'], ['forts', 'Forts'], ['hubs', 'Supply hubs']])),
       field('Front', toggles([['battles', 'Battles'], ['moves', 'Moves']])),
       field('Fog of war', fogPicker(redraw)),

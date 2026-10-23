@@ -77,6 +77,7 @@ class CampaignMapTest(unittest.TestCase):
         land = [(0, 1, campaign_map.LAND)] * 2 + [(0, 2, campaign_map.LAND)] * 2   # provinces 1, 2
         self.assertEqual(decode(out["png"]), [[(0, 3, campaign_map.SEA)] * 4, land])
         self.assertEqual(out["province_state"], [0, 1, 2, 0])   # province 3 is sea
+        self.assertEqual((out["terrain_types"], out["province_terrain"]), (["", "plains"], [0, 1, 1]))   # 3: sea
 
     def test_outlines_of_the_provinces(self):
         cache = Path(tempfile.mkdtemp())

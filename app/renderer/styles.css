@@ -1420,3 +1420,6 @@ div.tm-path-row { cursor: default; }
 .tm-path-row:hover { background: var(--bg-elev-2); }
 .gs-map-panel .mil-dd { zoom: .6; flex-wrap: wrap; }
 .gs-map-panel .dc-tpl { overflow-x: auto; }
+.gs-terrain-key { margin-top: 4px; }
+.gs-terrain-item { display: inline-flex; align-items: center; gap: 5px; margin-right: 12px; font-size: 12px; }
+.gs-terrain-item canvas { border-radius: 3px; border: 1px solid var(--border); }

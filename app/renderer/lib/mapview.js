@@ -9,6 +9,8 @@
 // the screen's resolution and, from VECTOR_ZOOM, the map itself from the province outlines (campaign_map.borders:
 // smoothed lines, the same for both provinces of a border) instead of the enlarged pixels. Terrain (campaign_map.terrain):
 // the relief blended soft-light over the colours and the rivers as lines, wider ones from further away.
+// 2026-10-23 (user's request "deserts, hills, mountains, swamps, forests visible"): the terrain of every province
+// (definition.csv) as a light tint and, from TYPE_SYMBOLS_ZOOM, symbols of a constant size on screen.
 import { h } from './dom.js';
 import { zoomable } from './zoom.js';
 import { dragToScroll } from '../views/research.js';
@@ -26,6 +28,55 @@ const loaded = new Map();   // map key -> Promise of the decoded map
 const loadedBorders = new Map();   // map key -> Promise of the decoded outlines
 const loadedTerrain = new Map();   // map key -> Promise of {relief: image, rivers}
 const RIVER = 'rgba(86, 140, 196, .9)';
+const TYPE_SYMBOLS_ZOOM = 0.45;
+// province terrain: [tint, draw(g) of a 16 x 16 symbol tile]; plains (and unknown) stay as they are
+const tree = (color) => (g, x, y) => {
+  g.fillStyle = color; g.beginPath(); g.moveTo(x, y - 4); g.lineTo(x + 3, y + 2); g.lineTo(x - 3, y + 2); g.closePath(); g.fill();
+  g.fillRect(x - 0.5, y + 2, 1, 2);
+};
+export const TERRAIN_STYLES = {
+  forest: ['rgba(30, 110, 40, .2)', (g) => { const t = tree('rgba(18, 70, 26, .85)'); t(g, 4.5, 6); t(g, 12, 13); }],
+  jungle: ['rgba(10, 95, 55, .28)', (g) => { const t = tree('rgba(8, 60, 32, .9)'); t(g, 4, 5); t(g, 12, 6); t(g, 8, 13); }],
+  hills: ['rgba(160, 115, 60, .18)', (g) => {
+    g.strokeStyle = 'rgba(85, 52, 16, .95)'; g.lineWidth = 1.6;
+    g.beginPath(); g.arc(5, 8, 3.5, Math.PI, 0); g.stroke(); g.beginPath(); g.arc(12.5, 15, 3.5, Math.PI, 0); g.stroke();
+  }],
+  mountain: ['rgba(235, 235, 235, .2)', (g) => {
+    g.lineJoin = 'round';
+    for (const [x, y] of [[5, 8], [12.5, 15]]) {
+      g.beginPath(); g.moveTo(x - 4.5, y); g.lineTo(x, y - 6); g.lineTo(x + 4.5, y);
+      g.fillStyle = 'rgba(240, 240, 240, .75)'; g.fill(); g.strokeStyle = 'rgba(40, 40, 40, .85)'; g.lineWidth = 1; g.stroke();
+    }
+  }],
+  desert: ['rgba(245, 215, 120, .26)', (g) => {
+    g.fillStyle = 'rgba(150, 110, 40, .85)';
+    for (const [x, y] of [[3, 4], [11, 3], [7, 9], [14, 11], [3, 14], [10, 15]]) g.fillRect(x, y, 1.9, 1.9);
+  }],
+  marsh: ['rgba(50, 150, 150, .22)', (g) => {
+    g.strokeStyle = 'rgba(20, 95, 110, .9)'; g.lineWidth = 1.1;
+    g.beginPath(); g.moveTo(1, 6); g.lineTo(7, 6); g.moveTo(9, 13); g.lineTo(15, 13);
+    g.moveTo(4, 6); g.lineTo(4, 3); g.moveTo(12, 13); g.lineTo(12, 10); g.stroke();
+  }],
+  urban: ['rgba(70, 70, 70, .22)', (g) => {
+    g.fillStyle = 'rgba(45, 45, 45, .85)'; g.fillRect(3, 4, 4, 4); g.fillRect(10, 11, 4, 4); g.fillRect(9, 3, 2.5, 2.5);
+  }],
+};
+
+/** A small canvas of a terrain's look (the map's legend), null for one without a style. */
+export function terrainSwatch(name, size = 18) {
+  const style = TERRAIN_STYLES[name];
+  if (!style || typeof document === 'undefined') return null;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d');
+  g.fillStyle = '#6b6a66';
+  g.fillRect(0, 0, size, size);
+  g.fillStyle = style[0];
+  g.fillRect(0, 0, size, size);
+  g.scale(size / 16, size / 16);
+  style[1](g);
+  return c;
+}
 // screen pixels and colours of the borders drawn from the outlines, the lowest first
 const LINES = {
   province: [0.6, 'rgba(0, 0, 0, .3)'],
@@ -158,7 +209,7 @@ export function shade([r, g, b], f) {
   return [Math.round(r + (255 - r) * w), Math.round(g + (255 - g) * w), Math.round(b + (255 - b) * w)];
 }
 
-async function decode(png, provinceState) {
+async function decode(png, provinceState, terrainTypes = [], provinceTerrain = []) {
   const img = new Image();
   img.src = png;
   await img.decode();
@@ -176,7 +227,8 @@ async function decode(png, provinceState) {
     kind[i] = px[4 * i + 2];
   }
   const provState = Uint16Array.from(provinceState);
-  return { width: img.width, height: img.height, pids, kind, provState, ...measure(img.width, img.height, pids, kind, provState) };
+  return { width: img.width, height: img.height, pids, kind, provState, terrainTypes, provTerrain: Uint8Array.from(provinceTerrain),
+    ...measure(img.width, img.height, pids, kind, provState) };
 }
 
 /** Per province: pixel count, sums of x and y, bounding box (x0, y0, x1, y1); pairs [a, b] of neighbouring land states;
@@ -334,7 +386,8 @@ export function cityThreshold(z) {
 export async function loadMap(ctx) {
   const info = (await ctx.api.get('/api/map')).data;
   if (!loaded.has(info.map.key)) {
-    loaded.set(info.map.key, ctx.api.get('/api/map?raster=1').then((r) => decode(r.data.map.png, r.data.map.province_state)));
+    loaded.set(info.map.key, ctx.api.get('/api/map?raster=1').then((r) => decode(r.data.map.png, r.data.map.province_state,
+      r.data.map.terrain_types ?? [], r.data.map.province_terrain ?? [])));
   }
   try {
     const decoded = await loaded.get(info.map.key);
@@ -404,7 +457,7 @@ export function riverThreshold(z) {
 }
 
 /** A map view of `map` (loadMap): {el, draw(style), labels({names, cities}), at(event) -> {pid, sid} | null, canvas,
- * snapshot(scale) -> a canvas with the names, setTip(nodes, event), terrain({relief, rivers}) - what is shown}.
+ * snapshot(scale) -> a canvas with the names, setTip(nodes, event), terrain({relief, rivers, types}) - what is shown}.
  * style: {fill(sid) -> [r, g, b] | null, stripe(sid) -> [r, g, b] | null (occupation stripes), group(sid) -> number
  * (country borders between different groups), states: true (state borders), provinces: true (province borders),
  * highlight: state id, overrides: Map province id -> {fill, stripe, group} (a province unlike its state: the front),
@@ -432,7 +485,8 @@ export function mapView(map, zoomId, { onHover, onClick } = {}) {
   let outlines = null;   // decodeBorders, when loaded
   let ground = null;     // loadTerrain, when loaded
   let riverPaths = null; // width class -> Path2D
-  const show = { relief: true, rivers: true };
+  const show = { relief: true, rivers: true, types: true };
+  const typePatterns = new Map();   // terrain -> CanvasPattern of its symbols
   const provPaths = new Map();   // province -> Path2D
   const arcPaths = new Map();    // arc -> Path2D
   const patterns = new Map();    // "fill|stripe" -> occupation stripes
@@ -603,6 +657,7 @@ export function mapView(map, zoomId, { onHover, onClick } = {}) {
 
   /** Relief (soft-light: lighter slopes to the north-west, darker to the south-east) and rivers over `area`. */
   function paintTerrain(g, z, area) {
+    if (show.types && outlines && map.provTerrain?.length) paintTypes(g, z, area);
     if (!ground) return;
     const x0 = Math.max(0, area[0]);
     const y0 = Math.max(0, area[1]);
@@ -632,6 +687,37 @@ export function mapView(map, zoomId, { onHover, onClick } = {}) {
         g.lineWidth = Math.max(0.6 / z, 0.4 + (c - 3) * 0.125);
         g.stroke(path);
       }
+    }
+  }
+
+  /** The terrain of the provinces in `area`: a tint per terrain, its symbols from TYPE_SYMBOLS_ZOOM. */
+  function paintTypes(g, z, area) {
+    const groups = new Map();
+    for (const [pid, b] of outlines.provBox) {
+      if (b[2] < area[0] || b[0] > area[2] || b[3] < area[1] || b[1] > area[3]) continue;
+      const name = map.terrainTypes[map.provTerrain[pid]];
+      if (!TERRAIN_STYLES[name] || map.provKind[pid] !== LAND) continue;
+      let path = provPaths.get(pid);
+      if (!path) { path = provincePath(outlines, pid); provPaths.set(pid, path); }
+      if (!groups.has(name)) groups.set(name, new Path2D());
+      groups.get(name).addPath(path);
+    }
+    for (const [name, path] of groups) {
+      const [tint, symbol] = TERRAIN_STYLES[name];
+      g.fillStyle = tint;
+      g.fill(path);
+      if (z < TYPE_SYMBOLS_ZOOM) continue;
+      let pattern = typePatterns.get(name);
+      if (!pattern) {
+        const tile = document.createElement('canvas');
+        tile.width = tile.height = 16;
+        symbol(tile.getContext('2d'));
+        pattern = g.createPattern(tile, 'repeat');
+        typePatterns.set(name, pattern);
+      }
+      pattern.setTransform(new DOMMatrix([1 / z, 0, 0, 1 / z, 0, 0]));   // the symbols keep their size on screen
+      g.fillStyle = pattern;
+      g.fill(path);
     }
   }
 
