@@ -1,6 +1,10 @@
 // Construction: what the selected country builds and has queued, in the game's queue order, with the progress of
-// each line (game memory). The tile has the usual [Live | On refresh] switch.
-import { h, notice, viewHeader } from '../lib/dom.js';
+// each line (game memory). The tile has the usual [Live | On refresh] switch. Below the queue: the forecast (the queue
+// played forward at today's speeds: when each line is done, factories in 3 / 6 / 12 months) and where to build (states
+// with free building slots).
+import { card, h, notice, viewHeader } from '../lib/dom.js';
+import { humanize } from '../lib/format.js';
+import { modifierIcon } from '../lib/icons.js';
 import { livePanel } from '../lib/refresh.js';
 import { countryPicker, tagChip } from './shared.js';
 import { setSortMode, sortMode } from '../lib/construction-sort.js';
@@ -80,9 +84,42 @@ function lineRow(l) {
       h('div', { class: 'research-bar-fill', style: { width: `${Math.min(100, (l.progress ?? 0) * 100)}%` } })),
       h('span', { class: 'research-progress-text' }, `${progressPct(l.progress)} · ${pointsText(l)}`)),
     h('span', { class: 'construction-eta muted', title: 'Next level complete at the current construction speed (game tooltip "Next complete")' },
-      completeText(l))),
+      completeText(l)),
+    l.finish_days !== undefined ? h('span', { class: 'construction-finish', title: 'Forecast: the whole line done (all levels), the '
+      + 'queue played forward at today\'s speeds' }, finishText(l)) : null),
   h('span', { class: `construction-factories ${working ? '' : 'muted'}`, title: 'Civilian factories assigned to this line' },
     `${l.factories}/${l.max_factories}`));
+}
+
+/** "Forecast - all done: 14 Mar, 1937 (in 72 days)" / not done within 2 years - forecast of the whole line. */
+export function finishText(l) {
+  if (l.finish_days == null) return 'Forecast: not done within 2 years at today\'s factories';
+  return `Forecast - all done: ${l.finish?.text ?? '?'} (in ${l.finish_days} day${l.finish_days === 1 ? '' : 's'})`;
+}
+
+/** Factories now and in 3 / 6 / 12 months: [{label, date, civ, mil, dock, delta: {civ, mil, dock}}]. */
+export function forecastRows(f) {
+  if (!f) return [];
+  const row = (label, key, date) => ({ label, date, ...f[key],
+    delta: Object.fromEntries(['civ', 'mil', 'dock'].map((k) => [k, (f[key]?.[k] ?? 0) - (f.now?.[k] ?? 0)])) });
+  return [row('Now', 'now', null), row('3 months', '90', f.dates?.['90']), row('6 months', '180', f.dates?.['180']),
+    row('12 months', '365', f.dates?.['365'])];
+}
+
+function forecastBlock(f) {
+  const rows = forecastRows(f);
+  if (!rows.length) return null;
+  const cell = (r, k) => h('td', { class: 'num' }, String(r[k] ?? '—'),
+    r.delta[k] ? h('span', { class: 'cons-delta' }, ` +${r.delta[k]}`) : null);
+  return h('div', { class: 'cons-forecast' },
+    h('table', { class: 'table cons-forecast-table' },
+      h('thead', null, h('tr', null, h('th', null, 'Forecast'), h('th', null, 'Game date'), h('th', { class: 'num' }, 'Civilian'),
+        h('th', { class: 'num' }, 'Military'), h('th', { class: 'num' }, 'Dockyards'))),
+      h('tbody', null, rows.map((r) => h('tr', null, h('td', null, r.label), h('td', null, r.date ?? 'today'),
+        cell(r, 'civ'), cell(r, 'mil'), cell(r, 'dock'))))),
+    h('p', { class: 'hint' }, 'The queue played forward day by day at today\'s speeds: free civilian factories go to the lines in '
+      + 'queue order (15 each), new civilian factories join less their consumer goods share. New bonuses, laws, trade and '
+      + 'changes of the queue are not known.'));
 }
 
 const TASKS = [['consumer_goods', 'Consumer Goods'], ['market_contracts', 'Market Contracts'],
@@ -120,10 +157,11 @@ export function constructionPanel(ctx, tag) {
         body.replaceChildren(notice('warn', `Construction unavailable: ${res.note}`));
         return;
       }
-      body.replaceChildren(
+      body.replaceChildren(...[
         factoriesBlock(res.data.factories),
+        forecastBlock(res.data.forecast),
         h('p', { class: 'muted research-summary' }, queueSummary(lines)),
-        h('div', { class: 'construction-lines' }, lines.map(lineRow)));
+        h('div', { class: 'construction-lines' }, lines.map(lineRow))].filter(Boolean));
     },
   });
 }
@@ -164,6 +202,40 @@ function sortSwitch(ctx) {
   return h('div', { class: 'cons-sort' }, ...labels, info);
 }
 
+/** "Where to build" tile: the country's states with free building slots, best first (read on demand). */
+export function adviceSection(ctx, tag) {
+  const body = h('div', { class: 'cons-advice' });
+  const fmt = (v) => (v && Object.keys(v).length ? Object.entries(v).map(([k, n]) => [modifierIcon(k), ` ${humanize(k)} ${n} `]) : '—');
+  async function read() {
+    body.replaceChildren(h('p', { class: 'muted' }, 'Reading the states…'));
+    let res;
+    try {
+      res = await ctx.api.get(`/api/countries/${encodeURIComponent(tag)}/construction/advice`);
+    } catch (err) {
+      body.replaceChildren(notice('warn', `Not available: ${err.message}`));
+      return;
+    }
+    if (!res.data) { body.replaceChildren(notice('warn', `Not available: ${res.note}`)); return; }
+    const d = res.data;
+    body.replaceChildren(
+      h('p', { class: 'muted' }, `${d.free} free building slots in ${d.total} states`
+        + `${d.total > d.states.length ? ` (the best ${d.states.length} shown)` : ''}.`),
+      d.states.length ? h('table', { class: 'table cons-advice-table' },
+        h('thead', null, h('tr', null, ...['State', 'Category', 'Free slots', 'Used / slots', 'Queued', 'Infrastructure', 'Core', 'Resources']
+          .map((t, i) => h('th', { class: [2, 3, 4, 5].includes(i) ? 'num' : null }, t)))),
+        h('tbody', null, d.states.map((st) => h('tr', null, h('td', null, st.name ?? `State ${st.id}`),
+          h('td', null, humanize(st.category ?? '')), h('td', { class: 'num cons-free' }, st.free),
+          h('td', { class: 'num' }, `${st.used} / ${st.slots}`), h('td', { class: 'num' }, st.queued || '—'),
+          h('td', { class: 'num' }, st.infrastructure), h('td', null, st.core ? 'yes' : h('span', { class: 'warn-text' }, 'no')),
+          h('td', { class: 'cons-res' }, fmt(st.resources)))))) : notice('info', 'No free building slot in the country\'s states.'),
+      h('p', { class: 'hint' }, `${res.note} Best first: most free slots, then higher infrastructure (factories are built `
+        + 'faster), then cores. Owned and controlled states only.'));
+  }
+  const el = card('Where to build', body, { extra: h('button', { class: 'btn btn-small', onclick: read }, 'Read again') });
+  read();
+  return el;
+}
+
 export default {
   id: 'construction',
   title: 'Construction',
@@ -176,7 +248,8 @@ export default {
       viewHeader('Construction', 'What the selected country builds and has queued, with the progress of each line (game memory).', picker),
       h('div', { class: 'country-head research-head' }, tagChip(tag, 'tag-chip-lg')),
       sortSwitch(ctx),
-      tile.el);
+      tile.el,
+      adviceSection(ctx, tag));
     return () => tile.stop();
   },
 };

@@ -31,9 +31,18 @@ from . import actions as actions_mod
 POLL_SECONDS = 0.25
 MAX_STEP = 30   # days between two polls that still count as the game running (more = a save was loaded)
 FACTION_EVERY = 7
+UNITS_FULL_EVERY = 30   # days between full rows of division positions (and of railways and buildings)
+INFRA_EVERY = 3         # days between readings of railways and buildings (0.3 s; they change slowly)
+FRAME_HOURS = 6         # game hours between readings of divisions, moves and battles within a day
+DELTA_KINDS = ("units", "infra", "front", "divs", "tmpl")
 NEW_CAMPAIGN_GAP = 31   # days back that still count as a reload of the same campaign
 MONTH_DAYS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)   # the game has no leap years
 SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
+
+
+def row_time(row: dict) -> float:
+    """Time of a campaign map row in days: its day and game hour ("h", readings within a day)."""
+    return row["t"] + row.get("h", 0) / 24
 
 
 def day_number(date: dict) -> int:
@@ -54,11 +63,15 @@ STORED = ("mil", "nav", "civ", "fciv", "fmil", "fdock",   # order of the values 
           "lcom", "latt", "lenemy",                      # IC of equipment lost in combat / to attrition / of the enemy
           "amil", "anav", "aciv",                        # factories on military / naval production lines, construction
           *("pp", "stab", "ws", "cp", "fuel",            # from 2026-10-21 (EXTRA, live/service._campaign_day)
-            "divs", "bat", "cover", "sown", "sctl", "vp", "tech", "mpf", "mpa", "mpt"))
+            "divs", "bat", "cover", "sown", "sctl", "vp", "tech", "mpf", "mpa", "mpt"),
+          "mpl", "mpk")                                  # from 2026-10-23: manpower lost / enemy manpower lost a day
 # values recorded from 2026-10-21 (user's request): political power, stability %, war support %, command power, fuel,
 # divisions, battalions, equipment coverage % of the divisions, owned / controlled states, victory points controlled,
 # researched technologies, free manpower, manpower in the field, in training
-EXTRA = STORED[15:]
+EXTRA = STORED[15:30]
+# manpower lost in wars a day and manpower the country's enemies lost in its wars (the game's war casualties of each
+# pair of countries at war, live/pointers.read_wars) - recorded from 2026-10-23
+CASUALTIES = STORED[30:]
 SUMS = {"fall": ("fciv", "fmil", "fdock"), "wall": ("wmil", "wnav", "wciv"), "lall": ("lcom", "latt"),
         "mpall": ("mpf", "mpa", "mpt"), "icall": ("mil", "nav", "civ")}
 # IC a day per factory working on a line (2026-10-20, user's request): IC / assigned factories - the line's efficiency,
@@ -109,6 +122,23 @@ def wasted_ic(ic: dict, idle: dict) -> dict:
         assigned = ic["a" + kind]
         per = ic[kind] / assigned if assigned else BASE_SPEED[kind]
         out["w" + kind] = round(max(0, idle[kind]) * per, 3)
+    return out
+
+
+def casualty_deltas(before: dict | None, now: dict) -> dict[str, list[int]] | None:
+    """{tag: [manpower lost, enemy manpower lost]} since `before` (live ic_snapshot "casualties": {tag: {enemy: (lost,
+    killed)}} of the countries at war); None without an earlier reading. The game counts per war, from its start: a war
+    not in `before` counts whole (it began since), a war that ended is gone; counts only grow."""
+    if before is None:
+        return None
+    out = {}
+    for tag, wars in now.items():
+        old = before.get(tag, {})
+        sums = [0, 0]
+        for enemy, values in wars.items():
+            for i, v in enumerate(values):
+                sums[i] += max(0, (v or 0) - (old.get(enemy, (0, 0))[i] or 0))
+        out[tag] = sums
     return out
 
 
@@ -393,6 +423,7 @@ class IcHistory:
         self.active: str | None = None
         self._lock = threading.Lock()
         self._equipment_cache: dict[str, tuple[int, list]] = {}
+        self._delta_cache: dict[tuple[str, str], tuple] = {}   # (campaign, kind) -> (file stamp, rows)
 
     def _path(self, gid: str) -> Path:
         if not SAFE_ID.match(gid):
@@ -501,6 +532,8 @@ class IcHistory:
             (self.folder / f"{gid}.actions.jsonl").unlink(missing_ok=True)
             (self.folder / f"{gid}.equipment.jsonl").unlink(missing_ok=True)
             (self.folder / f"{gid}.map.jsonl").unlink(missing_ok=True)
+            for kind in DELTA_KINDS:
+                (self.folder / f"{gid}.{kind}.jsonl").unlink(missing_ok=True)
             (self.folder / f"{gid}.notes.json").unlink(missing_ok=True)
 
     def _choose(self, player: str, t: int, campaign: str | None = None) -> str:
@@ -592,6 +625,11 @@ class IcHistory:
         if any(r["t"] >= t for r in lines):
             self._map_path(gid).write_text("".join(json.dumps(r, separators=(",", ":")) + "\n" for r in lines
                                                    if r["t"] < t), encoding="utf-8")
+        for kind in DELTA_KINDS:   # division positions, railways of replayed days (the recorder starts a full row next)
+            lines = self.delta_rows(kind, gid)
+            if any(r["t"] >= t for r in lines):
+                self._delta_path(gid, kind).write_text("".join(json.dumps(r, separators=(",", ":")) + "\n"
+                                                               for r in lines if r["t"] < t), encoding="utf-8")
         seen = self.designs(gid)   # designs first seen on a replayed day: the game may give their ids to new ones
         kept = {tag: {i: v for i, v in ids.items() if v[1] or v[0] < t} for tag, ids in seen.items()}
         if kept != seen:
@@ -670,12 +708,114 @@ class IcHistory:
         self._path(gid)   # checks the id
         return self.folder / f"{gid}.map.jsonl"
 
-    def add_map(self, gid: str, t: int, states: dict, full: bool) -> None:
+    def add_map(self, gid: str, t: int, states: dict, full: bool, provinces: dict | None = None) -> None:
+        """A map row {"t", "s": {state: [owner, controller]} (all or the changes), "full": 1 for all, "x": {province:
+        controller} all provinces off their state's controller - only when they changed}."""
         row = {"t": t, "s": {str(k): v for k, v in states.items()}}
         if full:
             row["full"] = 1
+        if provinces is not None:
+            row["x"] = {str(k): v for k, v in provinces.items()}
         with self._map_path(gid).open("a", encoding="utf-8") as f:
             f.write(json.dumps(row, separators=(",", ":")) + "\n")
+
+    # -- campaign map, <id>.<kind>.jsonl rows {"t", "full": 1 | absent, "u": {key: value or null}} - every key in a full
+    # row, else the keys that changed (null: gone); "h": the game hour when not the day's first reading (FRAME_HOURS).
+    # "units": division positions {province: {tag: [divisions, mean organisation, mean strength, {template:
+    # divisions}]}}; "infra" (2026-10-23): {"r<a>-<b>": railway level, "b<province>": [supply hub, naval base, land
+    # fort, coastal fort levels]}; "front" (2026-10-23): {"m<from>-<to>": {tag: divisions moving / attacking},
+    # "c<province>": [attacker, defender, attacking divisions, defending divisions, attacker share in %]}; "divs"
+    # (2026-10-23): each division (live division_rows: n name, p position, s stats, e equipment - positions every
+    # FRAME_HOURS, the rest daily); "tmpl": {"<tag>|<template>": {"b", "s", "r" sub-units, "g" designer grid, "i"
+    # icon}} of the templates in use
+    def _delta_path(self, gid: str, kind: str) -> Path:
+        self._path(gid)   # checks the id
+        if kind not in DELTA_KINDS:
+            raise ValueError(f"Unknown campaign map file {kind}")
+        return self.folder / f"{gid}.{kind}.jsonl"
+
+    def add_delta(self, kind: str, gid: str, t: int, values: dict, full: bool, hour: int = 0) -> None:
+        row = {"t": t, "u": values}
+        if hour:
+            row["h"] = hour
+        if full:
+            row["full"] = 1
+        with self._delta_path(gid, kind).open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row, separators=(",", ":")) + "\n")
+
+    def add_units(self, gid: str, t: int, units: dict, full: bool, hour: int = 0) -> None:
+        self.add_delta("units", gid, t, units, full, hour)
+
+    def units_rows(self, gid: str) -> list[dict]:
+        return self.delta_rows("units", gid)
+
+    def delta_rows(self, kind: str, gid: str) -> list[dict]:
+        """The rows of a campaign map file (read again only when the file changed; the list is shared - not to be
+        changed)."""
+        path = self._delta_path(gid, kind)
+        try:
+            st = path.stat()
+        except OSError:
+            return []
+        stamp = (st.st_mtime_ns, st.st_size)
+        cached = self._delta_cache.get((gid, kind))
+        if cached and cached[0] == stamp:
+            return cached[1]
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            return []
+        out = []
+        for line in text.splitlines():
+            try:
+                out.append(json.loads(line))
+            except ValueError:   # a line cut by a crash
+                continue
+        if len(self._delta_cache) > 8:
+            self._delta_cache.clear()
+        self._delta_cache[(gid, kind)] = (stamp, out)
+        return out
+
+    def delta_at(self, kind: str, gid: str, t: float) -> dict:
+        """{key: value} of a campaign map file at time `t` (days, row_time): the last full row on or before it and the
+        changes after it (null: gone)."""
+        rows = self.delta_rows(kind, gid)
+        last = -1
+        for i, r in enumerate(rows):
+            if row_time(r) > t:
+                break
+            last = i
+        start = next((i for i in range(last, -1, -1) if rows[i].get("full")), 0)
+        out: dict = {}
+        for r in rows[start:last + 1]:
+            for k, v in r["u"].items():
+                if v is None:
+                    out.pop(k, None)
+                else:
+                    out[k] = v
+        return out
+
+    def key_history(self, kind: str, gid: str, keys: list[str]) -> list[list]:
+        """[[time, key's first letter, value or None]] of `keys` in a campaign map file, each change once (full rows
+        repeat what did not change)."""
+        out, last = [], {}
+        for r in self.delta_rows(kind, gid):
+            u = r["u"]
+            for k in keys:
+                if k in u:
+                    v = u[k]
+                elif r.get("full") and k in last and last[k] is not None:
+                    v = None   # a full row without it: gone
+                else:
+                    continue
+                if last.get(k, "missing") != v:
+                    out.append([row_time(r), k[0], v])
+                    last[k] = v
+        return out
+
+    def faction_rows(self, gid: str) -> list[list]:
+        """[[day, {tag: faction}]] of the days the factions were recorded on (every FACTION_EVERY days)."""
+        return [[r["t"], r["f"]] for r in self._lines(gid) if "t" in r and r.get("f") is not None]
 
     def map_rows(self, gid: str) -> list[dict]:
         try:
@@ -846,6 +986,7 @@ class IcRecorder:
         self._stop = threading.Event()
         self._last_faction_t = -FACTION_EVERY
         self._losses: dict | None = None   # combat log of the last recorded day (loss_deltas)
+        self._casualties: dict | None = None   # war casualties of the last recorded day (casualty_deltas)
         self.actions = actions             # tags -> {tag: snapshot} (Players actions), None = off
         self._snaps: dict[str, dict] = {}  # last snapshot per watched country
         self._snaps_gid: str | None = None
@@ -853,6 +994,16 @@ class IcRecorder:
         self._launch_done: str | None = None   # the game start (game.log) whose loaded day is recorded
         self._map_last: dict | None = None   # states of the last day written to the map file
         self._map_gid: str | None = None
+        self._prov_last: dict | None = None   # provinces off their state's controller, last written
+        self._units_last: dict | None = None  # division positions of the last day written (add_units)
+        self._units_gid: str | None = None
+        self._units_full_t = -UNITS_FULL_EVERY
+        self._infra: dict = {"last": None, "gid": None, "full_t": -UNITS_FULL_EVERY}   # railways, buildings written
+        self._last_infra_t = -INFRA_EVERY
+        self._front: dict = {"last": None, "gid": None, "full_t": -UNITS_FULL_EVERY}   # moves and battles written
+        self._divs: dict = {"last": None, "gid": None, "full_t": -UNITS_FULL_EVERY}    # each division written
+        self._tmpl: dict = {"last": None, "gid": None, "full_t": -UNITS_FULL_EVERY}    # templates written
+        self._frame: tuple | None = None   # (campaign, game hour) of the last reading of divisions
         self._hour: int | None = None        # game hour of the last poll and since when (real time) it stands
         self._hour_since: float | None = None
         self._still = 0.0                    # real seconds stopped since the last recorded day
@@ -883,18 +1034,30 @@ class IcRecorder:
         previous, self.seen_t = self.seen_t, t
         if t is not None and t != previous:   # a game started since the user turned it on gets it too
             self.live.ensure_combat_log_patch()
+        if t is not None and t == previous and t == self.last_t and hours is not None:
+            self._step_frame(hours)
+            return False
         launch = None
         if t is None or previous is None or not 0 < t - previous <= MAX_STEP:
             if t != previous:   # another game state: its combat log and snapshots do not continue the last ones
                 self._losses = None
+                self._casualties = None
                 self._snaps = {}
                 self._map_last = None
+                self._units_last = None
+                self._infra["last"] = None
+                self._front["last"] = None
+                self._divs["last"] = None
+                self._tmpl["last"] = None
+                self._frame = None
+                self._last_infra_t = -INFRA_EVERY
             # a game just started on a country (game.log, not the menu's state): its first day is recorded at once
             launch = self._new_launch()
             if t is None or launch is None:
                 return False
         with_factions = t - self._last_faction_t >= FACTION_EVERY or self.last_t is None or t < self.last_t
-        sample = self.live.ic_snapshot(with_factions)
+        with_infra = t - self._last_infra_t >= INFRA_EVERY or t < self._last_infra_t
+        sample = self.live.ic_snapshot(with_factions, with_infra)
         if sample["t"] != t:   # the day moved on while reading: take it next time
             self.seen_t = previous
             return False
@@ -912,11 +1075,22 @@ class IcRecorder:
                     values.extend([None, None, None])
             self._losses = losses
         extra = sample.pop("extra", None) or {}
+        casualties = sample.pop("casualties", None)
+        lost = casualty_deltas(self._casualties, casualties) if casualties is not None else None
+        self._casualties = casualties
+        days = max(1, t - self.last_t) if self.last_t is not None else 1
         for tag, values in sample["countries"].items():   # after the losses (None when not read): assigned factories
             values.extend([None] * (12 - len(values)))
             values.extend(assigned.get(tag) or [None, None, None])
             values.extend(extra.get(tag) or [None] * len(EXTRA))
+            values.extend([None, None] if lost is None else [round(v / days, 1) for v in lost.get(tag, (0, 0))])
         control = sample.pop("map", None)
+        units = sample.pop("units", None)
+        infra = sample.pop("infra", None)
+        front = sample.pop("front", None)
+        divs = sample.pop("divs", None)
+        templates = sample.pop("templates", None)
+        hour = sample.pop("hour", 0) or 0
         sample["wall"], sample["still"] = int(self.wall()), round(self._still)
         self._still = 0.0
         designs = sample.pop("designs", None)
@@ -932,6 +1106,21 @@ class IcRecorder:
             self.history.add_equipment(gid, t, equipment)
         if control:
             self._record_map(gid, t, control)
+        if units is not None:
+            self._record_units(gid, t, units, hour)
+            self._frame = (gid, t * 24 + hour)
+        if front is not None:
+            self._record_delta("front", self._front, gid, t, front, hour)
+        if divs is not None:
+            self._record_delta("divs", self._divs, gid, t, divs, hour)
+        if templates is not None:
+            self._record_delta("tmpl", self._tmpl, gid, t, templates, hour)
+        if infra is not None:
+            flat = {f"r{k}": v for k, v in infra.get("r", {}).items()}
+            flat.update({f"b{k}": v for k, v in infra.get("b", {}).items()})
+            self._record_delta("infra", self._infra, gid, t, flat)
+        if with_infra:
+            self._last_infra_t = t
         if self.actions is not None:
             self._record_actions(gid, t, sample.get("player"))
         if with_factions:
@@ -953,13 +1142,84 @@ class IcRecorder:
             self._hour, self._hour_since = hours, now
 
     def _record_map(self, gid: str, t: int, control: dict) -> None:
-        """Owner and controller of every state: all of them the first day written into a file, then the changes."""
+        """Owner and controller of every state: all of them the first day written into a file, then the changes; the
+        provinces held by another country than their state's controller (from 2026-10-23): all of them whenever they
+        change (few - the fronts inside states)."""
+        provinces = None
+        if "states" in control:
+            control, provinces = control["states"], control.get("provinces")
         control = {str(k): v for k, v in control.items()}
+        provinces = None if provinces is None else {str(k): v for k, v in provinces.items()}
         full = gid != self._map_gid or self._map_last is None
         changed = control if full else {k: v for k, v in control.items() if self._map_last.get(k) != v}
-        if full or changed:
-            self.history.add_map(gid, t, changed, full)
+        moved = provinces is not None and (full or provinces != self._prov_last)
+        if full or changed or moved:
+            self.history.add_map(gid, t, changed, full, provinces if moved else None)
         self._map_last, self._map_gid = control, gid
+        if provinces is not None:
+            self._prov_last = provinces
+
+    def _step_frame(self, hours: int) -> None:
+        """Within a recorded day: divisions, moves and battles again every FRAME_HOURS game hours."""
+        if self._frame is None or hours - self._frame[1] < FRAME_HOURS or not hasattr(self.live, "frame_snapshot"):
+            return
+        gid = self._frame[0]
+        try:
+            frame = self.live.frame_snapshot()
+        except Exception as exc:   # noqa: BLE001 - the daily rows go on without it
+            self.log.info("Divisions not readable between days: %s", exc)
+            self._frame = (gid, hours)
+            return
+        if frame["t"] != self.last_t:   # the day moved on: the daily reading takes it
+            return
+        if frame["units"] is not None:
+            self._record_units(gid, frame["t"], frame["units"], frame["hour"])
+        if frame["front"] is not None:
+            self._record_delta("front", self._front, gid, frame["t"], frame["front"], frame["hour"])
+        if frame.get("divs") is not None and self._divs["last"] is not None and self._divs["gid"] == gid:
+            # positions and names now, stats and equipment as last read (daily); divisions gone lose them all
+            here = {k[1:] for k in frame["divs"] if k[0] == "n"}
+            kept = {k: v for k, v in self._divs["last"].items() if k[0] in "se" and k[1:] in here}
+            self._record_delta("divs", self._divs, gid, frame["t"], {**kept, **frame["divs"]}, frame["hour"])
+        self._frame = (gid, frame["t"] * 24 + frame["hour"])
+
+    def _record_delta(self, kind: str, state: dict, gid: str, t: int, values: dict, hour: int = 0) -> None:
+        """Like _record_units for another file (`state`: {"last", "gid", "full_t"} of what was written)."""
+        full = gid != state["gid"] or state["last"] is None or t - state["full_t"] >= UNITS_FULL_EVERY \
+            or t < state["full_t"]
+        if full:
+            changed = values
+            state["full_t"] = t
+        else:
+            changed = {k: v for k, v in values.items() if state["last"].get(k) != v}
+            changed.update({k: None for k in state["last"] if k not in values})
+        if full or changed:
+            self.history.add_delta(kind, gid, t, changed, full, hour)
+        state["last"], state["gid"] = values, gid
+
+    def _record_units(self, gid: str, t: int, units: dict, hour: int = 0) -> None:
+        """Division positions: all of them the first day written into a file and every UNITS_FULL_EVERY days (playback
+        starts from the last full row), else the provinces that changed (null: no division left there). Within a day
+        (`hour`, FRAME_HOURS) only provinces whose divisions came or went - organisation and strength once a day."""
+        units = {str(k): v for k, v in units.items()}
+        full = gid != self._units_gid or self._units_last is None or t - self._units_full_t >= UNITS_FULL_EVERY \
+            or t < self._units_full_t
+        if full:
+            changed = units
+            self._units_full_t = t
+        else:
+            last = self._units_last
+            same = lambda a, b: {g: (e[0], e[3]) for g, e in a.items()} == {g: (e[0], e[3]) for g, e in b.items()}  # noqa: E731
+            changed = {k: v for k, v in units.items() if last.get(k) != v and not (hour and k in last and same(v, last[k]))}
+            changed.update({k: None for k in last if k not in units})
+        if full or changed:
+            self.history.add_units(gid, t, changed, full, hour)
+        if full or not hour:
+            self._units_last = units
+        else:   # what the file holds now: provinces with only other organisation / strength keep the written values
+            kept = {k: v for k, v in self._units_last.items() if k in units}
+            self._units_last = {**kept, **{k: v for k, v in changed.items() if v is not None}}
+        self._units_gid = gid
 
     def _new_launch(self) -> str | None:
         """Id of the game being played (game.log) when its loaded day is not recorded yet, else None."""

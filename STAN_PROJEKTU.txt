@@ -1,5 +1,5 @@
 HOI4 DEBUGGER - STAN PROJEKTU
-Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-22 (Game summary: analiza kampanii - mapa, ranking, sesje, notatki, raport, prognoza)
+Aktualizowane po każdym kroku. Ostatnia aktualizacja: 2026-10-23 (straty ludzi w wojnach z pamięci gry -> Game summary)
 Szczegóły i dowody: docs/PROGRESS.md, plan: docs/STATUS-AND-PLAN.md
 
 ======================================================================
@@ -885,14 +885,163 @@ DO ZROBIENIA (w tej kolejności)
             POPRAWKA BACKENDU: --watch-stdin czytał stdin blokująco w wątku - na Windows ładowanie DLL (pierwszy import
             numpy dla mapy) czekało na ten odczyt i backend wisiał; teraz PeekNamedPipe co 0,5 s (__main__.wait_for_eof).
             [ ] wymaga ponownego uruchomienia aplikacji (nowy rejestrator); kampanie sprzed 2026-10-21 bez tych wartości
-            [ ] STRATY LUDZI: w zapisie war_relation {first_casualties, second_casualties} na parę państw; w pamięci obiekt
-                wojny (relacja +0x2E8): +0x10/+0x14 strony, +0x20 data startu (godziny), od +0x48 zera w 1936.01.01 -
-                kandydaci na straty; do potwierdzenia po kilku dniach wojny (porównanie z autozapisem)
+            [x] STRATY LUDZI (2026-10-23, zapisy użytkownika start_/end_manpower, wojna ITA-ETH 1936.1.20): CWarRelation
+                +0x50 / +0x58 = int32 straty pierwszej / drugiej strony (= first_casualties 581 / second_casualties 2971
+                z zapisu, co do sztuki); +0x80 / +0x88 = wynik wojny pierwszej strony (equipment_damage 13,81921,
+                province_capture 132,09992, fixed /1e5). pointers.read_wars zwraca "lost" / "killed"; country+0x1328
+                != 0 tylko w wojnie (ITA 9, ETH 6, 437 pozostałych 0) - filtr, bo odczyt relacji wszystkich państw = 1,45 s.
+                Rejestrator: nowe wartości "mpl" (ludzie straceni dziennie) i "mpk" (straty wrogów w wojnach państwa),
+                przyrost na wojnę od poprzedniego dnia (nowa wojna liczona w całości; pierwszy dzień po starcie - brak).
+                Game summary > Manpower: "Lost" / "Enemy lost" + wykres skumulowany; raport HTML: 2 wykresy.
+                Na żywo: snapshot 0,68 s, ITA {ETH: 581/2971}. Testy py 343 / js 119, smoke summary/research/army OK
+                (z grą Research i Compare przechodzą).
+                [ ] wymaga ponownego uruchomienia aplikacji (nowy rejestrator); sprawdzić wykres po kilku dniach wojny
             [ ] KOMENDY W MP (nowa funkcja 3): rozpoznanie hoi4.exe 1.19.3: CSetNationalFocusCommand (vtable rva
                 0x2996458, konstruktor 0x1146f70: (cmd, &tag int32 -> +0x28, focus -> +0x30), 0x38 B przez 0x21c9af0),
                 CSetResearchCommand (vtable 0x2994f40, konstruktor 0x11479c0); interfejs wysyła przez 0x2250b00(handler,
                 cmd, 0), handler = [obiekt+0xF38]->vfunc 0x88. Do zrobienia: wywołanie w głównym wątku gry (hook), nie
                 z obcego wątku (kolejka komend nie jest na to gotowa - ryzyko crasha), test na 2 klientach (Krok H)
+[x] STATE EDITOR - MAPA (2026-10-22, prośba użytkownika: "podział mapy na stany i prowincje"): kafelek Map nad
+            listą: mapa gry z modami (raster PROWINCJI: campaign_map.raster pisze numer prowincji w pikselu + tabela
+            prowincja -> stan; CACHE_VERSION 2), kolory państw, Owner (okupacja w paski) / Controller, granice państw
+            (czarne), stanów (ciemne) i prowincji (cienkie) - przełączniki zapamiętane, wybrany stan obrysowany na biało,
+            klik na mapie wybiera stan w liście, filtr państwa przyciemnia resztę, dymek: stan, numer stanu i prowincji,
+            właściciel, kontroler, kategoria. Wspólny moduł lib/mapview.js (też mapa kampanii w Game summary),
+            /api/map[?raster=1]. Smoke: mapa narysowana, klik wybiera stan (Skåne), zrzut wide-state-map.png.
+[x] CONSTRUCTION - PROGNOZA I GDZIE BUDOWAĆ (2026-10-22, prośba użytkownika): construction.forecast - kolejka
+            odtwarzana dzień po dniu (wolne fabryki cywilne po kolei, max 15 na linię, prędkość na fabrykę z linii /
+            średnia dla budynku / średnia; nowe fabryki cywilne dochodzą minus udział dóbr konsumpcyjnych, naprawy nie
+            dodają fabryk): przy każdej linii "Forecast - all done: <data>", tabela fabryk teraz / 3 / 6 / 12 miesięcy.
+            Kafelek "Where to build" (/api/countries/<TAG>/construction/advice): stany posiadane i kontrolowane z wolnymi
+            slotami = sloty kategorii (common/state_category gry i modów) - budynki z shares_slots - poziomy w kolejce;
+            kolejność: wolne sloty, infrastruktura, rdzenie. Na żywo GER 1936: 24 stany, 93 wolne sloty (0,15 s).
+            Nie liczone: sloty z technologii i modyfikatorów stanów. Testy: construction (prognoza, naprawy, brak fabryk,
+            sloty), js forecastRows / finishText.
+            [x] prognoza na prawdziwej kolejce (2026-10-23, zrzut użytkownika const.jpg, GER 1936.2.1): Hannover 15/15,
+                2025/7200, 168,75/dzień, gra "Next complete: 4 Mar, 1936" = aplikacja 4 Mar 1936, 168,75 (zgodne).
+                Hessen (23 Mar) i Thüringen (24 Apr) - brak dymka z gry do porównania.
+[x] CAMPAIGN MAP - SZCZEGÓŁY (2026-10-23, prośba użytkownika, odpowiedzi na pytania):
+            1) wygląd: pełna rozdzielczość + zoom/przesuwanie, granice i nazwy (państwa, VP), tryby: państwa / frakcje /
+               gracze, kolory z gry <-> kolory linii wykresów
+            2) front na prowincjach (kontroler prowincji z pamięci, nagrywany co dzień)
+            3) jednostki: liczba dywizji w prowincji (kolor właściciela, dymek z listą), nagrywane co dzień;
+               mgła wojny z perspektywy państwa - przybliżona (prowincje państwa + sojuszników + sąsiednie)
+            [x] ETAP 1 (2026-10-23): raster w pełnej rozdzielczości gry (campaign_map.STEP 1, 5632x2048, PNG 1,2 MB,
+                CACHE_VERSION 3; też State Editor), zoom 10-400% (zoom.js: własne limity, onZoom), gładko przy
+                pomniejszeniu, piksele przy powiększeniu. Druga warstwa canvas na napisy (lib/mapview.js): nazwy państw /
+                frakcji / graczy na kawałkach sąsiadujących stanów (główna nazwa na kawałku z największą sumą VP =
+                stolica, inne kawałki >= 1/4 największego - kolonie), rozmiar wg kawałka, 7-46 px na ekranie; miasta =
+                prowincje VP z nazwą (VICTORY_POINTS_<id>, 1495 w grze) - im większy zoom, tym mniejsze VP (25/10/3/0),
+                bez nakładania. Przełączniki (zapamiętane): Show Countries / Factions (grupy z wykresu z przesunięciami
+                użytkownika, frakcje z dnia) / Players (konto, marionetki gdy wykres je wlicza, AI szare), Colours Game
+                (kolor gry; frakcja / gracz = kolor państwa wiodącego) / Chart lines (kolor linii z wykresu), Map Owner /
+                Controller, Borders States / Provinces, Names Countries / Cities. /api/summary/games/<id>/map zwraca
+                też factions [[t, {tag: frakcja}]], players [[t, {...}]] (dni zmian), groups; /api/map - cities.
+                Raport HTML: mapa z napisami. Rysowanie całej mapy 145-190 ms. Testy py 343 / js 121, smoke summary +
+                state-editor OK, zrzuty smoke-output/wide-campaign-map(-zoom).png.
+                (ranking / notatki w smoke wymagają kampanii MP z notatkami - obecne dwie kampanie GER SP ich nie mają)
+            [x] ETAP 2 (2026-10-23): FRONT NA PROWINCJACH. Pamięć: state+0x18 = tablica CProvince*, province+0xA4 = id,
+                +0x188 = slot kontrolera; 10272 prowincji lądowych = zapis GER_1936_02_01_03 (17 zajętych przez ITA, reszta
+                = właściciel stanu). pointers.read_province_control: tylko prowincje z innym kontrolerem niż ich stan
+                (na żywo 3: 13239 ITA, 13249 i 13241 ETH); snapshot nadal 0,69 s. Rejestrator: wiersz mapy "x" = wszystkie
+                takie prowincje, zapisywany tylko przy zmianie (i w wierszu pełnym). Mapa: kolor / paski / granice państw
+                per prowincja (mapview draw: overrides), dymek pokazuje kontrolera prowincji. Dni sprzed 2026-10-23: stany.
+                Testy py 344 / js 122, smoke summary + state-editor OK.
+                [ ] wymaga ponownego uruchomienia aplikacji (nowy rejestrator)
+            [x] ETAP 3 (2026-10-23): JEDNOSTKI I MGŁA WOJNY. Pamięć: division+0x1F0 = CProvince* lokalizacji, +0x420 siła,
+                +0x428 organizacja (fixed /1e5); wszystkie 1221 dywizji wszystkich państw = zapis GER_1936_02_01_03
+                (państwo, prowincja, org, siła), odczyt 0,03 s. pointers.read_unit_positions: {prowincja: {tag: [dywizje,
+                śr. org, śr. siła (całe liczby), {szablon: dywizje}]}}. Rejestrator: plik <id>.units.jsonl - wiersz pełny
+                co 30 dni (i na początku / po wczytaniu), poza tym tylko zmienione prowincje (null = nikt nie został);
+                pełny wiersz 1936 = 957 prowincji, ~55 KB. API /api/summary/games/<id>/units. Usuwanie kampanii i cięcie
+                powtórzonych dni obejmują ten plik. Mapa: suwak po wszystkich nagranych dniach (wcześniej tylko dni ze
+                zmianą granic), znaczniki z liczbą dywizji w kolorze państwa / grupy (na prowincję; przy zoomie < 50% na
+                stan), dymek: dywizje, org, siła, szablony. Mgła wojny (lista: gracze, potem państwa): widać prowincje
+                państwa + frakcji + marionetek i ich sąsiadów lądowych; reszta szara, bez pasków okupacji i jednostek.
+                Do kampanii GER_1936-01-01_20261023-104040 dopisano pozycje z 1936.02.01 (odczyt na żywo, ten sam dzień),
+                żeby sprawdzić mapę. Testy py 345 / js 124, smoke OK, zrzuty smoke-output/wide-campaign-map-zoom.png,
+                -fog.png.
+                [ ] wymaga ponownego uruchomienia aplikacji (nowy rejestrator); sprawdzić wielkość pliku po dłuższej wojnie
+[x] CAMPAIGN MAP - DOKŁADNOŚĆ (2026-10-23, prośba użytkownika "bardziej dokładna, precyzyjna"; odpowiedzi: ostre
+            krawędzie przy zoomie, teren (lekki relief + rzeki/jeziora, styl uproszczony), koleje/porty/forty NA ŻYWO
+            z pamięci, front: bitwy w prowincjach + strzałki ruchu + kilka odczytów dziennie; kolejność: krawędzie ->
+            teren -> budynki -> front)
+            [x] ETAP A (2026-10-23): OSTRE KRAWĘDZIE. campaign_map.trace(): kontury prowincji z provinces.bmp jako łuki
+                między narożnikami, gdzie stykają się >= 3 prowincje (926 tys. krawędzi pikseli -> 32 tys. łuków), środki
+                krawędzi pikseli + Douglas-Peucker 0,5 px, pierścienie łuków dla prowincji lądowych i jezior (wspólny
+                łuk dla obu sąsiadów = bez szczelin). Binarnie (OVB1, 1,3 MB, 4,4 s raz, cache campaign_borders_<klucz>.bin),
+                API /api/map/borders. Sprawdzone: pola wielokątów = liczba pikseli (różnice tylko w prowincjach < 100 px,
+                ścięte rogi), wszystkie pierścienie jednej orientacji. Renderer: kanwa wielkości widoku (rozdzielczość
+                ekranu) zamiast nakładki 5632x2048: napisy zawsze ostre; od 100% mapa rysowana z konturów (krzywe
+                kwadratowe przez środki odcinków, symetryczne w obie strony), wypełnienia łączone po kolorze, paski
+                okupacji wzorem, linie: wybrzeże, prowincje, stany, granice państw, podświetlony stan. Klatka 7-10 ms.
+                Też w State Editorze. Testy py 346 / js 125, smoke OK (zrzut smoke-output/wide-campaign-map-close.png).
+            [x] ETAP B (2026-10-23): TEREN. campaign_map.terrain(): relief z heightmap.bmp (połowa rozdzielczości,
+                cieniowanie ze światłem z NW, 128 = płasko / poza lądem, siła RELIEF_STRENGTH 80) jako szary PNG
+                (~1 MB) + rzeki z rivers.bmp (indeksy 3..11 = wąska..szeroka, Ren = 11; 0-2 znaczniki biorą klasę
+                sąsiada) jako linie przez środki pikseli (2214 linii, 41 tys. punktów), cache campaign_terrain_<klucz>.json,
+                1,7 s raz; API /api/map/terrain. Renderer: kanwa ekranu rysuje teraz zawsze całą mapę (piksele przy
+                zoomie < 100%, kontury od 100%), na to relief (soft-light) i rzeki (wygładzone; < 30% tylko klasy >= 9,
+                < 60% >= 6), potem granice i napisy. Przełączniki Terrain: Relief / Rivers. Raport HTML z mapą: 1 -> 3 MB
+                (relief w obrazie). Klatka 6-9 ms. Testy py 347 / js 126, smoke OK.
+            [x] ETAP C (2026-10-23): KOLEJE, PORTY, FORTY NA ŻYWO. Pamięć (RTTI + zapis GER 1936.2.1 vs gra 1943):
+                stan gry +0x3E0 = CRailwayManager, +0x08 tablica CProvinceRailwayInfo* na id prowincji; info +0x38 =
+                pary {id sąsiada, poziom} (info +0x20 = poziomy na sąsiada jak "rail_way" w zapisie: prowincje 2/46
+                identyczne). CProvince (0x210 B, ciągła tablica) +0x190 = CBuildingStatus: +0x20 int32 na typ (indeks
+                budynku / -1), +0x38 CBuilding*, +0x40 int16 poziom. Typ t = t-ty wpis bloków buildings={} w
+                common/buildings (spawn_points pomijane; 56 typów; potwierdzone: supply_node 5, rail_way 6,
+                naval_base 8 (473/534 poziomów jak w 1936), bunker 9, coastal_bunker 10, landmarki 34-55).
+                Odczyt 0,33 s (3704 odcinki kolei, 1391 prowincji z budynkami) co 3 dni gry (INFRA_EVERY);
+                plik <id>.infra.jsonl jak dywizje (pełny wiersz co 30 dni, zmiany pomiędzy; klucze r<a>-<b>, b<prow>:
+                [węzeł, port, fort, fort przybrzeżny]). Pliki delta ujednolicone (DELTA_KINDS: units, infra).
+                API /api/summary/games/<id>/infra. Mapa: koleje jako linie między środkami prowincji (grubsze = wyższy
+                poziom, z podkładami od 80%; < 30% tylko >= 3, < 50% >= 2), od 70% ikony: port (niebieskie kółko),
+                fort (szary kwadrat, przybrzeżny z niebieską ramką), węzeł zaopatrzenia (pomarańczowy romb) z poziomem;
+                dymek prowincji z budynkami; mgła wojny ukrywa ikony. Przełączniki Infrastructure: Railways, Ports
+                (domyślnie wł.), Forts, Supply hubs. Kampania GER_1936-01-01_20261023-104040: dopisany wiersz 1936.02.01
+                (koleje z railways.txt = stan startowy, budynki z zapisu GER_1936_02_01_03). Testy py 349 / js 126,
+                smoke OK.
+            [x] ETAP D (2026-10-23): BITWY, RUCHY, ODCZYT CO 6 GODZIN. Pamięć (gra 1943, 61 bitew lądowych): stan gry
+                +0x268 = tablica CLandCombat*: +0x28 atakujący, +0x30 obrońca (CLandCombatant +0x20 = dywizje CArmy*),
+                +0x38 CProvince* bitwy - wszyscy obrońcy stoją w niej, atakujący w marszu mają ją w dywizja +0x1E8
+                (= prowincja, do której dywizja idzie / atakuje; zawsze sąsiednia). read_battles: [atakujący, obrońca,
+                dywizje, dywizje, udział atakującego w sumie org x siła %] (przybliżenie paska z gry). Ruchy: dywizja
+                +0x1E8 != lokalizacja -> {(z, do): {tag: n}}. Plik <id>.front.jsonl (m<z>-<do>, c<prowincja>), API
+                /api/summary/games/<id>/front. Rejestrator: w ciągu nagranego dnia co FRAME_HOURS=6 godzin gry
+                frame_snapshot (0,34 s: dywizje, ruchy, bitwy), wiersze z "h"; w klatkach dywizje tylko tam, gdzie
+                zmieniła się liczba/skład (org i siła raz dziennie - rozmiar pliku). Mapa: suwak po dniach i klatkach
+                ("1936.02.01 12:00"), strzałki w kolorze państwa (grubsze = atak), bitwy: skrzyżowane szable pod
+                znacznikiem dywizji + pasek atakujący/obrońca, dymek prowincji z bitwą; mgła wojny ukrywa niewidoczne.
+                Przełączniki Front: Battles, Moves. Sprawdzone wizualnie na danych z gry 1943 (tymczasowo dopisanych do
+                kampanii GER i usuniętych po zrzucie). Testy py 351 / js 127, smoke OK (jeden przebieg padł na starcie
+                na kroku grup wykresu - "Cannot set properties of null", powtórka czysta; do obserwacji).
+                [ ] wymaga ponownego uruchomienia aplikacji (nowy rejestrator); sprawdzić wielkość plików po wojnie
+[x] DYWIZJE NA MAPIE + TIME MACHINE (2026-10-23, prośba użytkownika; odpowiedzi: doświadczenie i dowódca, skład i staty
+            szablonu, sprzęt i braki; Time machine = stan gry w chwili + historia dywizji + lista dywizji; pozycje co 6 h,
+            staty raz dziennie; panel obok mapy + przycisk do Time machine).
+            Pamięć (zapis GER_1936_02_01_03 wczytany przez użytkownika, 1215 dywizji po id): CArmy +0x1C id (= id zapisu),
+            +0x340 CNameGroupMember* (+0x60 nazwa jak w grze, "25. Infanterie-Division" = name_order 25), +0x430
+            doświadczenie (fixed; doświadczenie / ludzie szablonu = poziom wg UNIT_EXP_LEVELS 0.1/0.3/0.75/0.9, zapis: 0.1,
+            0.2, 0.3), +0x458 okopanie (+0x460 limit), +0x4F0 ludzie, +0x600 max zaopatrzenia, +0x610 zaopatrzenie;
+            sprzęt +0x368 jak wcześniej. Statów walki nie ma w dywizji (SSubUnitStats +0x6D0 nie pasuje) - staty z
+            projektanta szablonu (military, na żywo). Odczyt wszystkich dywizji 0,15 s (pozycje 0,08 s).
+            Zapis: <id>.divs.jsonl (n nazwa, p pozycja co 6 h, s staty i e sprzęt raz dziennie; w klatkach staty
+            zachowane), <id>.tmpl.jsonl (skład szablonów w użyciu). Pamięć podręczna wierszy (mtime). API: .../moment?t=
+            (wartości państw w dniu), .../divisions?t= (wszystkie dywizje z nazwą stanu), .../division/<id> (historia,
+            szablony w czasie, potrzeby oddziałów, archetypy i nazwy, staty projektanta z gry, bitwy).
+            UI: dymek prowincji z nazwami dywizji; klik prowincji -> panel obok mapy z listą dywizji, klik -> karta
+            (org/siła/ludzie/doświadczenie z poziomem, okopanie, zaopatrzenie, sprzęt vs potrzeba, siatka szablonu
+            grafika/tekst ze statami), przycisk "Open in the Time machine". Nowa zakładka Time machine: kampania +
+            suwak dni, stan gry państwa (wszystkie nagrywane wartości), tabela dywizji (filtry, sortowanie), dywizja:
+            karta + wykresy org/siła i ludzie, gdzie stała, bitwy. Testy py ok / js 129, smoke OK (klik na mapie,
+            Time machine: 30 dywizji GER, 25. Infanterie-Division z siatką).
+            [x] DOWÓDCA (2026-10-23, użytkownik przypisał 8 dywizji GER do Mansteina - dokładnie te 8 mają grupę):
+                dywizja +0xC0 COrdersGroup* (+0x160 nazwa armii "Army 1"), grupa +0x88 CArmyLeader* (+0x40 imię
+                "Erich von Manstein", +0x20 klucz GER_erich_von_manstein). Zapis w "n": [tag, nazwa, szablon, armia,
+                dowódca]; karta pokazuje armię i dowódcę, Time machine kolumnę Commander (szukanie też po nim).
+            KONTROLA (2026-10-23): testy py 342 OK, js 118 OK. Smoke: działa na profilu użytkownika - zwinięte kafelki
+                ukrywały sloty badań; teraz smoke na czas testu rozwija wszystko (hoi4dbg.collapsed) i przywraca na końcu.
+                Bez gry zostają 2 błędy smoke (Research: sloty na żywo, Army/Air/Navy: Compare) - wymagają działającej gry.
 [ ] Krok G  Game Tools (narzędzia lokalne)
             (zakładka Intelligence Lab USUNIĘTA 2026-10-13 na prośbę użytkownika - była tylko na danych DEMO)
 [ ] Krok H  Test multiplayera na 2 klientach (czy zmiany od nie-hosta się synchronizują)

@@ -30,6 +30,7 @@ from . import code_patch, console, layout, pointers, world
 from .calibration import SCAN_LIMIT, CalibrationError, FieldCalibration, holds, scan_many, tolerance_for
 
 TOLERANCE = 0.0005           # values are fixed point with 3 decimals
+INFRA_BUILDINGS = ("supply_node", "naval_base", "bunker", "coastal_bunker")   # province buildings of the campaign map
 OP_TIMEOUT_S = 600
 APPLY_GRACE_S = 5.0          # command seen in history, value not changed yet -> wait this long
 
@@ -43,6 +44,24 @@ class LiveError(Exception):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+def division_rows(rows: list[dict]) -> dict:
+    """The divisions of pointers.read_divisions as the Game summary records them (ic_history "divs"): "n<id>": [tag,
+    name, template, army, commander (None: none)], "p<id>": [province, province moving / attacking into or 0] and,
+    when read with the stats,
+    "s<id>": [organisation, strength (1 decimal), experience, manpower (whole), dig-in (1 decimal), supply in % or
+    None], "e<id>": {equipment type: amount (whole)}."""
+    out: dict = {}
+    for r in rows:
+        k = str(r["id"])
+        out[f"n{k}"] = [r["tag"], r["name"], r["template"], r.get("army"), r.get("leader")]
+        out[f"p{k}"] = [r["pid"], r["to"]]
+        if "exp" in r:
+            out[f"s{k}"] = [round(r["org"], 1), round(r["str"], 1), round(r["exp"]), round(r["mp"]), round(r["dig"], 1),
+                            None if r["sup"] is None else round(100 * r["sup"])]
+            out[f"e{k}"] = {t: round(a) for t, a in sorted(r["eq"].items()) if round(a)}
+    return out
 
 
 class LiveService:
@@ -1175,7 +1194,8 @@ class LiveService:
     def _campaign_day(self, mem, base: int, tags: list[str], countries: dict, out: dict, armies: dict,
                       equipment: dict, install: str) -> tuple[dict, dict | None]:
         """The rest of a Game summary day (2026-10-21, user's request): ({tag: values in the order of
-        ic_history.EXTRA}, {state id: [owner, controller]} or None) - political power, stability and war support in %,
+        ic_history.EXTRA}, {"states": {state id: [owner, controller]}, "provinces": {province id: controller} of the
+        provinces not held by their state's controller, or None} or None) - political power, stability and war support in %,
         command power, fuel, divisions, battalions, equipment coverage in % (pieces in divisions of what the templates
         need, up to the need, of each archetype), owned and controlled states, victory points controlled (state
         history files of the game and mods), researched technologies, free manpower (states controlled), manpower in
@@ -1228,12 +1248,58 @@ class LiveService:
             values += [army.get("manpower_field"), army.get("manpower_training")] if army else [None, None]
             extra[tag] = values
         mapped = {sid: [o, c] for sid, (o, c, _a) in control.items()} if control else None
+        if mapped is not None:   # the front inside states: provinces held by another country than their state's
+            try:
+                mapped = {"states": mapped, "provinces": pointers.read_province_control(mem, base, tags)}
+            except pointers.PointerError as exc:
+                self.log.info("Provinces not readable for the Game summary: %s", exc)
+                mapped = {"states": mapped, "provinces": None}
         return extra, mapped
 
-    def ic_snapshot(self, with_factions: bool = False) -> dict:
+    def _front(self, mem, base: int, countries: dict, types: dict | None = None) -> tuple[dict | None, dict | None, dict | None]:
+        """(division positions, {"m<from>-<to>": {tag: divisions} moving / attacking, "c<province>": battle
+        (pointers.read_battles)}, every division (division_rows; with `types` its stats too)) - None when not
+        readable."""
+        divisions, moves = {}, {}
+        try:   # where every division stands (the campaign map)
+            rows = pointers.read_divisions(mem, countries, types)
+            units = pointers.positions(rows, divisions, moves)
+        except pointers.PointerError as exc:
+            self.log.info("Division positions not readable: %s", exc)
+            return None, None, None
+        try:
+            battles = pointers.read_battles(mem, base, divisions)
+        except pointers.PointerError as exc:
+            self.log.info("Battles not readable: %s", exc)
+            battles = {}
+        front = {f"m{a}-{b}": v for (a, b), v in moves.items()}
+        front.update({f"c{p}": v for p, v in battles.items()})
+        return units, front, division_rows(rows)
+
+    def frame_snapshot(self) -> dict:
+        """{"t", "hour", "units", "front"} - divisions, their moves and the battles between two recorded days (the
+        campaign map's readings every few game hours)."""
+        def read(mem, base, tags, _process):
+            date = pointers.read_date(mem, base)
+            units, front, divs = self._front(mem, base, pointers.country_objects(mem, base, tags))
+            return {"t": ic_history.day_number(date), "hour": date["hour"], "units": units, "front": front,
+                    "divs": divs}
+        return self._game_memory(read)
+
+    def _infra_day(self, mem, base: int, install: str) -> dict:
+        """{"r": {"a-b": level} railways, "b": {province: [supply hub, naval base, land fort, coastal fort levels]}}."""
+        names = campaign_map.building_types([install, *self._mods])
+        types = {i + 1: n for i, n in enumerate(names) if n in INFRA_BUILDINGS}
+        rails = pointers.read_railways(mem, base)
+        built = pointers.read_province_buildings(mem, base, types)
+        return {"r": {f"{a}-{b}": lv for (a, b), lv in rails.items()},
+                "b": {str(p): [v.get(n, 0) for n in INFRA_BUILDINGS] for p, v in built.items()}}
+
+    def ic_snapshot(self, with_factions: bool = False, with_infra: bool = False) -> dict:
         """{"t", "player", "countries": {tag: [mil, nav, civ, civilian factories, military factories, dockyards,
         wasted mil, wasted nav, wasted civ]}, "factions": {tag: faction name} or None, "players": {tag: {"n": player
-        name, "s": [subject tags]}} of every human player or None, "losses": combat logs} - IC a
+        name, "s": [subject tags]}} of every human player or None, "losses": combat logs, "casualties": {tag: {enemy:
+        (manpower lost, enemy manpower lost)}} of the countries at war} - IC a
         day (pointers.read_ic), factories as the game shows them (pointers.read_factories), IC a day of the factories
         without a line (ic_history.wasted_ic) of every existing country and the combat logs
         (pointers.read_combat_log)."""
@@ -1294,11 +1360,31 @@ class LiveService:
                     players[p["tag"]] = {"n": p["name"], "s": subjects}
             except pointers.PointerError as exc:
                 self.log.info("Player list not readable: %s", exc)
+            casualties = {}
+            try:   # manpower lost in each war so far (only countries at war: reading every relation is slow)
+                for tag, c in countries.items():
+                    if pointers.at_war(mem, c):
+                        casualties[tag] = {w["enemy"]: (w["lost"], w["killed"])
+                                           for w in pointers.read_wars(mem, c, tags, tag)}
+            except pointers.PointerError as exc:
+                self.log.info("War casualties not readable: %s", exc)
+                casualties = None
             try:
                 losses = pointers.read_combat_log(mem, base, tags)
             except pointers.PointerError as exc:   # the IC values are still worth recording
                 self.log.info("Combat log not readable: %s", exc)
                 losses = None
+            types = self._equipment_types.get((process["pid"], process.get("started"))) or None
+            units, front, divs = self._front(mem, base, countries, types)
+            templates = {f"{tag}|{t['name']}": {"b": t["battalions"], "s": t["support"], "r": t["regimental"],
+                                                "g": t.get("grid"), "i": t.get("icon")}
+                         for tag, army in armies.items() for t in army.get("templates") or [] if t.get("count")}
+            infra = None
+            if with_infra:   # railways, ports, forts and supply hubs (the campaign map; they change slowly)
+                try:
+                    infra = self._infra_day(mem, base, process.get("install") or "")
+                except (pointers.PointerError, OSError) as exc:
+                    self.log.info("Railways and buildings not readable: %s", exc)
             designs = {}
             for tag, c in countries.items():   # plane designs, for the day each was first seen
                 try:
@@ -1307,6 +1393,9 @@ class LiveService:
                     continue
             return {"t": t, "player": player, "campaign": pointers.campaign_id(mem, base), "countries": out,
                     "factions": factions, "players": players or None, "losses": losses, "assigned": assigned,
+                    "casualties": casualties, "units": units, "infra": infra, "front": front, "divs": divs,
+                    "templates": templates,
+                    "hour": pointers.read_date(mem, base)["hour"],
                     "equipment": equipment, "extra": extra, "map": control,
                     "designs": {k: v for k, v in designs.items() if v}}
         return self._game_memory(read)

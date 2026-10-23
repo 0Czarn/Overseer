@@ -441,14 +441,26 @@ def read_leader(memory, country: int) -> dict | None:
 # the other country (int32), + 0x2e8 = CWarRelation or 0 in peace; CWarRelation + 0x10 / + 0x14 = slots of the
 # two sides (slot = index in the tag order + 1), the attacker first: GER-SOV, GER-POL, ENG-GER, JAP-CHI (the
 # saves' war_relation first="..." with first_was_instigator=yes, the only value seen in 10 text saves).
+# Casualties (2026-10-23, ITA-ETH 1936.1.20 save vs memory: 581 / 2971 exactly): CWarRelation + 0x50 / + 0x58 = int32
+# manpower lost by the first / second side in this war (the save's first_casualties / second_casualties).
+# country + 0x1328: not 0 only for countries at war (2026-10-13 SOV-POL, 2026-10-23 ITA and ETH, 0 in the 437 others) -
+# meaning unknown, used to skip the relations of countries at peace (all 439 countries: 1.45 s, this field: 0.003 s).
 RELATIONS = 0x8
 RELATION_SLOT = 0x50
 RELATION_WAR = 0x2E8
 WAR_SIDES = 0x10
+WAR_CASUALTIES = 0x50
+AT_WAR = 0x1328
+
+
+def at_war(memory, country: int) -> bool:
+    raw = memory.read(country + AT_WAR, 8)
+    return bool(raw) and raw != bytes(8)
 
 
 def read_wars(memory, country: int, order: list[str], tag: str) -> list[dict]:
-    """[{"enemy": tag, "offensive": bool}] of the country's wars."""
+    """[{"enemy": tag, "offensive": bool, "lost": manpower lost to the enemy, "killed": enemy manpower lost}] of the
+    country's wars."""
     dip = _ptr(memory, country + DIPLOMACY)
     if dip is None:
         raise PointerError("unreadable", "The country's diplomacy object is not readable")
@@ -466,7 +478,10 @@ def read_wars(memory, country: int, order: list[str], tag: str) -> list[dict]:
         first, second = struct.unpack("<ii", sides) if sides else (0, 0)
         if {first, second} != {own, other} or not 0 < other <= len(order):
             raise PointerError("implausible", "War sides do not match the relation - layout does not match")
-        out.append({"enemy": order[other - 1], "offensive": first == own})
+        raw = memory.read(war + WAR_CASUALTIES, 12)
+        a, _, b = struct.unpack("<iii", raw) if raw else (None, 0, None)
+        lost, killed = (a, b) if first == own else (b, a)
+        out.append({"enemy": order[other - 1], "offensive": first == own, "lost": lost, "killed": killed})
     return out
 
 
@@ -1589,6 +1604,278 @@ def read_state_control(memory, module_base: int, tags: list[str]) -> dict[int, t
         if not 0 <= available < 10**9:
             raise PointerError("implausible", "State manpower out of range - layout does not match")
         out[sid] = (tag_of(owner), tag_of(controller), available)
+    return out
+
+
+# Provinces (2026-10-23, GER 1936.2.1 save vs memory, ITA-ETH war: 10272 land provinces, all controllers equal - the 17
+# the save lists with controller="ITA", the rest their state's owner): state + 0x18 = array of CProvince* (read_array),
+# province + 0xA4 = province id (int32), + 0x188 = slot of its controller. 3 of them differed from their state's
+# controller: the front inside a state.
+STATE_PROVINCES = 0x18
+PROVINCE_ID = 0xA4
+PROVINCE_CONTROLLER = 0x188
+
+
+def read_province_control(memory, module_base: int, tags: list[str]) -> dict[int, str | None]:
+    """{province id: controller} of the provinces whose controller is not their state's controller (the front lines
+    inside states; the other provinces follow their state)."""
+    table = _ptr(memory, module_base + COUNTRY_TABLE[0])
+    if table is None:
+        raise PointerError("no_country_table", "The game state is not readable")
+    tag_of = lambda slot: tags[slot - 1] if 0 < slot <= len(tags) else None  # noqa: E731
+    out = {}
+    for state in read_array(memory, table + STATES, 5000):
+        head = memory.read(state + STATE["controller"], 4) if state else None
+        if not head:
+            continue
+        controller = struct.unpack("<i", head)[0]
+        for province in read_array(memory, state + STATE_PROVINCES, 500):
+            raw = memory.read(province + PROVINCE_ID, PROVINCE_CONTROLLER + 4 - PROVINCE_ID) if province else None
+            if not raw:
+                continue
+            pid = struct.unpack_from("<i", raw, 0)[0]
+            slot = struct.unpack_from("<i", raw, PROVINCE_CONTROLLER - PROVINCE_ID)[0]
+            if not 0 < pid < 100000:
+                raise PointerError("implausible", "Province id out of range - layout does not match")
+            if slot != controller:
+                out[pid] = tag_of(slot)
+    return out
+
+
+# Division positions (2026-10-23, GER 1936.2.1 save vs memory: all 1221 divisions of every country equal - country,
+# location, organisation, strength): division + 0x1F0 = CProvince* of its location (province + 0xA4 = id), + 0x420 =
+# strength, + 0x428 = organisation (fixed64 / 100000); the template at ARMY["division_template"].
+DIVISION_LOCATION = 0x1F0
+DIVISION_STRENGTH = 0x420
+# 2026-10-23 (1943 game, 61 land battles): division + 0x1E8 = CProvince* it moves or attacks into (a neighbour; null:
+# none). Game state + 0x268 = array of CLandCombat*: + 0x28 attacker, + 0x30 defender (CLandCombatant: + 0x20 array of
+# the divisions, CArmy*), + 0x38 CProvince* of the battle - every defender stands in it, the attackers moving in have it
+# at + 0x1E8.
+DIVISION_TARGET = 0x1E8
+GAME_COMBATS = 0x268
+COMBAT_SIDES = (0x28, 0x30)
+COMBAT_PROVINCE = 0x38
+COMBATANT_DIVISIONS = 0x20
+
+
+def read_unit_positions(memory, countries: dict[str, int], divisions: dict | None = None,
+                        moves: dict | None = None) -> dict[int, dict[str, list]]:
+    """{province id: {tag: [divisions, mean organisation, mean strength, {template name: divisions}]}} of the divisions
+    of `countries` ({tag: country object}) - where every army stands (the Game summary campaign map). Fills
+    `divisions` {division object: (tag, organisation, strength)} (read_battles) and `moves` {(from, to): {tag:
+    divisions}} - the divisions moving or attacking into a neighbouring province."""
+    return positions(read_divisions(memory, countries), divisions, moves)
+
+
+def positions(rows: list[dict], divisions: dict | None = None, moves: dict | None = None) -> dict[int, dict[str, list]]:
+    """read_unit_positions of the divisions read (read_divisions)."""
+    out: dict[int, dict[str, list]] = {}
+    for r in rows:
+        tag, pid, org, strength = r["tag"], r["pid"], r["org"], r["str"]
+        if divisions is not None:
+            divisions[r["ptr"]] = (tag, org, strength)
+        if moves is not None and r["to"]:
+            step = moves.setdefault((pid, r["to"]), {})
+            step[tag] = step.get(tag, 0) + 1
+        entry = out.setdefault(pid, {}).setdefault(tag, [0, 0.0, 0.0, {}])
+        entry[0] += 1
+        entry[1] += org
+        entry[2] += strength
+        name = r["template"] or "?"
+        entry[3][name] = entry[3].get(name, 0) + 1
+    for units in out.values():
+        for entry in units.values():
+            entry[1] = round(entry[1] / entry[0])   # whole numbers: small daily changes are not written every day
+            entry[2] = round(entry[2] / entry[0])
+    return out
+
+
+# One division (2026-10-23, GER 1936.2.1 save vs memory, 1215 divisions by id): + 0x1C int32 id (the save's
+# division id), + 0x340 CNameGroupMember* (+ 0x60 the division's name as the game shows it, "18ya Strelkovaya
+# Diviziya"), + 0x430 experience (1042 equal; experience / manpower need = the level of NDefines UNIT_EXP_LEVELS),
+# + 0x458 dig-in (+ 0x460 its cap), + 0x4F0 manpower (equal where the save's value differs from the need),
+# + 0x600 max supply, + 0x610 supply (army_current_supply_ratio) - fixed64 / 100000.
+DIVISION_ID = 0x1C
+DIVISION_NAME = 0x340
+NAME_TEXT = 0x60
+DIVISION_EXPERIENCE = 0x430
+DIVISION_DIG_IN = 0x458
+DIVISION_MANPOWER = 0x4F0
+DIVISION_SUPPLY = (0x600, 0x610)
+# Army and commander (2026-10-23, the user put 8 GER divisions under Erich von Manstein: exactly those 8 have it):
+# division + 0xC0 = COrdersGroup* (null: no army), + 0x160 its name ("Army 1"), + 0x88 CArmyLeader* (+ 0x40 the
+# general's name, + 0x20 his key GER_erich_von_manstein).
+DIVISION_ARMY = 0xC0
+ARMY_NAME = 0x160
+ARMY_LEADER = 0x88
+LEADER_NAME = 0x40
+
+
+def read_divisions(memory, countries: dict[str, int], types: dict[int, str] | None = None) -> list[dict]:
+    """Every division of `countries`: {"ptr", "id", "tag", "name", "template", "pid", "to" (province it moves / attacks
+    into, 0: none), "org", "str", "army", "leader" (None: in no army)} and with `types` (read_equipment_types; a daily reading) "exp", "mp", "dig", "sup"
+    (supply / max supply, 0..1), "eq": {equipment type: amount}."""
+    out = []
+    names: dict[int, str | None] = {}
+    tokens: dict[int, str | None] = {}
+    armies: dict[int | None, tuple] = {None: (None, None), 0: (None, None)}
+    for tag, country in countries.items():
+        for d in read_array(memory, country + ARMY["divisions"], 20_000):
+            province = _ptr(memory, d + DIVISION_LOCATION) if d else None
+            raw = memory.read(province + PROVINCE_ID, 4) if province else None
+            values = memory.read(d + DIVISION_STRENGTH, 16) if raw else None
+            if not values:
+                continue
+            pid = struct.unpack("<i", raw)[0]
+            strength, org = (v / 100000 for v in struct.unpack("<qq", values))
+            if not 0 < pid < 100000 or not 0 <= org < 10_000 or not 0 <= strength < 100_000:
+                raise PointerError("implausible", "Division position out of range - layout does not match")
+            target = _ptr(memory, d + DIVISION_TARGET)
+            to = memory.read(target + PROVINCE_ID, 4) if target and target != province else None
+            template = _ptr(memory, d + ARMY["division_template"])
+            if template not in names:
+                names[template] = _msvc_string(memory, template + DIVISION_TEMPLATE["name"]) if template else None
+            head = memory.read(d + DIVISION_ID, 4)
+            group = _ptr(memory, d + DIVISION_NAME)
+            army = _ptr(memory, d + DIVISION_ARMY)
+            if army not in armies:
+                leader = _ptr(memory, army + ARMY_LEADER) if army else None
+                armies[army] = (_msvc_string(memory, army + ARMY_NAME) if army else None,
+                                _msvc_string(memory, leader + LEADER_NAME) if leader else None)
+            row = {"ptr": d, "id": struct.unpack("<i", head)[0] if head else 0, "tag": tag,
+                   "name": _msvc_string(memory, group + NAME_TEXT) if group else None, "template": names[template],
+                   "pid": pid, "to": struct.unpack("<i", to)[0] if to else 0, "org": org, "str": strength,
+                   "army": armies[army][0], "leader": armies[army][1]}
+            if types is not None:
+                fixed = lambda off: (lambda r: struct.unpack("<q", r)[0] / 100000 if r else 0.0)(memory.read(d + off, 8))  # noqa: E731
+                top = fixed(DIVISION_SUPPLY[0])
+                row.update({"exp": fixed(DIVISION_EXPERIENCE), "mp": fixed(DIVISION_MANPOWER), "dig": fixed(DIVISION_DIG_IN),
+                            "sup": fixed(DIVISION_SUPPLY[1]) / top if top > 0 else None, "eq": {}})
+                head = memory.read(d + DIVISION_EQUIPMENT, 16)
+                data, _cap, count = struct.unpack("<Qii", head) if head else (0, 0, 0)
+                blob = memory.read(data, 16 * count) if 0 < count <= 500 else b""
+                for i in range(len(blob or b"") // 16):
+                    variant, amount = struct.unpack_from("<Qq", blob, 16 * i)
+                    if variant not in tokens:
+                        tok = memory.read(variant + VARIANT["type"], 4) if 0x10000 <= variant < 0x7FFF_FFFF_FFFF else None
+                        tokens[variant] = types.get(struct.unpack("<I", tok)[0]) if tok else None
+                    if tokens[variant]:
+                        row["eq"][tokens[variant]] = row["eq"].get(tokens[variant], 0) + amount / 100000
+            out.append(row)
+    return out
+
+
+def read_battles(memory, module_base: int, divisions: dict) -> dict[int, list]:
+    """{province id: [attacker, defender, attacking divisions, defending divisions, attacker share of the sides'
+    organisation x strength in %]} of the land battles; the sides' tags are their countries with the most divisions
+    there (`divisions` from read_unit_positions; divisions of no country - landing marines - are not counted)."""
+    table = _ptr(memory, module_base + COUNTRY_TABLE[0])
+    if table is None:
+        raise PointerError("no_country_table", "The game state is not readable")
+    out = {}
+    for combat in read_array(memory, table + GAME_COMBATS, 10_000):
+        province = _ptr(memory, combat + COMBAT_PROVINCE) if combat else None
+        raw = memory.read(province + PROVINCE_ID, 4) if province else None
+        if not raw:
+            continue
+        pid = struct.unpack("<i", raw)[0]
+        if not 0 < pid < 100_000:
+            raise PointerError("implausible", "Battle province out of range - layout does not match")
+        sides = []
+        for off in COMBAT_SIDES:
+            side = _ptr(memory, combat + off)
+            known = [divisions[d] for d in (read_array(memory, side + COMBATANT_DIVISIONS, 1000) if side else [])
+                     if d in divisions]
+            count: dict[str, int] = {}
+            for tag, _org, _str in known:
+                count[tag] = count.get(tag, 0) + 1
+            sides.append((max(count, key=count.get) if count else None, len(known),
+                          sum(org * strength for _tag, org, strength in known)))
+        (att, n_att, p_att), (dfn, n_def, p_def) = sides
+        if att and dfn:
+            out[pid] = [att, dfn, n_att, n_def, round(100 * p_att / (p_att + p_def)) if p_att + p_def else 50]
+    return out
+
+
+# Railways and province buildings (2026-10-23, RTTI + the GER 1936.2.1 save vs memory, 1943 game: railway levels per
+# neighbour equal the save's rail_way lists; building types in memory equal the save's per province - 727 supply nodes,
+# 473 of 534 naval bases at the same level 7 years apart).
+# game state + 0x3E0 = CRailwayManager: + 0x08 array of CProvinceRailwayInfo* per province id (null: no railway);
+# info + 0x38 array of {int32 neighbour province id, int32 level} - the railway to each connected neighbour.
+# CProvince + 0x190 = CBuildingStatus (embedded): + 0x20 int32 array per building type (index into the buildings, -1:
+# none), + 0x38 array of CBuilding* (+ 0x40 int16 level). Building type t = the t-th entry (1-based) of the
+# buildings = { } blocks of common/buildings (campaign_map.building_types).
+RAILWAY_MANAGER = 0x3E0
+RAILWAY_INFOS = 0x08
+RAILWAY_LINKS = 0x38
+PROVINCE_BUILDINGS = 0x190
+BUILDING_SLOTS = 0x20
+BUILDING_LIST = 0x38
+BUILDING_LEVEL = 0x40
+
+
+def read_railways(memory, module_base: int) -> dict[tuple[int, int], int]:
+    """{(province a, province b): level} of every railway between two neighbouring provinces (a < b)."""
+    table = _ptr(memory, module_base + COUNTRY_TABLE[0])
+    manager = _ptr(memory, table + RAILWAY_MANAGER) if table else None
+    if manager is None:
+        raise PointerError("no_railways", "The railways are not readable")
+    out = {}
+    for pid, info in enumerate(read_array(memory, manager + RAILWAY_INFOS, 100_000)):
+        if not info:
+            continue
+        head = memory.read(info + RAILWAY_LINKS, 16)
+        data, _cap, n = struct.unpack("<Qii", head) if head else (0, 0, 0)
+        if not 0 < n < 64:
+            continue
+        raw = memory.read(data, 8 * n)
+        if not raw:
+            continue
+        values = struct.unpack(f"<{2 * n}i", raw)
+        for j in range(n):
+            other, level = values[2 * j], values[2 * j + 1]
+            if not 0 < other < 100_000 or not 0 <= level <= 20:
+                raise PointerError("implausible", "Railway out of range - layout does not match")
+            if level:
+                out[(min(pid, other), max(pid, other))] = level
+    return out
+
+
+def read_province_buildings(memory, module_base: int, types: dict[int, str]) -> dict[int, dict[str, int]]:
+    """{province id: {building name: level}} of the land provinces with a building of `types` ({type index: name})."""
+    table = _ptr(memory, module_base + COUNTRY_TABLE[0])
+    if table is None:
+        raise PointerError("no_country_table", "The game state is not readable")
+    out: dict[int, dict[str, int]] = {}
+    for state in read_array(memory, table + STATES, 5000):
+        if not state:
+            continue
+        for province in read_array(memory, state + STATE_PROVINCES, 500):
+            raw = memory.read(province + PROVINCE_ID, 4) if province else None
+            head = memory.read(province + PROVINCE_BUILDINGS + BUILDING_SLOTS, 16) if raw else None
+            if not head:
+                continue
+            data, _cap, n = struct.unpack("<Qii", head)
+            if not 0 < n < 1000:
+                continue
+            slots = memory.read(data, 4 * n)
+            if not slots:
+                continue
+            index = struct.unpack(f"<{n}i", slots)
+            here = [(name, index[t]) for t, name in types.items() if t < n and index[t] >= 0]
+            if not here:
+                continue
+            buildings = read_array(memory, province + PROVINCE_BUILDINGS + BUILDING_LIST, 1000)
+            levels = {}
+            for name, i in here:
+                lv = memory.read(buildings[i] + BUILDING_LEVEL, 2) if i < len(buildings) and buildings[i] else None
+                level = struct.unpack("<h", lv)[0] if lv else 0
+                if not 0 <= level <= 100:
+                    raise PointerError("implausible", "Building level out of range - layout does not match")
+                if level:
+                    levels[name] = level
+            if levels:
+                out[struct.unpack("<i", raw)[0]] = levels
     return out
 
 

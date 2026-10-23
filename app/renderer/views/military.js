@@ -194,8 +194,29 @@ function slot(id, names, cls = '') {
   return h('div', { class: `mil-slot ${cls}`.trim(), title: names[id] ?? id }, iconImg(icons.units.get(id), names[id] ?? id, 'mil-slot-img'));
 }
 
+/** Icons of the sub-units and template numbers of `templates` ({grid, icon}) not fetched yet (GET /api/military/icons);
+ * `done()` after they arrived. */
+export async function loadTemplateIcons(ctx, templates, done) {
+  const units = [...new Set(templates.flatMap((t) => [t.icon?.unit, ...Object.values(t.grid ?? {}).flat()]))]
+    .filter((u) => u && !icons.units.has(u));
+  const nums = [...new Set(templates.map((t) => t.icon?.template).filter((n) => n != null && !icons.templates.has(String(n))))];
+  if (!units.length && !nums.length) return;
+  units.forEach((u) => icons.units.set(u, null));   // asked once even when the game has no icon
+  nums.forEach((n) => icons.templates.set(String(n), null));
+  try {
+    // commas encoded: the IPC bridge allows only [A-Za-z0-9_-.=&%] in a query
+    const q = `units=${encodeURIComponent(units.join(','))}&templates=${encodeURIComponent(nums.join(','))}`;
+    const res = (await ctx.api.get(`/api/military/icons?${q}`)).data;
+    Object.entries(res.units).forEach(([k, v]) => icons.units.set(k, v));
+    Object.entries(res.templates).forEach(([k, v]) => icons.templates.set(k, v));
+    done?.();
+  } catch (err) {   // names stay in place of icons
+    ctx.api.log?.('warn', `Army icons unavailable: ${err.message}`);
+  }
+}
+
 /** The template drawn like the game's division designer: battalion columns, support companies, regimental support. */
-function designerGraphic(t, names) {
+export function designerGraphic(t, names) {
   const cols = gridColumns(t.grid?.battalions);
   const width = t.designer?.stats?.combat_width;
   return h('div', { class: 'mil-dd' },
@@ -216,7 +237,7 @@ function designerGraphic(t, names) {
         h('span', { class: 'hoi-mod' }, designerIcon('Estimated Production Cost'), 'Estimated Production Cost:'), h('span', { class: 'hoi-num' }, productionCostText(t.designer.cost))) : null) : null);
 }
 
-function designerText(t) {
+export function designerText(t) {
   const part = (title, units) => (units.length ? h('div', { class: 'mil-part' },
     h('div', { class: 'mil-part-title' }, title), h('div', { class: 'mil-part-list' }, unitLines(units).map((l) => h('span', null, l)))) : null);
   return h('div', { class: 'mil-dd-text' }, part('Battalions', t.battalions), part('Support', t.support),
@@ -228,23 +249,8 @@ export function armyPanel(ctx, tag) {
   let view = loadView();
   let last = null;          // [body, res] of the last drawing, redrawn when icons arrive or the view changes
 
-  async function fetchIcons(a) {
-    const units = [...new Set(a.templates.flatMap((t) => [t.icon?.unit, ...Object.values(t.grid ?? {}).flat()]))]
-      .filter((u) => u && !icons.units.has(u));
-    const nums = [...new Set(a.templates.map((t) => t.icon?.template).filter((n) => n != null && !icons.templates.has(String(n))))];
-    if (!units.length && !nums.length) return;
-    units.forEach((u) => icons.units.set(u, null));   // asked once even when the game has no icon
-    nums.forEach((n) => icons.templates.set(String(n), null));
-    try {
-      // commas encoded: the IPC bridge allows only [A-Za-z0-9_-.=&%] in a query
-      const q = `units=${encodeURIComponent(units.join(','))}&templates=${encodeURIComponent(nums.join(','))}`;
-      const res = (await ctx.api.get(`/api/military/icons?${q}`)).data;
-      Object.entries(res.units).forEach(([k, v]) => icons.units.set(k, v));
-      Object.entries(res.templates).forEach(([k, v]) => icons.templates.set(k, v));
-      if (last) draw(...last);
-    } catch (err) {   // names stay in place of icons
-      ctx.api.log?.('warn', `Army icons unavailable: ${err.message}`);
-    }
+  function fetchIcons(a) {
+    loadTemplateIcons(ctx, a.templates, () => { if (last) draw(...last); });
   }
 
   function templateRow(t, names) {

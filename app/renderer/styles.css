@@ -1341,11 +1341,82 @@ body.compact .nav-pinned .nav-label { display: none; }
 .gs-map-options { display: flex; gap: 8px; flex-wrap: wrap; }
 .gs-map-date { font-family: var(--mono); min-width: 92px; }
 .gs-map-slider { flex: 1 1 220px; min-width: 120px; accent-color: var(--accent); }
-.gs-map-wrap { position: relative; }
-.gs-map-scroll { max-height: min(560px, 62vh); overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: #18263a; cursor: grab; }
-.gs-map-canvas { display: block; image-rendering: pixelated; }
-.gs-map-tip { position: absolute; z-index: 5; pointer-events: none; background: var(--bg-elev-2); border: 1px solid var(--border);
+.map-wrap { position: relative; }
+.map-scroll { max-height: min(560px, 62vh); overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: #18263a; cursor: grab; }
+.map-layers { position: relative; }
+.map-canvas { display: block; image-rendering: pixelated; }
+.map-screen { position: absolute; left: 0; top: 0; pointer-events: none; border-radius: 7px; }
+.map-tip { position: absolute; z-index: 5; pointer-events: none; background: var(--bg-elev-2); border: 1px solid var(--border);
   border-radius: 6px; padding: 6px 9px; font-size: 12px; max-width: 220px; box-shadow: 0 4px 14px rgba(0, 0, 0, .5); }
 .gs-map-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; font-size: 12px; }
 .gs-map-legend-item { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); }
+.gs-map-units { margin-top: 4px; }
+.gs-map-fog { max-width: 220px; }
 .gs-map-swatch { width: 12px; height: 12px; border-radius: 2px; border: 1px solid rgba(0, 0, 0, .5); }
+
+/* Construction - forecast and where to build (2026-10-22) */
+.construction-finish { display: block; font-size: 12px; color: var(--info); }
+.cons-forecast { margin: 10px 0; overflow-x: auto; }
+.cons-forecast-table td, .cons-forecast-table th { white-space: nowrap; }
+.cons-delta { color: var(--ok); font-size: 12px; }
+.cons-advice { overflow-x: auto; }
+.cons-advice-table td { white-space: nowrap; }
+.cons-free { color: var(--ok); font-weight: 600; }
+.cons-res img { width: 16px; height: 16px; vertical-align: middle; }
+
+/* State Editor - map (2026-10-22) */
+.se-map-options { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.se-map-check { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.se-map-hint { font-size: 12px; }
+
+/* Campaign map: the divisions of a province beside the map; the division card (views/division-card.js) */
+.gs-map-main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 12px; align-items: start; }
+@media (max-width: 1100px) { .gs-map-main { grid-template-columns: minmax(0, 1fr); } }
+.gs-map-panel { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; padding: 10px; max-height: min(640px, 72vh); overflow: auto; }
+.gs-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+.gs-div-list { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
+.gs-div-item { display: grid; grid-template-columns: 40px 1fr auto; gap: 6px; align-items: center; text-align: left; background: none; border: 1px solid transparent; border-radius: 6px; padding: 4px 6px; color: var(--text); cursor: pointer; font: inherit; }
+.gs-div-item:hover, .gs-div-on { background: var(--bg-elev-2); border-color: var(--border); }
+.gs-div-tag { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+.gs-div-stats { font-size: 12px; white-space: nowrap; }
+.gs-map-names { margin-top: 2px; font-size: 12px; }
+.dc { display: flex; flex-direction: column; gap: 10px; }
+.dc-head { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.dc-name { font-size: 15px; }
+.dc-level { padding: 2px 8px; border-radius: 10px; font-size: 12px; background: var(--bg-elev-2); border: 1px solid var(--border); white-space: nowrap; }
+.dc-level-veteran, .dc-level-elite { border-color: var(--warn); color: var(--warn); }
+.dc-bars { display: flex; flex-direction: column; gap: 6px; }
+.dc-bar-head { display: flex; justify-content: space-between; font-size: 12px; }
+.dc-bar-track { height: 6px; background: var(--bg-elev-2); border-radius: 3px; overflow: hidden; }
+.dc-bar-fill { height: 100%; background: var(--accent); }
+.dc-org .dc-bar-fill { background: #3987e5; }
+.dc-str .dc-bar-fill { background: #199e70; }
+.dc-mp .dc-bar-fill { background: #c98500; }
+.dc-exp .dc-bar-fill { background: #9085e9; }
+.dc-facts { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; }
+.dc-title { font-weight: 600; margin: 4px 0; display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.dc-eq-row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+.dc-short { color: var(--bad); }
+.dc-tpl .mil-dd { transform-origin: 0 0; }
+.dc-note { font-size: 12px; margin: 4px 0 0; }
+.dc-open { align-self: flex-start; }
+
+/* Time machine (views/time-machine.js) */
+.tm-row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 8px; }
+.tm-slider { width: 100%; }
+.tm-metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px 20px; }
+.tm-table-wrap { max-height: 520px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.tm-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tm-table th { position: sticky; top: 0; background: var(--bg-elev-2); text-align: left; padding: 6px 8px; cursor: pointer; white-space: nowrap; }
+.tm-table td { padding: 4px 8px; border-top: 1px solid var(--border); }
+.tm-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.tm-table tbody tr { cursor: pointer; }
+.tm-table tbody tr:hover, .tm-on { background: var(--bg-elev-2); }
+.tm-div { display: grid; grid-template-columns: minmax(280px, 420px) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 1000px) { .tm-div { grid-template-columns: minmax(0, 1fr); } }
+.tm-path { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow: auto; margin-bottom: 8px; }
+.tm-path-row { display: grid; grid-template-columns: 130px 1fr auto; gap: 8px; text-align: left; background: none; border: none; color: var(--text); font: inherit; font-size: 12px; padding: 2px 4px; cursor: pointer; }
+div.tm-path-row { cursor: default; }
+.tm-path-row:hover { background: var(--bg-elev-2); }
+.gs-map-panel .mil-dd { zoom: .6; flex-wrap: wrap; }
+.gs-map-panel .dc-tpl { overflow-x: auto; }

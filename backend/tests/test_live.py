@@ -1082,8 +1082,14 @@ class IdeaPointerTests(unittest.TestCase):
             mem.put(rel + pointers.RELATION_WAR, "Q", war)
         mem.put(wars[0] + pointers.WAR_SIDES, "i", 2); mem.put(wars[0] + pointers.WAR_SIDES + 4, "i", 1)   # ENG declared on GER (1941 game)
         mem.put(wars[1] + pointers.WAR_SIDES, "i", 4); mem.put(wars[1] + pointers.WAR_SIDES + 4, "i", 2)   # ITA declared on ENG
-        self.assertEqual(pointers.read_wars(mem, country, order, "ENG"),
-                         [{"enemy": "GER", "offensive": True}, {"enemy": "ITA", "offensive": False}])
+        mem.put(wars[0] + pointers.WAR_CASUALTIES, "i", 581); mem.put(wars[0] + pointers.WAR_CASUALTIES + 8, "i", 2971)
+        mem.put(wars[1] + pointers.WAR_CASUALTIES, "i", 40); mem.put(wars[1] + pointers.WAR_CASUALTIES + 8, "i", 7)
+        self.assertEqual(pointers.read_wars(mem, country, order, "ENG"),   # casualties: first side, then second
+                         [{"enemy": "GER", "offensive": True, "lost": 581, "killed": 2971},
+                          {"enemy": "ITA", "offensive": False, "lost": 7, "killed": 40}])
+        self.assertFalse(pointers.at_war(mem, country))
+        mem.put(country + pointers.AT_WAR, "i", 9)
+        self.assertTrue(pointers.at_war(mem, country))
         mem.put(wars[1] + pointers.WAR_SIDES, "i", 4); mem.put(wars[1] + pointers.WAR_SIDES + 4, "i", 3)   # war of other countries: wrong layout
         with self.assertRaises(pointers.PointerError):
             pointers.read_wars(mem, country, order, "ENG")
@@ -1243,6 +1249,149 @@ class IdeaPointerTests(unittest.TestCase):
         self.assertEqual(got, {"id": 1, "owner": "MNT", "controller": "MNT", "cores": ["MNT", "YUG"], "claims": ["ALB", "ITA"],
                                "category": "rural", "buildings": {"arms_factory": 4}, "resources": {"tungsten": 8.0},
                                "manpower": {"available": 27087, "locked": 973605, "total": 1024847}})
+
+    def test_division_positions_per_province(self):   # GER 1936.2.1: two infantry divisions in 478, one in 6334
+        mem = FakeMemory(0x8000)
+        country, array, template = BASE + 0x100, BASE + 0x400, BASE + 0x600
+        divisions = [BASE + 0x1000 + 0x500 * i for i in range(3)]
+        provinces = {478: BASE + 0x2C00, 6334: BASE + 0x2E00}
+        mem.put(country + pointers.ARMY["divisions"], "Qii", array, 3, 3)
+        mem.put(template + pointers.DIVISION_TEMPLATE["name"], "10s", b"Infanterie")   # short: inside the std::string
+        mem.put(template + pointers.DIVISION_TEMPLATE["name"] + 0x10, "QQ", 10, 15)
+        for pid, obj in provinces.items():
+            mem.put(obj + pointers.PROVINCE_ID, "i", pid)
+        for i, (d, pid, org, strength) in enumerate(zip(divisions, (478, 478, 6334), (53.45454, 51.0, 23.3), (227.2, 227.2, 62.2))):
+            mem.put(array + 8 * i, "Q", d)
+            mem.put(d + pointers.DIVISION_LOCATION, "Q", provinces[pid])
+            mem.put(d + pointers.DIVISION_STRENGTH, "qq", round(strength * 100000), round(org * 100000))
+            mem.put(d + pointers.ARMY["division_template"], "Q", template)
+        self.assertEqual(pointers.read_unit_positions(mem, {"GER": country}),
+                         {478: {"GER": [2, 52, 227, {"Infanterie": 2}]},
+                          6334: {"GER": [1, 23, 62, {"Infanterie": 1}]}})
+        mem.put(divisions[0] + pointers.DIVISION_STRENGTH + 8, "q", -5)   # negative organisation: wrong layout
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_unit_positions(mem, {"GER": country})
+
+    def test_provinces_off_their_states_controller(self):   # ETH state 835, 1936.2.1: ITA holds 5 of its 6 provinces
+        mem = FakeMemory(0x8000)
+        module, table = BASE - pointers.COUNTRY_TABLE[0], BASE + 0x100
+        mem.put(module + pointers.COUNTRY_TABLE[0], "Q", table)
+        states, state, provs = BASE + 0x400, BASE + 0x1000, BASE + 0x2000
+        objects = [BASE + 0x3000 + 0x200 * i for i in range(3)]
+        tags = ["ITA", "ETH"]
+        mem.put(table + pointers.STATES, "Qii", states, 2, 2)
+        mem.put(states, "QQ", 0, state)
+        mem.put(state + pointers.STATE["owner"], "ii", 2, 1)   # owner ETH, controller ITA
+        mem.put(state + pointers.STATE_PROVINCES, "Qii", provs, 3, 3)
+        for i, (obj, pid, slot) in enumerate(zip(objects, (12714, 13249, 13253), (1, 2, 1))):
+            mem.put(provs + 8 * i, "Q", obj)
+            mem.put(obj + pointers.PROVINCE_ID, "i", pid)
+            mem.put(obj + pointers.PROVINCE_CONTROLLER, "i", slot)
+        self.assertEqual(pointers.read_province_control(mem, module, tags), {13249: "ETH"})
+        mem.put(objects[0] + pointers.PROVINCE_ID, "i", -3)
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_province_control(mem, module, tags)
+
+    def test_every_division_with_its_stats(self):   # GER 1936.2.1: division 1 = 25. Infanterie-Division (save)
+        mem = FakeMemory(0x8000)
+        country, array, d, group, province, variant = (BASE + 0x100, BASE + 0x200, BASE + 0x1000, BASE + 0x2800,
+                                                        BASE + 0x2C00, BASE + 0x3000)
+        mem.put(country + pointers.ARMY["divisions"], "Qii", array, 1, 1)
+        mem.put(array, "Q", d)
+        mem.put(province + pointers.PROVINCE_ID, "i", 6334)
+        mem.put(d + pointers.DIVISION_ID, "i", 1)
+        mem.put(d + pointers.DIVISION_LOCATION, "Q", province)
+        mem.put(d + pointers.DIVISION_STRENGTH, "qq", 22720000, 5345454)
+        mem.put(d + pointers.DIVISION_NAME, "Q", group)
+        mem.put(group + pointers.NAME_TEXT, "11s", b"25. Inf-Div")
+        mem.put(group + pointers.NAME_TEXT + 0x10, "QQ", 11, 15)
+        mem.put(d + pointers.DIVISION_EXPERIENCE, "q", 288000000)
+        mem.put(d + pointers.DIVISION_DIG_IN, "q", 880000)
+        mem.put(d + pointers.DIVISION_MANPOWER, "q", 960000000)
+        mem.put(d + pointers.DIVISION_SUPPLY[0], "q", 10800000)
+        mem.put(d + pointers.DIVISION_SUPPLY[1], "q", 5400000)
+        mem.put(d + pointers.DIVISION_EQUIPMENT, "Qii", BASE + 0x3800, 1, 1)
+        mem.put(BASE + 0x3800, "Qq", variant, 91000000)
+        mem.put(variant + pointers.VARIANT["type"], "I", 7)
+        army, leader = BASE + 0x4000, BASE + 0x4400   # in "Army 1" under Erich von Manstein (the user's 8 divisions)
+        mem.put(d + pointers.DIVISION_ARMY, "Q", army)
+        mem.put(army + pointers.ARMY_NAME, "6s", b"Army 1")
+        mem.put(army + pointers.ARMY_NAME + 0x10, "QQ", 6, 15)
+        mem.put(army + pointers.ARMY_LEADER, "Q", leader)
+        mem.put(leader + pointers.LEADER_NAME, "8s", b"Manstein")
+        mem.put(leader + pointers.LEADER_NAME + 0x10, "QQ", 8, 15)
+        rows = pointers.read_divisions(mem, {"GER": country}, {7: "infantry_equipment_1"})
+        self.assertEqual([(r["id"], r["name"], r["pid"], r["to"], round(r["org"], 2), r["str"], r["exp"], r["mp"], r["dig"], r["sup"], r["eq"], r["army"], r["leader"])
+                          for r in rows], [(1, "25. Inf-Div", 6334, 0, 53.45, 227.2, 2880.0, 9600.0, 8.8, 0.5, {"infantry_equipment_1": 910.0},
+                                            "Army 1", "Manstein")])
+        self.assertNotIn("exp", pointers.read_divisions(mem, {"GER": country})[0])   # positions only (every 6 game hours)
+        from hoi4dbg.live.service import division_rows
+        self.assertEqual(division_rows(rows), {"n1": ["GER", "25. Inf-Div", None, "Army 1", "Manstein"], "p1": [6334, 0],
+                                               "s1": [53.5, 227.2, 2880, 9600, 8.8, 50], "e1": {"infantry_equipment_1": 910}})
+
+    def test_moves_and_battles(self):   # SOV attacks province 6226 held by GER and SLO (1943 game)
+        mem = FakeMemory(0x8000)
+        module, table = BASE - pointers.COUNTRY_TABLE[0], BASE + 0x100
+        mem.put(module + pointers.COUNTRY_TABLE[0], "Q", table)
+        provinces = {6226: BASE + 0x2C00, 6227: BASE + 0x2E00}
+        for pid, obj in provinces.items():
+            mem.put(obj + pointers.PROVINCE_ID, "i", pid)
+        countries, divs = {}, {}
+        for n, (tag, where, target) in enumerate((("SOV", 6227, 6226), ("SOV", 6227, 6226), ("GER", 6226, None),
+                                                  ("SLO", 6226, None))):
+            d = BASE + 0x1000 + 0x500 * n
+            divs.setdefault(tag, []).append(d)
+            mem.put(d + pointers.DIVISION_LOCATION, "Q", provinces[where])
+            mem.put(d + pointers.DIVISION_TARGET, "Q", provinces[target] if target else 0)
+            mem.put(d + pointers.DIVISION_STRENGTH, "qq", 100 * 100000, (40 if tag == "SOV" else 20) * 100000)
+        for i, (tag, ds) in enumerate(divs.items()):
+            country, array = BASE + 0x100 + 0x40 * (i + 1), BASE + 0x500 + 0x40 * i
+            countries[tag] = country
+            mem.put(country + pointers.ARMY["divisions"], "Qii", array, len(ds), len(ds))
+            mem.put(array, f"{len(ds)}Q", *ds)
+        known, moves = {}, {}
+        pointers.read_unit_positions(mem, countries, known, moves)
+        self.assertEqual(moves, {(6227, 6226): {"SOV": 2}})
+        combats, combat, att, dfn = BASE + 0x3000, BASE + 0x3100, BASE + 0x3200, BASE + 0x3300
+        mem.put(table + pointers.GAME_COMBATS, "Qii", combats, 1, 1)
+        mem.put(combats, "Q", combat)
+        mem.put(combat + pointers.COMBAT_SIDES[0], "QQ", att, dfn)
+        mem.put(combat + pointers.COMBAT_PROVINCE, "Q", provinces[6226])
+        for side, ds in ((att, divs["SOV"]), (dfn, divs["GER"] + divs["SLO"])):
+            mem.put(side + pointers.COMBATANT_DIVISIONS, "Qii", side + 0x40, len(ds), len(ds))
+            mem.put(side + 0x40, f"{len(ds)}Q", *ds)
+        # attacker 2 x 40 x 100, defender 2 x 20 x 100 organisation x strength: 67%; the tie goes to the first country
+        self.assertEqual(pointers.read_battles(mem, module, known), {6226: ["SOV", "GER", 2, 2, 67]})
+
+    def test_railways_and_province_buildings(self):   # province 2: railway level 2 to 9168 and 11099 (1936 save)
+        mem = FakeMemory(0x8000)
+        module, table = BASE - pointers.COUNTRY_TABLE[0], BASE + 0x100
+        mem.put(module + pointers.COUNTRY_TABLE[0], "Q", table)
+        manager, infos, info, links = BASE + 0x600, BASE + 0x700, BASE + 0x800, BASE + 0x900
+        mem.put(table + pointers.RAILWAY_MANAGER, "Q", manager)
+        mem.put(manager + pointers.RAILWAY_INFOS, "Qii", infos, 4, 4)
+        mem.put(infos, "QQQQ", 0, 0, info, 0)
+        mem.put(info + pointers.RAILWAY_LINKS, "Qii", links, 2, 2)
+        mem.put(links, "iiii", 9168, 2, 1, 3)
+        self.assertEqual(pointers.read_railways(mem, module), {(2, 9168): 2, (1, 2): 3})
+        states, state, provs, province = BASE + 0x400, BASE + 0x1000, BASE + 0x1100, BASE + 0x2000
+        slots, blist, naval, coastal = BASE + 0x3000, BASE + 0x3100, BASE + 0x3200, BASE + 0x3300
+        mem.put(table + pointers.STATES, "Qii", states, 2, 2)
+        mem.put(states, "QQ", 0, state)
+        mem.put(state + pointers.STATE_PROVINCES, "Qii", provs, 1, 1)
+        mem.put(provs, "Q", province)
+        mem.put(province + pointers.PROVINCE_ID, "i", 53)   # naval base 2, coastal fort 1: types 8, 10 -> buildings 0, 1
+        mem.put(province + pointers.PROVINCE_BUILDINGS + pointers.BUILDING_SLOTS, "Qii", slots, 12, 12)
+        mem.put(slots, "12i", *[-1] * 8, 0, -1, 1, -1)
+        mem.put(province + pointers.PROVINCE_BUILDINGS + pointers.BUILDING_LIST, "Qii", blist, 2, 2)
+        mem.put(blist, "QQ", naval, coastal)
+        mem.put(naval + pointers.BUILDING_LEVEL, "hh", 2, 2)
+        mem.put(coastal + pointers.BUILDING_LEVEL, "hh", 1, 1)
+        types = {5: "supply_node", 8: "naval_base", 9: "bunker", 10: "coastal_bunker"}
+        self.assertEqual(pointers.read_province_buildings(mem, module, types), {53: {"naval_base": 2, "coastal_bunker": 1}})
+        mem.put(links + 4, "i", 99)   # a level no railway has: wrong layout
+        with self.assertRaises(pointers.PointerError):
+            pointers.read_railways(mem, module)
 
     def test_combat_log_skips_a_dynamic_countrys_log_and_odd_items(self):
         mem = FakeMemory(0x8000)

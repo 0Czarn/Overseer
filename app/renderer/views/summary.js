@@ -34,17 +34,26 @@ const TERRITORY_METRICS = [['sown', 'States owned', 'Owned'], ['sctl', 'States c
 const RESEARCH_METRICS = [['tech', 'Technologies researched', 'Technologies']];
 const MANPOWER_METRICS = [['mpf', 'Free manpower', 'Free'], ['mpa', 'Manpower in the field', 'In the field'],
   ['mpt', 'Manpower in training', 'Training'], ['mpall', 'All manpower (free + field + training)', 'All']];
+// recorded from 2026-10-23 (user's request) - flows: men a day, with a cumulative chart
+const CASUALTY_METRICS = [['mpl', 'Manpower lost in wars', 'Lost'], ['mpk', 'Manpower the enemies lost', 'Enemy lost']];
+export const isCasualtyMetric = (m) => CASUALTY_METRICS.some(([k]) => k === m);
 const EXTRA_METRICS = [...KD_METRICS, ...POLITICS_METRICS, ...ARMY_METRICS, ...TERRITORY_METRICS, ...RESEARCH_METRICS, ...MANPOWER_METRICS];
 export const PERCENT_METRICS = ['stab', 'ws', 'cover'];
 // groups of buttons: [label, metrics]
 export const METRIC_GROUPS = [['IC a day', null], ['Factories', null], ['IC per factory', null], ['Wasted IC', null],
   ['IC lost', null], ['Politics', POLITICS_METRICS], ['Army', ARMY_METRICS], ['Territory', TERRITORY_METRICS],
-  ['Research', RESEARCH_METRICS], ['Manpower', MANPOWER_METRICS]];
+  ['Research', RESEARCH_METRICS], ['Manpower', [...MANPOWER_METRICS, ...CASUALTY_METRICS]]];
 // IC a day per factory working on a line (efficiency, output and construction bonuses); groups: their IC / their factories
 const PER_FACTORY_METRICS = [['pmil', 'Military IC per military factory', 'Military'],
   ['pnav', 'Naval IC per dockyard', 'Naval'], ['pciv', 'Construction IC per civilian factory', 'Civilian']];
-const METRICS = [...IC_METRICS, ...FACTORY_METRICS, ...PER_FACTORY_METRICS, ...WASTED_METRICS, ...LOSS_METRICS, ...EXTRA_METRICS];
+const METRICS = [...IC_METRICS, ...FACTORY_METRICS, ...PER_FACTORY_METRICS, ...WASTED_METRICS, ...LOSS_METRICS, ...EXTRA_METRICS,
+  ...CASUALTY_METRICS];
 export const isExtraMetric = (m) => EXTRA_METRICS.some(([k]) => k === m);
+/** [section, [[metric, title]]] of every recorded value (the Time machine's game state). */
+export const METRIC_SECTIONS = [['IC a day', IC_METRICS], ['Factories', FACTORY_METRICS], ['IC per factory', PER_FACTORY_METRICS],
+  ['Wasted IC', WASTED_METRICS], ['IC lost', [...LOSS_METRICS, ...KD_METRICS]], ['Politics', POLITICS_METRICS],
+  ['Army', ARMY_METRICS], ['Territory', TERRITORY_METRICS], ['Research', RESEARCH_METRICS],
+  ['Manpower', [...MANPOWER_METRICS, ...CASUALTY_METRICS]]].map(([s, list]) => [s, list.map(([k, title]) => [k, title])]);
 export const isLossMetric = (m) => LOSS_METRICS.some(([k]) => k === m);
 /** Factory counts are a level, not a flow: no cumulative chart, whole numbers. */
 export const isFactoryMetric = (m) => FACTORY_METRICS.some(([k]) => k === m);
@@ -179,7 +188,7 @@ export default {
     const equipment = equipmentSection(ctx);   // the separate equipment chart at the bottom
     const notesBox = notesSection(ctx, () => renderCharts());
     const ranking = rankingSection(ctx);
-    const campaignMap = mapSection(ctx);
+    const campaignMap = mapSection(ctx, { seriesColors: SERIES_COLORS });
     const sessions = sessionsSection(ctx);
     const pickDay = (t) => notesBox.pick(t);
     root.append(viewHeader('Game summary', 'IC a day per country over the campaign, recorded from game memory while the app runs.'),
@@ -570,8 +579,8 @@ export default {
         h('summary', null, 'Table'),
         h('table', { class: 'table' },
           h('thead', null, h('tr', null, h('th', null, { players: 'Player', factions: 'Faction', countries: 'Country' }[mode()]),
-            h('th', null, `${isLevelMetric(prefs.metric) ? metric : 'IC a day'} (${dayText(main.t[last])})`),
-            isLevelMetric(prefs.metric) ? null : h('th', null, 'Cumulative IC'))),
+            h('th', null, `${isLevelMetric(prefs.metric) ? metric : isCasualtyMetric(prefs.metric) ? 'Men a day' : 'IC a day'} (${dayText(main.t[last])})`),
+            isLevelMetric(prefs.metric) ? null : h('th', null, isCasualtyMetric(prefs.metric) ? 'Total' : 'Cumulative IC'))),
           h('tbody', null, main.series.filter((s) => keys.includes(s.key)).map((s) => h('tr', null, h('td', null, s.key),
             h('td', { class: 'num' }, s.values[last] == null ? '—' : PERCENT_METRICS.includes(prefs.metric) || prefs.metric === 'kd'
               ? metricFormat(prefs.metric)(s.values[last]) : s.values[last].toLocaleString(numberLocale(),
@@ -585,6 +594,9 @@ export default {
         isLossMetric(prefs.metric) || prefs.metric === 'kd' ? patchBar() : null,
         isLossMetric(prefs.metric) ? lossNotice(keys) : null,
         isExtraMetric(prefs.metric) ? notice('info', extraNote(prefs.metric)) : null,
+        isCasualtyMetric(prefs.metric) ? notice('info', 'War casualties as the game counts them: men lost in combat and to attrition in '
+          + 'each war, counted for every pair of countries at war (also in multiplayer, without the combat log patch). '
+          + 'Recorded once a game day from 2026-10-23 - older days and the first day after the app started have no value.') : null,
         prefs.metric.startsWith('w') ? notice('info', 'Factories without a production or construction line, at the '
           + 'country\'s own IC per assigned factory that day (a construction line takes at most 15 factories).') : null,
         isPerFactoryMetric(prefs.metric) ? notice('info', 'IC a day the game produced per factory working on a line - '

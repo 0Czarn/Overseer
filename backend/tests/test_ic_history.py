@@ -126,7 +126,7 @@ class FakeLive:
     def ensure_combat_log_patch(self):
         pass
 
-    def ic_snapshot(self, with_factions):
+    def ic_snapshot(self, with_factions, with_infra=False):
         self.snapshots += 1
         return {"t": self.t, "player": "SOV", "countries": {"SOV": [1.0, 0.0, 2.0]},
                 "factions": {"SOV": "Comintern"} if with_factions else None}
@@ -194,7 +194,7 @@ class IcRecorderTest(unittest.TestCase):
 
     def test_all_zero_production_is_skipped(self):
         live = FakeLive()
-        live.ic_snapshot = lambda f: {"t": live.t, "player": "SOV", "countries": {"SOV": [0, 0, 0, 0, 0, 0]}, "factions": None}
+        live.ic_snapshot = lambda f, i=False: {"t": live.t, "player": "SOV", "countries": {"SOV": [0, 0, 0, 0, 0, 0]}, "factions": None}
         rec = IcRecorder(live, IcHistory(Path(tempfile.mkdtemp())), logging.getLogger("test"))
         rec.step()
         live.t += 1
@@ -283,7 +283,7 @@ class PerFactoryTest(unittest.TestCase):
 
     def test_the_recorder_stores_assigned_factories_after_the_losses(self):
         live = FakeLive()
-        live.ic_snapshot = lambda f: {"t": live.t, "player": "SOV", "factions": None,
+        live.ic_snapshot = lambda f, i=False: {"t": live.t, "player": "SOV", "factions": None,
                                       "countries": {"SOV": [9.0, 0.0, 5.0, 1, 2, 0, 0, 0, 0]}, "assigned": {"SOV": [2, 0, 1]}}
         history = IcHistory(Path(tempfile.mkdtemp()))
         rec = IcRecorder(live, history, logging.getLogger("test"))
@@ -317,7 +317,7 @@ class EquipmentHistoryTest(unittest.TestCase):
 
     def test_the_recorder_writes_the_equipment_of_the_day(self):
         live = FakeLive()
-        live.ic_snapshot = lambda f: {"t": live.t, "player": "SOV", "factions": None, "countries": {"SOV": [9.0, 0.0, 5.0]},
+        live.ic_snapshot = lambda f, i=False: {"t": live.t, "player": "SOV", "factions": None, "countries": {"SOV": [9.0, 0.0, 5.0]},
                                       "equipment": {"SOV": {"infantry_equipment": [10, 5, 1, 2.5]}}}
         history = IcHistory(Path(tempfile.mkdtemp()))
         rec = IcRecorder(live, history, logging.getLogger("test"))
@@ -412,10 +412,17 @@ class WastedAndLossesTest(unittest.TestCase):
             "POL": [2.0, 0.0, 30.0], "ITA": [0.0, 0.0, 10.0], "ETH": [1.0, 0.0, 0.0],   # ETH: its own log wins
             "SOV": [26.0, None, None], "MON": [4.0, None, None]})
 
+    def test_casualty_deltas_per_war(self):
+        before = {"ITA": {"ETH": (500, 2000)}, "ETH": {"ITA": (2000, 500)}}
+        now = {"ITA": {"ETH": (581, 2971), "ABY": (3, 1)}, "ETH": {"ITA": (2971, 581)}}   # ABY: a war begun since
+        self.assertIsNone(ic_history.casualty_deltas(None, now))
+        self.assertEqual(ic_history.casualty_deltas(before, now), {"ITA": [84, 972], "ETH": [971, 81]})
+        self.assertEqual(ic_history.casualty_deltas(now, {}), {})   # peace: the wars are gone
+
     def test_recorder_adds_losses_from_the_second_day(self):
         live = FakeLive()
         log = {"SOV": {(1, "combat", 0, 9): (10.0, 1.0)}}
-        live.ic_snapshot = lambda f: {"t": live.t, "player": "SOV", "factions": None, "losses": {k: dict(v) for k, v in log.items()},
+        live.ic_snapshot = lambda f, i=False: {"t": live.t, "player": "SOV", "factions": None, "losses": {k: dict(v) for k, v in log.items()},
                                       "countries": {"SOV": [1.0, 0, 0, 1, 1, 0, 0, 0, 0], "ITA": [1.0, 0, 0, 1, 1, 0, 2.5, 0, 0]}}
         history = IcHistory(Path(tempfile.mkdtemp()))
         rec = IcRecorder(live, history, logging.getLogger("test"))
@@ -534,17 +541,90 @@ class MapLive(FakeLive):
     def __init__(self):
         super().__init__()
         self.control = {1: ["SOV", "SOV"], 2: ["FIN", "FIN"]}
+        self.front = {}   # provinces off their state's controller
+        self.units = {100: {"SOV": [2, 50, 200, {"Rifle": 2}]}, 200: {"FIN": [1, 40, 100, {"Jalkav": 1}]}}
         self.hours = None
+        self.infra_days = []
 
     def game_hours(self):
         return self.hours if self.hours is not None else self.t * 24
 
-    def ic_snapshot(self, with_factions):
+    def ic_snapshot(self, with_factions, with_infra=False):
         s = super().ic_snapshot(with_factions)
-        return {**s, "extra": {"SOV": extra(stab=55.5, divs=300)}, "map": dict(self.control)}
+        self.infra_days.append(with_infra)
+        infra = {"r": {"1-2": 2}, "b": {"53": [0, 2, 0, 1]}} if with_infra else None
+        return {**s, "extra": {"SOV": extra(stab=55.5, divs=300)}, "units": dict(self.units), "infra": infra,
+                "map": {"states": dict(self.control), "provinces": dict(self.front)},
+                "casualties": {"SOV": {"FIN": (100 * (self.t % 1000), 50)}}}
 
 
 class RecorderCampaignTest(unittest.TestCase):
+    def test_divisions_one_by_one_and_their_history(self):
+        live = MapLive()
+        day = {"n1": ["SOV", "1st Rifle", "Rifle"], "p1": [100, 0], "s1": [50, 200, 100, 9000, 5, 100], "e1": {"inf": 900},
+               "n2": ["FIN", "Jalkav 1", "Jalkav"], "p2": [200, 0], "s2": [40, 100, 50, 5000, 2, 90], "e2": {}}
+        live.days = dict(day)
+        snap = live.ic_snapshot
+        live.ic_snapshot = lambda f, i=False: {**snap(f, i), "divs": dict(live.days), "templates": {"SOV|Rifle": {"b": ["infantry"]}}}
+        live.frame_snapshot = lambda: {"t": live.t, "hour": live.hours % 24, "units": dict(live.units), "front": {},
+                                       "divs": dict(live.moving)}
+        history = IcHistory(Path(tempfile.mkdtemp()))
+        rec = IcRecorder(live, history, logging.getLogger("test"))
+        rec.step()
+        live.t += 1
+        live.hours = live.t * 24
+        self.assertTrue(rec.step())
+        live.moving = {"n1": ["SOV", "1st Rifle", "Rifle"], "p1": [100, 200]}   # 6 hours: 1 attacks, 2 is gone
+        live.hours += 6
+        rec.step()
+        gid, t = history.active, live.t
+        rows = history.delta_rows("divs", gid)
+        self.assertEqual([(r.get("h"), r["u"]) for r in rows[1:]],
+                         [(6, {"p1": [100, 200], "n2": None, "p2": None, "s2": None, "e2": None})])   # stats kept
+        self.assertEqual(history.delta_at("divs", gid, t + 0.1), day)
+        self.assertEqual(sorted(history.delta_at("divs", gid, t + 0.3)), ["e1", "n1", "p1", "s1"])
+        self.assertEqual(history.key_history("divs", gid, ["n2", "p1"]),
+                         [[t, "n", day["n2"]], [t, "p", [100, 0]], [t + 0.25, "n", None], [t + 0.25, "p", [100, 200]]])
+        self.assertEqual(history.delta_rows("tmpl", gid)[0]["u"], {"SOV|Rifle": {"b": ["infantry"]}})
+
+    def test_divisions_moves_and_battles_every_six_game_hours(self):
+        live = MapLive()
+        live.fight = {"m100-200": {"SOV": 2}, "c200": ["SOV", "FIN", 2, 1, 70]}
+        live.frame_snapshot = lambda: {"t": live.t, "hour": live.hours % 24, "units": dict(live.units),
+                                       "front": dict(live.fight)}
+        snap = live.ic_snapshot
+        live.ic_snapshot = lambda f, i=False: {**snap(f, i), "front": dict(live.fight), "hour": 0}
+        history = IcHistory(Path(tempfile.mkdtemp()))
+        rec = IcRecorder(live, history, logging.getLogger("test"))
+        rec.step()
+        live.t += 1
+        live.hours = live.t * 24
+        self.assertTrue(rec.step())   # the day: everything at hour 0
+        live.hours += 3
+        rec.step()                    # 3 hours later: nothing yet
+        live.units = {100: {"SOV": [2, 30, 190, {"Rifle": 2}]}, 200: {"FIN": [1, 40, 100, {"Jalkav": 1}]}}
+        live.hours += 3
+        rec.step()                    # 6 hours: the battle goes on; only organisation and strength changed
+        live.units = {200: {"FIN": [1, 20, 90, {"Jalkav": 1}], "SOV": [2, 30, 190, {"Rifle": 2}]}}
+        live.fight = {"c200": ["SOV", "FIN", 2, 1, 85]}
+        live.hours += 6
+        rec.step()                    # 12 hours: SOV moved in
+        gid = history.active
+        units = history.units_rows(gid)
+        self.assertEqual([(r.get("h"), sorted(r["u"])) for r in units], [(None, ["100", "200"]), (12, ["100", "200"])])
+        self.assertEqual(units[1]["u"]["100"], None)
+        front = history.delta_rows("front", gid)
+        self.assertEqual([(r.get("h"), r["u"]) for r in front],
+                         [(None, {"m100-200": {"SOV": 2}, "c200": ["SOV", "FIN", 2, 1, 70]}),
+                          (12, {"m100-200": None, "c200": ["SOV", "FIN", 2, 1, 85]})])
+        live.units = {200: {"FIN": [1, 15, 90, {"Jalkav": 1}], "SOV": [2, 30, 190, {"Rifle": 2}]}}
+        live.hours += 6
+        rec.step()                    # 18 hours: organisation only - not within a day
+        live.t += 1
+        live.hours = live.t * 24
+        self.assertTrue(rec.step())   # the next day: organisation and strength again
+        self.assertEqual([(r.get("h"), r["u"]) for r in history.units_rows(gid)[2:]], [(None, {"200": live.units[200]})])
+
     def test_extra_values_map_changes_and_stopped_time(self):
         live = MapLive()
         history = IcHistory(Path(tempfile.mkdtemp()))
@@ -558,13 +638,24 @@ class RecorderCampaignTest(unittest.TestCase):
         clock[0] = 10                     # the same hour for 10 s: paused
         rec.step()
         live.control[2] = ["FIN", "SOV"]
+        live.front = {512: "FIN"}
+        live.units = {100: {"SOV": [1, 50, 200, {"Rifle": 1}]}, 300: {"SOV": [1, 45, 190, {"Rifle": 1}]}}
         live.t += 1
         clock[0] = 11
         self.assertTrue(rec.step())
         game = history.game(history.active)
         self.assertEqual(game["countries"]["SOV"]["stab"], [55.5, 55.5])
         self.assertEqual(game["countries"]["SOV"]["divs"], [300, 300])
+        self.assertEqual(game["countries"]["SOV"]["mpl"], [None, 100])   # unknown the first day, then the growth
+        self.assertEqual(game["countries"]["SOV"]["mpk"], [None, 0])
         self.assertEqual(game["still"], [0, 11])
         rows = history.map_rows(history.active)
         self.assertEqual([r.get("full") for r in rows], [1, None])
         self.assertEqual(rows[1]["s"], {"2": ["FIN", "SOV"]})
+        self.assertEqual([r.get("x") for r in rows], [{}, {"512": "FIN"}])   # all of them, only when changed
+        units = history.units_rows(history.active)   # all the first day, then the changed provinces (null: left)
+        self.assertEqual([(r.get("full"), sorted(r["u"])) for r in units], [(1, ["100", "200"]), (None, ["100", "200", "300"])])
+        self.assertEqual((units[1]["u"]["200"], units[1]["u"]["300"]), (None, {"SOV": [1, 45, 190, {"Rifle": 1}]}))
+        self.assertEqual(live.infra_days, [True, False])   # railways and buildings every INFRA_EVERY days
+        self.assertEqual(history.delta_rows("infra", history.active), [{"t": rows[0]["t"], "u": {"r1-2": 2, "b53": [0, 2, 0, 1]},
+                                                                         "full": 1}])

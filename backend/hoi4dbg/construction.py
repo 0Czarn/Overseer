@@ -23,8 +23,8 @@ def _strip(path: Path) -> str:
 
 @lru_cache(maxsize=2)
 def buildings(roots: tuple[str, ...]) -> dict[str, dict]:
-    """{building id: {"icon_frame": int or None, "provincial": bool (level cap per province)}}; later roots (mods)
-    override."""
+    """{building id: {"icon_frame": int or None, "provincial": bool (level cap per province), "shares_slots": bool (takes
+    one of the state's building slots: factories, dockyards, refineries...)}}; later roots (mods) override."""
     out: dict[str, dict] = {}
     for root in map(Path, roots):
         for path in sorted((Path(root) / "common" / "buildings").glob("*.txt")):
@@ -42,8 +42,9 @@ def buildings(roots: tuple[str, ...]) -> dict[str, dict]:
                     frame = values.get("icon_frame")
                     cap = values.get("level_cap")
                     provincial = isinstance(cap, list) and any(isinstance(i, tuple) and i[0] == "province_max" for i in cap)
+                    shares = isinstance(cap, list) and any(i == ("shares_slots", "yes") for i in cap if isinstance(i, tuple))
                     out[name] = {"icon_frame": int(frame) if isinstance(frame, str) and frame.isdigit() else None,
-                                 "provincial": provincial}
+                                 "provincial": provincial, "shares_slots": shares}
     return out
 
 
@@ -155,3 +156,106 @@ def factory_first_order(lines: list[dict], kind: str = "civ") -> list[int]:
 
 def civilian_first_order(lines: list[dict]) -> list[int]:
     return factory_first_order(lines, "civ")
+
+
+# -- forecast of the queue and where to build (2026-10-22, user's request) --------------------------------------
+FORECAST_DAYS = 730
+FORECAST_MARKS = (90, 180, 365)
+FACTORY_KINDS = {"industrial_complex": "civ", "arms_factory": "mil", "dockyard": "dock"}
+BASE_SPEED = 5.0   # construction points a day of one factory when no line shows the country's own speed
+
+
+def forecast(lines: list[dict], free: float, counts: dict[str, int], consumer_share: float = 0.0,
+             max_factories: int = 15, days: int = FORECAST_DAYS) -> dict:
+    """The queue played forward day by day at today's speeds: the free civilian factories go to the lines in queue
+    order (up to `max_factories` each), a line's speed per factory is its own today (else the mean of the working lines
+    for the same building, else of all), a finished level of a civilian factory adds a factory less its consumer goods
+    share, levels finish in turn and a finished line hands its factories to the next. Returns {"lines": [days until the
+    line is done or None], "levels": [[day of each level]], "factories": {mark: {"civ", "mil", "dock"}}} - a forecast:
+    new bonuses, consumer goods changes, trade and the player's changes of the queue are not known."""
+    per = [(l["speed"] / l["factories"]) if l.get("factories") and l.get("speed") else None for l in lines]
+    by_building: dict[str, list[float]] = {}
+    for l, v in zip(lines, per):
+        if v:
+            by_building.setdefault(l["building"], []).append(v)
+    known = [v for v in per if v]
+    mean = sum(known) / len(known) if known else BASE_SPEED
+    speed = [v or (sum(by_building[l["building"]]) / len(by_building[l["building"]]) if l["building"] in by_building else mean)
+             for l, v in zip(lines, per)]
+    left = [(l.get("levels") or 0) + (l.get("repair") or 0) for l in lines]
+    done = [l.get("produced") or 0.0 for l in lines]
+    finished = [0 if n <= 0 else None for n in left]
+    levels: list[list[int]] = [[] for _ in lines]
+    counts = dict(counts)
+    marks = {}
+    for day in range(1, days + 1):
+        pool = free
+        for i, l in enumerate(lines):
+            if left[i] <= 0 or pool < 1:
+                continue
+            n = min(max_factories, int(pool))
+            pool -= n
+            done[i] += n * speed[i]
+            while left[i] > 0 and l["cost"] and done[i] >= l["cost"]:
+                done[i] -= l["cost"]
+                left[i] -= 1
+                levels[i].append(day)
+                kind = FACTORY_KINDS.get(l["building"])
+                if kind and (l.get("levels") or 0) >= len(levels[i]) - (l.get("repair") or 0) > 0:
+                    counts[kind] = counts.get(kind, 0) + 1
+                    if kind == "civ":
+                        free += 1 - consumer_share
+            if left[i] <= 0:
+                finished[i] = day
+                done[i] = 0.0
+        if day in FORECAST_MARKS:
+            marks[day] = dict(counts)
+        if all(n <= 0 for n in left) and day >= max(FORECAST_MARKS):
+            break
+    for m in FORECAST_MARKS:   # an empty queue: nothing changes
+        marks.setdefault(m, dict(counts))
+    return {"lines": finished, "levels": levels, "factories": marks}
+
+
+def state_slots(roots) -> dict[str, int]:
+    """{state category: building slots} of common/state_category (game and mods, a later root wins)."""
+    out: dict[str, int] = {}
+    for root in map(Path, roots):
+        for path in sorted((root / "common" / "state_category").glob("*.txt")):
+            try:
+                items = text.parse(_strip(path))
+            except Exception:  # a broken mod file
+                continue
+            for key, block in items:
+                if key != "state_categories" or not isinstance(block, list):
+                    continue
+                for name, body in block:
+                    values = dict(i for i in body if isinstance(i, tuple)) if isinstance(body, list) else {}
+                    slots = values.get("local_building_slots")
+                    if isinstance(slots, str) and slots.lstrip("-").isdigit():
+                        out[name] = int(slots)
+    return out
+
+
+def where_to_build(states: list[dict], tag: str, slots: dict[str, int], defs: dict[str, dict],
+                   queued: dict[int, int] | None = None) -> list[dict]:
+    """States of `tag` where a factory can go, best first: owned and controlled, free building slots = the category's
+    slots - buildings sharing slots - levels already queued there (techs and state modifiers that add slots are not
+    counted), then higher infrastructure (faster construction of factories), cores before other states."""
+    queued = queued or {}
+    out = []
+    for st in states:
+        if st.get("owner") != tag or st.get("controller") != tag:
+            continue
+        total = slots.get(st.get("category") or "")
+        if total is None:
+            continue
+        used = sum(v for b, v in (st.get("buildings") or {}).items() if (defs.get(b) or {}).get("shares_slots"))
+        free = total - used - queued.get(st["id"], 0)
+        if free <= 0:
+            continue
+        out.append({"id": st["id"], "name": st.get("name"), "category": st.get("category"), "slots": total, "used": used,
+                    "queued": queued.get(st["id"], 0), "free": free,
+                    "infrastructure": (st.get("buildings") or {}).get("infrastructure", 0),
+                    "core": tag in (st.get("cores") or []), "resources": st.get("resources") or {}})
+    return sorted(out, key=lambda s: (-s["free"], -s["infrastructure"], not s["core"], s["id"]))

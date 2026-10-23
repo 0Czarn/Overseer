@@ -10,7 +10,8 @@ import { minutesText, wallText } from './summary-extra.js';
 export const REPORT_METRICS = [['icall', 'IC a day (military + naval + construction)', true], ['mil', 'Military IC a day', true],
   ['fall', 'Factories', false], ['divs', 'Divisions', false], ['mpall', 'Manpower', false], ['sctl', 'States controlled', false],
   ['vp', 'Victory points controlled', false], ['tech', 'Technologies researched', false], ['lall', 'IC of equipment lost', true],
-  ['lenemy', 'IC of enemy equipment destroyed', true], ['kd', 'Destroyed / lost', false], ['stab', 'Stability %', false],
+  ['lenemy', 'IC of enemy equipment destroyed', true], ['kd', 'Destroyed / lost', false],
+  ['mpl', 'Manpower lost in wars', true], ['mpk', 'Manpower the enemies lost', true], ['stab', 'Stability %', false],
   ['ws', 'War support %', false]];
 
 /** Text safe inside HTML. */

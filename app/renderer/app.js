@@ -19,6 +19,7 @@ import equipment from './views/equipment.js';
 import tools from './views/tools.js';
 import logs from './views/logs.js';
 import summary from './views/summary.js';
+import timeMachine from './views/time-machine.js';
 import actions from './views/actions.js';
 import { loadNavOrder, moveTab, orderTabs, saveNavOrder } from './lib/nav-order.js';
 import { mountEye, mountLogoEye } from './lib/eye.js';
@@ -28,7 +29,7 @@ import { tr } from './lib/i18n.js';
 import { startPlayersRail } from './lib/players-rail.js';
 import options from './views/options.js';
 
-const VIEWS = [dashboard, summary, actions, countries, countryEditor, research, construction, doctrines, stateEditor, focus, equipment, tools, logs, options];
+const VIEWS = [dashboard, summary, timeMachine, actions, countries, countryEditor, research, construction, doctrines, stateEditor, focus, equipment, tools, logs, options];
 const STATUS_INTERVAL_MS = 3000;
 const PREFS_KEY = 'hoi4dbg.prefs';
 
@@ -137,7 +138,7 @@ async function renderView() {
 // Sidebar icons (assets/texticons, from the mods Modifier Icons / Descriptive Icons) - the two-letter short name is
 // shown only for a view without one.
 const NAV_ICONS = {
-  dashboard: 'civilian_intel_texticon.png', summary: 'factory_output_modifier_texticon.png', actions: 'decision_icon_small.png',
+  dashboard: 'civilian_intel_texticon.png', summary: 'factory_output_modifier_texticon.png', 'time-machine': 'army_experience.png', actions: 'decision_icon_small.png',
   countries: 'ai_faction_texticon.png', 'country-editor': 'political_power_texticon.png', research: 'research_speed_texticon.png',
   construction: 'construction_speed_texticon.png', doctrines: 'divisions_texticon.png', 'state-editor': 'infrastructure_building_texticon.png',
   focus: 'decision_modifier_texticon.png', equipment: 'ai_military_equipment_texticon.png', tools: 'repairing.png',

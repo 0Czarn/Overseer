@@ -275,7 +275,8 @@ class DebuggerService:
         self.log = logger
         self.data_dir = data_dir
         self._last_detected: bool | None = None
-        self.ic_history = IcHistory(Path(data_dir or ".") / "ic-history")   # recorded campaigns (Game summary)
+        self.ic_history = IcHistory(Path(data_dir or ".") / "ic-history")
+        self._where_cache: tuple | None = None   # (game roots, {province: state name})   # recorded campaigns (Game summary)
         self.backgrounds = Backgrounds(Path(data_dir or ".") / "backgrounds")   # the user's images (Options)
         self.ic_recorder = None   # ic_history.IcRecorder when live access is on (started in __main__)
 
@@ -1287,9 +1288,53 @@ class DebuggerService:
             icons = {task: gfx.icon_data_uri(sprites[name]) if sprites.get(name) else None
                      for task, name in construction_mod.TASK_SPRITES.items()}
             factories = {**factories, "assigned": sum(row["factories"] for row in out), "icons": icons}
+        forecast = self._construction_forecast(tag, out, factories, roots, found.get("date"))
         return envelope(LIVE, {"tag": tag, "lines": out, "factories": factories, "construction_source": "live",
-                               "game_date": found.get("date")},
+                               "game_date": found.get("date"), "forecast": forecast},
                         "Construction queue from game memory.")
+
+    def _construction_forecast(self, tag: str, lines: list[dict], civil: dict | None, roots, today: dict | None) -> dict | None:
+        """The queue played forward (construction.forecast): each row gets "finish_days" / "finish" (when its last
+        level is done); {"now", 90, 180, 365: {"civ", "mil", "dock"}} factories, None without the factory counts."""
+        if not civil or not today:
+            return None
+        try:
+            fac = self.live.factories(tag)
+        except Exception:  # the queue is still shown
+            return None
+        counts = {"civ": fac["civilian"]["total"], "mil": fac["military"]["total"], "dock": fac["dockyards"]["total"]}
+        share = civil["consumer_goods"] / civil["total"] if civil.get("total") else 0.0
+        result = construction_mod.forecast(lines, civil["free"], counts, share, construction_mod.max_factories(roots))
+        for row, days in zip(lines, result["lines"]):
+            row["finish_days"] = days
+            row["finish"] = construction_mod.game_date_after(today, days) if days else None
+        return {"now": counts, **{str(k): v for k, v in result["factories"].items()},
+                "dates": {str(k): construction_mod.game_date_after(today, k)["text"] for k in construction_mod.FORECAST_MARKS}}
+
+    def construction_advice(self, tag: str) -> dict:
+        """Where `tag` can build factories (construction.where_to_build): its owned and controlled states with free
+        building slots (live states, state categories of the game and mods, levels already queued there)."""
+        tag = tag.upper()
+        install = self._install_path()
+        if install is None or self.live is None:
+            return envelope(UNAVAILABLE, None, "Needs the game installation and the running game")
+        states = self._states_live(None)
+        if not states["data"]:
+            return envelope(UNAVAILABLE, None, states["note"])
+        roots = self._game_roots(install)
+        defs = construction_mod.buildings(roots)
+        queued: dict[int, int] = {}
+        try:
+            for line in self.live.construction(tag)["lines"]:
+                if (defs.get(line["building"]) or {}).get("shares_slots") and line.get("levels"):
+                    queued[line.get("location")] = queued.get(line.get("location"), 0) + line["levels"]
+        except Exception:  # without the queue the slots are still known
+            pass
+        rows = construction_mod.where_to_build(states["data"], tag, construction_mod.state_slots(roots), defs, queued)
+        return envelope(LIVE, {"tag": tag, "states": rows[:40], "total": len(rows),
+                               "free": sum(r["free"] for r in rows)},
+                        "Free building slots of the state categories; slots added by technologies or state modifiers "
+                        "are not counted.")
 
     def construction_sort(self, apply: bool, kind: str = "civ") -> dict:
         """Player's construction queue with civilian ("civ") or military ("mil") factories closest to completion first
@@ -1858,15 +1903,10 @@ class DebuggerService:
             self.log.info("Game summary groups of %s: %d custom, %d moved", gid, len(groups["custom"]), len(groups["assign"]))
         return {"data": groups}
 
-    def summary_map(self, gid: str, raster: bool = False) -> dict:
-        """Campaign map of the Game summary (campaign_map.py): the recorded owner / controller rows of `gid` (changes per
-        day, ic_history.add_map), country colours and names, state names and victory points of the game and the mods
-        it runs with, the map's key - and with `raster` the state map itself (PNG data URI; the renderer keeps it by key)."""
-        try:
-            rows = self.ic_history.map_rows(gid)
-            game = self.ic_history.game(gid)
-        except (FileNotFoundError, ValueError):
-            raise NotFound(f"No recorded campaign {gid}") from None
+    def game_map(self, raster: bool = False) -> dict:
+        """The game's province map (campaign_map.py) for the Game summary and the State Editor: country colours and
+        names, state names and victory points of the game and the mods it runs with, the map's key - and with `raster`
+        the map itself (PNG data URI, kept by the renderer by key) and the state of each province."""
         install = self._install_path()
         if install is None:
             raise ReportError("The game installation was not found - the map comes from its files")
@@ -1876,14 +1916,193 @@ class DebuggerService:
         except (OSError, ValueError, ImportError) as exc:
             raise ReportError(f"The game's map could not be read: {exc}") from None
         loc = campaign_map.state_names(roots)
+        found = campaign_map.states(roots)
         states = {sid: {"name": loc.get(s["name_key"] or "") or s["name_key"] or f"State {sid}", "vp": s["vp"]}
-                  for sid, s in campaign_map.states(roots).items()}
-        out = {"id": gid, "rows": rows, "t": game["t"], "dates": game["dates"], "colors": campaign_map.country_colors(roots),
-               "names": gamefiles.country_names(install), "states": states,
+                  for sid, s in found.items()}
+        vps = {p: v for s in found.values() for p, v in s["vps"].items() if v > 0}
+        names = self._loc_names(install, {f"VICTORY_POINTS_{p}" for p in vps})
+        # [province id, victory points, name] of the cities (victory point provinces with a name), the largest first
+        cities = sorted(([p, v, clean_loc(names[f"VICTORY_POINTS_{p}"], names)] for p, v in vps.items()
+                         if names.get(f"VICTORY_POINTS_{p}")), key=lambda c: -c[1])
+        out = {"colors": campaign_map.country_colors(roots), "names": gamefiles.country_names(install), "states": states,
+               "cities": cities,
                "map": {"key": image["key"], "width": image["width"], "height": image["height"]}}
         if raster:
             out["map"]["png"] = "data:image/png;base64," + base64.b64encode(image["png"]).decode("ascii")
+            out["map"]["province_state"] = image["province_state"]
         return {"data": out}
+
+    def game_borders(self) -> dict:
+        """The province outlines of the game's map (campaign_map.borders, base64) - the sharp borders of the map when
+        zoomed in."""
+        install = self._install_path()
+        if install is None:
+            raise ReportError("The game installation was not found - the map comes from its files")
+        try:
+            out = campaign_map.borders(self._game_roots(install), Path(self.data_dir or ".") / "cache")
+        except (OSError, ValueError, ImportError) as exc:
+            raise ReportError(f"The game's map could not be read: {exc}") from None
+        return {"data": {"key": out["key"], "borders": base64.b64encode(out["data"]).decode("ascii")}}
+
+    def game_terrain(self) -> dict:
+        """Relief and rivers of the game's map (campaign_map.terrain) - the terrain under the colours of the map."""
+        install = self._install_path()
+        if install is None:
+            raise ReportError("The game installation was not found - the map comes from its files")
+        try:
+            return {"data": campaign_map.terrain(self._game_roots(install), Path(self.data_dir or ".") / "cache")}
+        except (OSError, ValueError, ImportError) as exc:
+            raise ReportError(f"The game's terrain could not be read: {exc}") from None
+
+    def summary_map(self, gid: str, raster: bool = False) -> dict:
+        """Campaign map of the Game summary: the recorded owner / controller rows of `gid` (changes per day,
+        ic_history.add_map) and the game's map (game_map)."""
+        try:
+            rows = self.ic_history.map_rows(gid)
+            game = self.ic_history.game(gid)
+            factions = self.ic_history.faction_rows(gid)
+        except (FileNotFoundError, ValueError):
+            raise NotFound(f"No recorded campaign {gid}") from None
+        players, last = [], None   # the player lists of the days they changed on
+        for t, p in zip(game["t"], game["players"]):
+            if p != last:
+                players.append([t, p])
+                last = p
+        return {"data": {"id": gid, "rows": rows, "t": game["t"], "dates": game["dates"], "factions": factions,
+                         "players": players, "groups": self.ic_history.groups(gid), **self.game_map(raster)["data"]}}
+
+    def summary_units(self, gid: str) -> dict:
+        """Division positions of a recorded campaign (ic_history.add_units rows) for the campaign map."""
+        try:
+            return {"data": {"id": gid, "rows": self.ic_history.units_rows(gid)}}
+        except ValueError:
+            raise NotFound(f"No recorded campaign {gid}") from None
+
+    def summary_infra(self, gid: str, kind: str = "infra") -> dict:
+        """Railways and province buildings ("infra") or moves and battles ("front") of a recorded campaign
+        (ic_history rows) for the campaign map."""
+        try:
+            return {"data": {"id": gid, "rows": self.ic_history.delta_rows(kind, gid)}}
+        except ValueError:
+            raise NotFound(f"No recorded campaign {gid}") from None
+
+    def summary_moment(self, gid: str, t: float) -> dict:
+        """The Time machine's game state: every country's recorded values (ic_history.METRICS) on the last recorded
+        day on or before `t` (days), the factions and players of that day, the country names."""
+        try:
+            game = self.ic_history.game(gid)
+        except FileNotFoundError:
+            raise NotFound(f"No recorded campaign {gid}") from None
+        i = max(0, sum(1 for d in game["t"] if d <= t) - 1)
+        countries = {tag: {k: v[i] for k, v in s.items() if i < len(v)} for tag, s in game["countries"].items()}
+        install = self._install_path()
+        factions = ic_history_mod.IcHistory.faction_rows(self.ic_history, gid)
+        faction = next((f for d, f in reversed(factions) if d <= t), {})
+        players = game.get("players") or []
+        return {"data": {"id": gid, "day": game["t"][i], "countries": countries, "factions": faction,
+                         "players": players[i] if i < len(players) else {},
+                         "names": gamefiles.country_names(install) if install else {}}}
+
+    def summary_divisions(self, gid: str, t: float) -> dict:
+        """Every division of a recorded campaign at time `t` (days; ic_history.delta_at): [{"id", "tag", "name",
+        "template", "pid", "to", "s": stats or None}] - the map's names and the Time machine's list."""
+        try:
+            state = self.ic_history.delta_at("divs", gid, t)
+        except ValueError:
+            raise NotFound(f"No recorded campaign {gid}") from None
+        where = self._province_states()
+        out = []
+        for key, v in state.items():
+            if key[0] != "n":
+                continue
+            k = key[1:]
+            pos = state.get(f"p{k}") or [0, 0]
+            out.append({"id": int(k), "tag": v[0], "name": v[1], "template": v[2], "pid": pos[0], "to": pos[1],
+                        "army": v[3] if len(v) > 3 else None, "leader": v[4] if len(v) > 4 else None,
+                        "where": where.get(pos[0]), "s": state.get(f"s{k}")})
+        return {"data": {"id": gid, "t": t, "divisions": out}}
+
+    def _province_states(self) -> dict[int, str]:
+        """{province id: name of its state} of the game and its mods (the Time machine's division locations)."""
+        install = self._install_path()
+        if install is None:
+            return {}
+        roots = self._game_roots(install)
+        if self._where_cache and self._where_cache[0] == roots:
+            return self._where_cache[1]
+        try:
+            loc = campaign_map.state_names(roots)
+            out = {p: loc.get(s["name_key"] or "") or s["name_key"] or f"State {sid}"
+                   for sid, s in campaign_map.states(roots).items() for p in s["provinces"]}
+        except OSError:
+            out = {}
+        self._where_cache = (roots, out)
+        return out
+
+    def summary_division(self, gid: str, did: int) -> dict:
+        """One division of a recorded campaign: "history" [[time (days), "n" | "p" | "s" | "e", value]] (its rows),
+        its templates over time ({"<tag>|<name>": [[time, definition]]}), equipment needed and manpower of the
+        template's sub-units (game files), the designer's stats of the template when it is in the running game now,
+        the battles where it stood or attacked ([time, province, battle])."""
+        try:
+            hist = self.ic_history.key_history("divs", gid, [f"{p}{did}" for p in "npse"])
+            front = self.ic_history.delta_rows("front", gid)
+            tmpl_rows = self.ic_history.delta_rows("tmpl", gid)
+        except ValueError:
+            raise NotFound(f"No recorded campaign {gid}") from None
+        if not hist:
+            raise NotFound(f"No division {did} recorded in {gid}")
+        names = {v[0]: v[1] for _t, k, v in hist if k == "n" and v}
+        keys = {f"{v[0]}|{v[2]}" for _t, k, v in hist if k == "n" and v}
+        templates = {key: [[ic_history_mod.row_time(r), r["u"][key]] for r in tmpl_rows if key in r["u"]] for key in keys}
+        place: list = []   # (time, province, attacking into)
+        for t, k, v in hist:
+            if k == "p":
+                place.append((t, v[0] if v else None, v[1] if v else None))
+        battles = []
+        for r in front:
+            when = ic_history_mod.row_time(r)
+            at = next((p for p in reversed(place) if p[0] <= when), None)
+            if not at or at[1] is None:
+                continue
+            for key, b in r["u"].items():
+                if key[0] == "c" and b and int(key[1:]) in (at[1], at[2]):
+                    battles.append([when, int(key[1:]), b])
+        out = {"id": did, "history": hist, "templates": templates, "battles": battles}
+        install = self._install_path()
+        if install is not None:
+            try:
+                tabs = divisions_mod.tables(self._game_roots(install))["units"]
+                out["units"] = {u: {"need": tabs[u]["need"], "manpower": tabs[u]["stats"].get("manpower", 0)}
+                                for key in keys for _t, d in templates[key] for u in (d["b"] or []) + (d["s"] or [])
+                                + (d["r"] or []) if u in tabs}
+            except Exception as exc:  # broken game files: the division without its needs
+                self.log.info("Unit tables unavailable: %s", exc)
+            held = {t for _t, k, v in hist if k == "e" and v for t in v}
+            try:
+                archetypes = deficit.tables(install, [Path(r) for r in self._game_roots(install)[1:]])[1]
+            except Exception:  # noqa: BLE001 - the types stay as they are
+                archetypes = {}
+            out["archetype"] = {t: deficit.archetype_of(t, archetypes) for t in held}
+            ids = set(out.get("units", {})) | set(out["archetype"].values())
+            loc = self._loc_names(install, ids | {f"{i}_short" for i in ids})
+            out["labels"] = {i: clean_loc(loc[i], loc) for i in ids if loc.get(i)}
+            out["designer"] = self._live_designer(names, keys)
+        return {"data": out}
+
+    def _live_designer(self, names: dict, keys: set) -> dict:
+        """{"<tag>|<template>": designer stats} of the templates the running game has now (military)."""
+        out = {}
+        for tag in {k.split("|")[0] for k in keys}:
+            try:
+                found = self.military(tag)
+            except Exception:  # noqa: BLE001 - the game not running
+                continue
+            for t in ((found.get("data") or {}).get("army") or {}).get("templates") or []:
+                key = f"{tag}|{t['name']}"
+                if key in keys and t.get("designer"):
+                    out[key] = t["designer"]
+        return out
 
     def summary_notes(self, gid: str, data=None) -> dict:
         """The user's notes on a campaign's timeline; with `data` {"t", "text", "id"?} one is added, changed or (an

@@ -55,7 +55,7 @@ class FakeLive:
     def ensure_combat_log_patch(self):
         pass
 
-    def ic_snapshot(self, with_factions):
+    def ic_snapshot(self, with_factions, with_infra=False):
         return {"t": self.t, "player": "POL", "countries": {"POL": [1.0, 0, 0, 1, 1, 0, 0, 0, 0]}, "factions": None}
 
 
