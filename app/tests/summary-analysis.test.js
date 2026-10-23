@@ -152,7 +152,8 @@ test('fog of war: the provinces held and their land neighbours; markers per stat
   assert.deepEqual([...seenProvinces(map, [1])].sort(), [1, 2]);
   const units = [{ pid: 1, key: 'GER', color: [1, 2, 3], count: 2 }, { pid: 2, key: 'GER', color: [1, 2, 3], count: 1 }];
   assert.deepEqual(unitMarkers(map, units, 0.2).map((m) => [m.count, m.x]), [[3, 2]]);   // state 1: both provinces
-  assert.equal(unitMarkers(map, units, 1).length, 2);
+  assert.equal(unitMarkers(map, units, 1).length, 1);   // still per state at 100% (wide counters)
+  assert.equal(unitMarkers(map, units, 2).length, 2);
 });
 
 test('map outlines: decoded from the backend binary, each border smoothed the same both ways', async () => {
@@ -246,4 +247,24 @@ test('border strength scales the opacity of the state and province lines', async
   assert.equal(strengthen('rgba(0, 0, 0, .6)', 4), 'rgba(0, 0, 0, 1.000)');   // up to opaque
   assert.equal(strengthen('rgb(12, 12, 12)', 3), 'rgb(12, 12, 12)');
   assert.ok(BORDER_STRENGTH[0] < 1 && BORDER_STRENGTH[1] > 1);
+});
+
+test('division counters: kind, organisation and strength against the best seen, battles and moves', async () => {
+  const { unitReference, counterOf } = await import('../renderer/views/summary-map.js');
+  const { unitMarkers } = await import('../renderer/lib/mapview.js');
+  const rows = [{ t: 1, full: 1, u: { 5: { GER: [2, 60, 100, { Inf: 2 }] }, 6: { GER: [1, 30, 50, { Pz: 1 }] } } },
+    { t: 2, u: { 5: { GER: [3, 40, 80, { Inf: 2, Pz: 1 }] }, 6: null } }];
+  const ref = unitReference(rows);
+  assert.deepEqual(ref.tpl.get('GER|Inf'), [60, 100]);
+  assert.deepEqual(ref.tag.get('GER'), [60, 100]);
+  const kinds = { 'GER|Inf': 'infantry', 'GER|Pz': 'armor' };
+  const c = counterOf('GER', [3, 40, 80, { Inf: 2, Pz: 1 }], kinds, ref);
+  assert.equal(c.kind, 'infantry');                       // 2 of 3
+  assert.equal(c.org, 40 / ((60 * 2 + 30) / 3));          // against the templates' best, weighted
+  assert.equal(counterOf('GER', [1, 99, 999, { X: 1 }], null, ref).org, 1);   // capped; unknown template: the country's
+  assert.equal(counterOf('ITA', [1, 10, 10, {}], null, ref).org, null);
+  const map = { provState: Uint16Array.from([0, 1, 1]), prov: { count: [0, 10, 10], sx: [0, 10, 30], sy: [0, 10, 10] } };
+  const [m] = unitMarkers(map, [{ pid: 1, key: 'GER', color: [1, 1, 1], count: 1, kind: 'armor', org: 1, str: 0.5, fight: true },
+    { pid: 2, key: 'GER', color: [1, 1, 1], count: 3, kind: 'infantry', org: 0.5, str: null, moving: true }], 0.2);
+  assert.deepEqual([m.count, m.kind, m.org, m.str, m.fight, m.moving], [4, 'infantry', 0.625, 0.5, true, true]);
 });

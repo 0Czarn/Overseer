@@ -1983,6 +1983,21 @@ class DebuggerService:
         except ValueError:
             raise NotFound(f"No recorded campaign {gid}") from None
 
+    def summary_unit_kinds(self, gid: str) -> dict:
+        """{"<tag>|<template>": kind (divisions.KINDS)} of every template recorded in a campaign (its newest line
+        battalions) - the division counters of the campaign map."""
+        try:
+            rows = self.ic_history.delta_rows("tmpl", gid)
+        except ValueError:
+            raise NotFound(f"No recorded campaign {gid}") from None
+        kinds: dict[str, str] = {}
+        for r in rows:
+            for key, tpl in (r.get("u") or {}).items():
+                kind = divisions_mod.unit_kind(tpl.get("b") or []) if tpl else None
+                if kind:
+                    kinds[key] = kind
+        return {"data": {"id": gid, "kinds": kinds}}
+
     def summary_infra(self, gid: str, kind: str = "infra") -> dict:
         """Railways and province buildings ("infra") or moves and battles ("front") of a recorded campaign
         (ic_history rows) for the campaign map."""

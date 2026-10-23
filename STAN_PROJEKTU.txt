@@ -1048,6 +1048,16 @@ DO ZROBIENIA (w tej kolejności)
             KONTROLA (2026-10-23): testy py 342 OK, js 118 OK. Smoke: działa na profilu użytkownika - zwinięte kafelki
                 ukrywały sloty badań; teraz smoke na czas testu rozwija wszystko (hoi4dbg.collapsed) i przywraca na końcu.
                 Bez gry zostają 2 błędy smoke (Research: sloty na żywo, Army/Air/Navy: Compare) - wymagają działającej gry.
+[x] LICZNIKI DYWIZJI JAK W HOI4 (2026-10-23, prośba użytkownika; odpowiedzi: licznik jak w grze, rodzaj wojsk, paski
+            org. i siły, walka / ruch, oddalenie zbiorczo na stan): plakietka w kolorze państwa, symbol NATO rodzaju (X
+            piechota, owal pancerne, owal+X zmech., X+koło zmot., / kawaleria, X+szczyt górskie, X+fala piechota morska,
+            X+czasza spadochroniarze, zygzak milicja, kropka artyleria), liczba dywizji, paski organizacji (zielony) i
+            siły (złoty); czerwona poświata w bitwie, przerywana biała ramka w ruchu / ataku (z Front). Rodzaj:
+            divisions.unit_kind z nazw batalionów szablonu (pancerne / zmech. od 1/3 batalionów, reszta: najczęstszy),
+            GET /api/summary/games/<id>/unit-kinds. Paski względem najlepszej organizacji / siły szablonu widzianej w
+            kampanii (nagranie nie ma maksimum - przybliżenie; dymek: % obok wartości). Zbiorczo na stan poniżej 150%
+            (wcześniej 50%: liczniki są szersze). Nagrania GER / ICE: 221 szablonów, 129 piechota, 50 kawaleria,
+            18 górskie, 10 pancerne. Testy py 366 / js 131; smoke (ICE): bez nowych błędów.
 [x] MAPA: STRZAŁKI DNI I SIŁA GRANIC (2026-10-23, prośba użytkownika): przyciski ◀ ▶ obok daty i klawisze ← → (Home /
             End: pierwszy / ostatni krok; po kliknięciu mapy) - poprzedni / następny zapisany krok suwaka. Borders: − suwak +
             (×0,5-×4, zapamiętane): grubość i krycie linii stanów i prowincji z konturów, przyciemnienie w widoku

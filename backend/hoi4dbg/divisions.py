@@ -279,3 +279,43 @@ def template_stats(template: dict, tabs: dict, equipment: dict[str, dict], mods:
     out["reliability"] = sum(rel) / len(rel) if rel else None
     missing = sorted({a for u in ids for a in units[u]["need"] if a not in equipment})
     return {"stats": out, "missing_equipment": missing}
+
+
+# The kind of a division for its counter on the campaign map (2026-10-23, user's request: counters like the game's
+# instead of a square with a number): from the names of its line battalions (common/units names, vanilla and the mods
+# that keep the usual words), the first rule that matches; a template is armour / mechanised from a third of its
+# battalions (tank divisions carry motorised infantry), else the most common kind (ties: the earlier one in KINDS).
+UNIT_KINDS = (
+    ("armor", re.compile(r"armor|armour|tank|panzer")),
+    ("mechanized", re.compile(r"mechani[sz]ed|^mech_|amtrac")),
+    ("motorized", re.compile(r"motori[sz]ed|^mot_|armored_car|truck")),
+    ("cavalry", re.compile(r"cavalry|camel|horse")),
+    ("mountain", re.compile(r"mountain")),
+    ("marine", re.compile(r"marine")),
+    ("paratrooper", re.compile(r"paratroop|airborne")),
+    ("militia", re.compile(r"militia|irregular|partisan")),
+    ("artillery", re.compile(r"artillery|anti_air|anti_tank|rocket|howitzer")),
+)
+KINDS = ("infantry",) + tuple(k for k, _ in UNIT_KINDS)
+HEAVY = ("armor", "mechanized")
+
+
+def battalion_kind(name: str) -> str:
+    name = (name or "").lower()
+    return next((kind for kind, rule in UNIT_KINDS if rule.search(name)), "infantry")
+
+
+def unit_kind(battalions: list[str]) -> str | None:
+    """The kind (KINDS) of a template of line battalions `battalions`, None without any."""
+    counts: dict[str, int] = {}
+    for b in battalions or []:
+        if b:
+            k = battalion_kind(b)
+            counts[k] = counts.get(k, 0) + 1
+    total = sum(counts.values())
+    if not total:
+        return None
+    for heavy in HEAVY:
+        if counts.get(heavy, 0) * 3 >= total:
+            return heavy
+    return max(KINDS, key=lambda k: (counts.get(k, 0), -KINDS.index(k)))

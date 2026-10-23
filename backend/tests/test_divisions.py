@@ -126,3 +126,34 @@ class DesignBonusTests(unittest.TestCase):
         self.assertEqual((stats["hard_attack"], stats["breakthrough"], stats["ap_attack"], stats["armor_value"]), (73.92, 53.625, 143.75, 103))
         self.assertEqual((stats["supply_consumption"], stats["suppression"]), (0.3, 1.25))
         self.assertEqual(add, {"ap_attack": 0.15, "hard_attack": 0.5})   # breakthrough: -0.25 own + 0.25 = no change
+
+
+class UnitKindTests(unittest.TestCase):
+    """The kind of a template for the campaign map's division counters."""
+
+    def test_kinds_of_real_templates(self):
+        k = divisions.unit_kind
+        self.assertEqual(k(["light_armor"] * 4 + ["motorized"] * 2), "armor")   # GER Panzer-Division 1936
+        self.assertEqual(k(["infantry"] * 9), "infantry")
+        self.assertEqual(k(["cavalry"] * 4), "cavalry")
+        self.assertEqual(k(["mountaineers"] * 6), "mountain")
+        self.assertEqual(k(["motorized"] * 6), "motorized")
+        self.assertEqual(k(["mechanized"] * 3 + ["infantry"] * 6), "mechanized")   # a third
+        self.assertEqual(k(["militia", "irregular_infantry"]), "militia")
+        self.assertEqual(k(["marine", "marine", "infantry"]), "marine")
+        self.assertEqual(k(["infantry", "cavalry"]), "infantry")   # a tie: the earlier kind
+        self.assertIsNone(k([]))
+        self.assertIsNone(k([None]))
+
+    def test_kinds_of_a_recorded_campaign(self):
+        from hoi4dbg.service import NotFound
+
+        from helpers import make_service
+        svc = make_service(Path(tempfile.mkdtemp()))
+        history = svc.ic_history
+        gid = history.add({"t": 706640, "player": "GER", "countries": {"GER": [1.0, 0.0, 2.0]}})
+        history.add_delta("tmpl", gid, 706640, {"GER|Inf": {"b": ["infantry"] * 9}, "GER|Pz": {"b": ["light_armor"] * 4}}, True)
+        history.add_delta("tmpl", gid, 706650, {"GER|Inf": None}, False)   # gone: the kind seen before stays
+        self.assertEqual(svc.summary_unit_kinds(gid)["data"]["kinds"], {"GER|Inf": "infantry", "GER|Pz": "armor"})
+        with self.assertRaises(NotFound):
+            svc.summary_unit_kinds("../x")

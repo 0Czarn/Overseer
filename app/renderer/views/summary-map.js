@@ -7,7 +7,7 @@
 // country (a counter per province, per state when zoomed out) and an approximate fog of war from a country's view.
 import { card, h, notice } from '../lib/dom.js';
 import { dayText } from '../lib/linechart.js';
-import { BORDER_STRENGTH, TERRAIN_STYLES, loadMap, mapView, placeLabels, provinceCentre, rgb, seenProvinces, terrainSwatch } from '../lib/mapview.js';
+import { BORDER_STRENGTH, KIND_NAMES, TERRAIN_STYLES, loadMap, mapView, placeLabels, provinceCentre, rgb, seenProvinces, terrainSwatch } from '../lib/mapview.js';
 import { numberLocale } from '../lib/options.js';
 import { divisionCard, dropDivisions } from './division-card.js';
 
@@ -102,6 +102,48 @@ export function unitsAt(rows, t) {
     }
   }
   return out;
+}
+
+/** The best mean organisation and strength seen in the division rows (a full division - the recording has no maximum):
+ * {tpl: Map "<tag>|<template>" -> [org, strength] (provinces with that template only), tag: Map tag -> [org, strength]}. */
+export function unitReference(rows) {
+  const tpl = new Map();
+  const tag = new Map();
+  const up = (m, k, org, str) => {
+    const v = m.get(k);
+    if (!v) m.set(k, [org, str]);
+    else { v[0] = Math.max(v[0], org); v[1] = Math.max(v[1], str); }
+  };
+  for (const r of rows) {
+    for (const byTag of Object.values(r.u)) {
+      if (!byTag) continue;
+      for (const [t, [, org, str, templates]] of Object.entries(byTag)) {
+        up(tag, t, org, str);
+        const names = Object.keys(templates ?? {});
+        if (names.length === 1) up(tpl, `${t}|${names[0]}`, org, str);
+      }
+    }
+  }
+  return { tpl, tag };
+}
+
+/** {kind, org, str} of a province's divisions of `tag` (entry [divisions, organisation, strength, {template: n}]): the
+ * kind most of them are (`kinds`: summary_unit_kinds, null: not known), organisation and strength as shares 0..1 of the
+ * best seen for their templates (unitReference; null: not known). */
+export function counterOf(tag, [count, org, str, templates], kinds, ref) {
+  const byKind = {};
+  let refOrg = 0;
+  let refStr = 0;
+  let known = 0;
+  for (const [name, n] of Object.entries(templates ?? {})) {
+    const kind = kinds?.[`${tag}|${name}`];
+    if (kind) byKind[kind] = (byKind[kind] ?? 0) + n;
+    const best = ref?.tpl.get(`${tag}|${name}`) ?? ref?.tag.get(tag);
+    if (best) { refOrg += best[0] * n; refStr += best[1] * n; known += n; }
+  }
+  const kind = Object.entries(byKind).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  const share = (v, best) => (best > 0 ? Math.max(0, Math.min(1, v / best)) : null);
+  return { kind, org: known ? share(org, refOrg / known) : null, str: known ? share(str, refStr / known) : null, count };
 }
 
 /** The countries a country sees with: itself, its faction that day and its subjects. */
@@ -202,6 +244,8 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
   let index = -1;       // day shown
   let unitRows = [];    // division positions (ic_history.add_units)
   let units = {};       // divisions of the day shown
+  let unitKinds = null; // "<tag>|<template>" -> kind (GET .../unit-kinds), the counters' symbols
+  let unitRef = unitReference([]);   // the best organisation and strength seen (the counters' bars)
   let infraRows = [];   // railways and province buildings (ic_history "infra")
   let built = {};       // province -> [supply hub, naval base, fort, coastal fort] of the day shown
   let frontRows = [];   // moves and battles (ic_history "front")
@@ -310,10 +354,13 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
     });
     const markers = [];
     if (prefs.units) {
+      const moving = new Set();   // "<province>|<tag>" of the divisions moving or attacking out of a province
+      for (const [k, v] of Object.entries(fighting)) if (k[0] === 'm') for (const tag of Object.keys(v)) moving.add(`${k.slice(1).split('-')[0]}|${tag}`);
       for (const [pid, byTag] of Object.entries(units)) {
         if (visible && !visible.has(Number(pid))) continue;
         for (const [tag, entry] of Object.entries(byTag)) {
-          markers.push({ pid: Number(pid), key: area(tag), color: colorOf(tag) ?? [110, 108, 104], count: entry[0] });
+          markers.push({ pid: Number(pid), key: area(tag), color: colorOf(tag) ?? [110, 108, 104],
+            ...counterOf(tag, entry, unitKinds, unitRef), fight: !!battles[pid], moving: moving.has(`${pid}|${tag}`) });
         }
       }
     }
@@ -373,11 +420,15 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
       group, state.vp ? h('div', { class: 'muted' }, `Victory points: ${state.vp}`) : null,
       buildings.length ? h('div', null, buildings.join(' · ')) : null,
       seen && battles[hit.pid] ? h('div', { class: 'bad-text' }, battleText(battles[hit.pid])) : null,
-      ...here.map(([tag, [count, org, strength, templates]]) => {
+      ...here.map(([tag, entry]) => {
+        const [count, org, strength, templates] = entry;
         const names = named.filter((d) => d.tag === tag).map((d) => d.name ?? `Division ${d.id}`);
+        const c = counterOf(tag, entry, unitKinds, unitRef);
+        const pct = (v) => (v == null ? '' : ` (${Math.round(100 * v)}%)`);
         return h('div', { class: 'gs-map-units' },
           h('strong', null, `${tag}: ${count} ${count === 1 ? 'division' : 'divisions'}`),
-          ` · organisation ${org} · strength ${strength}`,
+          c.kind ? ` · ${KIND_NAMES[c.kind] ?? c.kind}` : '',
+          ` · organisation ${org}${pct(c.org)} · strength ${strength}${pct(c.str)}`,
           names.length ? h('div', { class: 'gs-map-names' }, names.slice(0, 8).map((n) => h('div', null, n)),
             names.length > 8 ? h('div', { class: 'muted' }, `+${names.length - 8} more`) : null)
             : h('div', { class: 'muted' }, Object.entries(templates).map(([n, c]) => `${n} ×${c}`).join(', ')));
@@ -439,8 +490,12 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
         + 'chart above (your moves included); Players: with '
         + 'their subjects when the chart includes them. Chart colours: the colour of each line shown in the chart, the '
         + 'game\'s colour for the rest. City names show more the closer you zoom. Units: the divisions of every country '
-        + '(from 2026-10-23) - a counter per province, per state when zoomed out; hover for their templates, organisation '
-        + 'and strength. Fog of war: only what the chosen country, its faction and subjects hold and the provinces next '
+        + '(from 2026-10-23) - a counter per province from 150% zoom, per state below: the NATO symbol of the kind most of them '
+        + 'are (from their templates: X infantry, oval armour, oval with X mechanised, X with a wheel motorised, / cavalry, '
+        + 'X with a peak mountain, X with a wave marines, X with a canopy paratroopers, zigzag militia, dot artillery), the '
+        + 'number of divisions and the bars of organisation (green) and strength (gold) against the best seen for their '
+        + 'templates in this campaign; a red glow: in a battle, a dashed white edge: moving or attacking (with Front '
+        + 'on). Hover for their templates, organisation and strength. Fog of war: only what the chosen country, its faction and subjects hold and the provinces next '
         + 'to it - an approximation (the game also counts intelligence, radar, planes and ships). Terrain: the relief and '
         + 'the rivers of the game map (wider rivers from further away); from 100% the borders are drawn as smooth lines. '
         + 'Terrain types: each province as the game counts it in battle (map/definition.csv) - a tint, and symbols '
@@ -543,6 +598,12 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
       unitRows = (await ctx.api.get(`/api/summary/games/${encodeURIComponent(gid)}/units`)).data.rows;
     } catch {
       unitRows = [];   // the map still works without them
+    }
+    unitRef = unitReference(unitRows);
+    try {
+      unitKinds = (await ctx.api.get(`/api/summary/games/${encodeURIComponent(gid)}/unit-kinds`)).data.kinds;
+    } catch {
+      unitKinds = null;   // counters without the kind symbol
     }
   }
 

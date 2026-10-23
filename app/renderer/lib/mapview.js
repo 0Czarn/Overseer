@@ -292,10 +292,13 @@ export function seenProvinces(map, own) {
   return seen;
 }
 
-/** Division markers of a zoom: one per province and country key, or per state when zoomed out (< 0.5).
- * units: [{pid, key, color, count}] -> [{x, y, key, color, count}]. */
+/** Division markers of a zoom: one per province and country key, or per state when zoomed out (< UNITS_PER_PROVINCE;
+ * the counters with a symbol and bars are wider than the earlier squares, which went per state below 0.5).
+ * units: [{pid, key, color, count, kind?, org?, str?, fight?, moving?}] -> [{x, y, key, color, count, kind (the one of
+ * most divisions, null: not known), org, str (shares 0..1 weighted by divisions, null: not known), fight, moving}]. */
+export const UNITS_PER_PROVINCE = 1.5;
 export function unitMarkers(map, units, z) {
-  const perState = z < 0.5;
+  const perState = z < UNITS_PER_PROVINCE;
   const groups = new Map();
   for (const u of units) {
     const c = map.prov.count[u.pid];
@@ -303,12 +306,58 @@ export function unitMarkers(map, units, z) {
     const where = perState ? `s${map.provState[u.pid]}` : `p${u.pid}`;
     const id = `${where}|${u.key}`;
     let g = groups.get(id);
-    if (!g) { g = { key: u.key, color: u.color, count: 0, sx: 0, sy: 0, n: 0 }; groups.set(id, g); }
+    if (!g) {
+      g = { key: u.key, color: u.color, count: 0, sx: 0, sy: 0, n: 0, kinds: {}, org: [0, 0], str: [0, 0], fight: false, moving: false };
+      groups.set(id, g);
+    }
     g.count += u.count;
     g.sx += map.prov.sx[u.pid]; g.sy += map.prov.sy[u.pid]; g.n += c;
+    if (u.kind) g.kinds[u.kind] = (g.kinds[u.kind] ?? 0) + u.count;
+    if (u.org != null) { g.org[0] += u.org * u.count; g.org[1] += u.count; }
+    if (u.str != null) { g.str[0] += u.str * u.count; g.str[1] += u.count; }
+    g.fight ||= !!u.fight;
+    g.moving ||= !!u.moving;
   }
-  return [...groups.values()].map((g) => ({ x: g.sx / g.n, y: g.sy / g.n, key: g.key, color: g.color, count: g.count }));
+  return [...groups.values()].map((g) => ({ x: g.sx / g.n, y: g.sy / g.n, key: g.key, color: g.color, count: g.count,
+    kind: Object.entries(g.kinds).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
+    org: g.org[1] ? g.org[0] / g.org[1] : null, str: g.str[1] ? g.str[0] / g.str[1] : null,
+    fight: g.fight, moving: g.moving }));
 }
+
+/** The NATO symbol of a division kind (divisions.KINDS) in the box x, y, w, h (one `s` = a screen pixel). */
+export function natoSymbol(g, kind, x, y, w, h, s) {
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const cross = () => { g.moveTo(x, y); g.lineTo(x + w, y + h); g.moveTo(x + w, y); g.lineTo(x, y + h); };
+  const oval = () => { g.moveTo(cx + w * 0.3, cy); g.ellipse(cx, cy, w * 0.3, h * 0.28, 0, 0, Math.PI * 2); };
+  g.beginPath();
+  switch (kind) {
+    case 'armor': oval(); break;
+    case 'mechanized': cross(); oval(); break;
+    case 'motorized':   // infantry with a wheel at the foot
+      cross();
+      g.moveTo(cx + 1.3 * s, y + h - 1.6 * s); g.arc(cx, y + h - 1.6 * s, 1.3 * s, 0, Math.PI * 2);
+      break;
+    case 'cavalry': g.moveTo(x, y + h); g.lineTo(x + w, y); break;
+    case 'mountain': cross(); break;   // + a peak, filled below
+    case 'marine': cross(); g.moveTo(x + w * 0.2, y + h * 0.82); g.quadraticCurveTo(cx, y + h * 0.55, x + w * 0.8, y + h * 0.82); break;
+    case 'paratrooper': cross(); g.moveTo(x + w * 0.25, y + h * 0.3); g.quadraticCurveTo(cx, y - h * 0.05, x + w * 0.75, y + h * 0.3); break;
+    case 'militia': g.moveTo(x + w * 0.2, y + h * 0.75); g.lineTo(x + w * 0.35, y + h * 0.25); g.lineTo(cx, y + h * 0.6);
+      g.lineTo(x + w * 0.65, y + h * 0.25); g.lineTo(x + w * 0.8, y + h * 0.75); break;
+    case 'artillery': g.moveTo(cx + 2 * s, cy); g.arc(cx, cy, 2 * s, 0, Math.PI * 2); break;
+    case 'infantry': cross(); break;
+    default: break;   // not known: the empty box
+  }
+  g.stroke();
+  if (kind === 'artillery') g.fill();
+  if (kind === 'mountain') {
+    g.beginPath(); g.moveTo(cx - 2.2 * s, y + h); g.lineTo(cx, y + h - 2.6 * s); g.lineTo(cx + 2.2 * s, y + h); g.closePath(); g.fill();
+  }
+}
+
+export const KIND_NAMES = { infantry: 'Infantry', armor: 'Armour', mechanized: 'Mechanised', motorized: 'Motorised',
+  cavalry: 'Cavalry', mountain: 'Mountain', marine: 'Marines', paratrooper: 'Paratroopers', militia: 'Militia',
+  artillery: 'Artillery' };
 
 /** Name labels of the land of each key: `keyOf(sid)` -> a key or null, `textOf(key)` -> its name or null. A key's land
  * splits into pieces of neighbouring states; the piece with the most victory points (`vpOf(sid)`: the capital, not the
@@ -858,21 +907,75 @@ export function mapView(map, zoomId, { onHover, onClick } = {}) {
     if (z >= 0.7) paintMarks(g, z, labelSet.marks ?? [], inside);
     paintBattles(g, z, labelSet.battles ?? [], inside);
     g.font = `700 ${(10 / z).toFixed(2)}px "Segoe UI", system-ui, sans-serif`;
-    for (const m of unitMarkers(map, labelSet.units ?? [], z)) {   // a counter with the number of divisions
-      if (!inside(m.x, m.y, 20 / z)) continue;
-      const text = String(m.count);
-      const w = Math.max(16 / z, g.measureText(text).width + 8 / z);
-      const hgt = 14 / z;
-      g.fillStyle = `rgb(${m.color.join(',')})`;
-      g.strokeStyle = 'rgba(0, 0, 0, .85)';
-      g.lineWidth = 1.5 / z;
-      g.beginPath();
-      g.roundRect(m.x - w / 2, m.y - hgt / 2, w, hgt, 3 / z);
-      g.fill();
-      g.stroke();
-      const light = m.color[0] * 0.299 + m.color[1] * 0.587 + m.color[2] * 0.114 > 150;
-      g.fillStyle = light ? '#111' : '#fff';
-      g.fillText(text, m.x, m.y + 0.5 / z);
+    for (const m of unitMarkers(map, labelSet.units ?? [], z)) paintCounter(g, z, m, inside);
+  }
+
+  /** A division counter like the game's (2026-10-23, user's request): a plate in the country's colour with the NATO
+   * symbol of the kind and the number of divisions, under it the organisation (green) and strength (gold) bars;
+   * a red glow in a battle, a dashed white edge when moving or attacking. */
+  function paintCounter(g, z, m, inside) {
+    const s = 1 / z;
+    if (!inside(m.x, m.y, 30 * s)) return;
+    const text = String(m.count);
+    const textW = g.measureText(text).width;
+    const w = 22 * s + textW;
+    const plateH = 15 * s;
+    const bars = m.org != null || m.str != null;
+    const hgt = plateH + (bars ? 6 * s : 0);
+    const x0 = m.x - w / 2;
+    const top = m.y - hgt / 2;
+    if (m.fight) {   // the glow's blur is in screen pixels
+      g.save();
+      g.shadowColor = 'rgba(255, 40, 30, .95)';
+      g.shadowBlur = 9;
+      g.strokeStyle = 'rgb(235, 40, 30)';
+      g.lineWidth = 2.4 * s;
+      g.strokeRect(x0 - 1.5 * s, top - 1.5 * s, w + 3 * s, hgt + 3 * s);
+      g.restore();
+    }
+    if (m.moving) {
+      g.save();
+      g.setLineDash([3 * s, 2 * s]);
+      g.strokeStyle = 'rgba(255, 255, 255, .95)';
+      g.lineWidth = 1.4 * s;
+      const out = m.fight ? 4 * s : 1.8 * s;
+      g.strokeRect(x0 - out, top - out, w + 2 * out, hgt + 2 * out);
+      g.restore();
+    }
+    g.fillStyle = `rgb(${m.color.join(',')})`;
+    g.strokeStyle = 'rgba(0, 0, 0, .9)';
+    g.lineWidth = 1.2 * s;
+    g.beginPath();
+    g.rect(x0, top, w, hgt);
+    g.fill();
+    g.stroke();
+    const bx = x0 + 2.5 * s;   // the symbol's box
+    const by = top + 2.5 * s;
+    const bw = 14 * s;
+    const bh = 10 * s;
+    g.fillStyle = 'rgba(250, 248, 240, .95)';
+    g.fillRect(bx, by, bw, bh);
+    g.strokeStyle = '#151515';
+    g.fillStyle = '#151515';
+    g.lineWidth = 1.1 * s;
+    g.strokeRect(bx, by, bw, bh);
+    natoSymbol(g, m.kind, bx, by, bw, bh, s);
+    const light = m.color[0] * 0.299 + m.color[1] * 0.587 + m.color[2] * 0.114 > 150;
+    g.fillStyle = light ? '#111' : '#fff';
+    g.textAlign = 'left';
+    g.fillText(text, bx + bw + 3 * s, top + plateH / 2 + 0.5 * s);
+    g.textAlign = 'center';
+    if (!bars) return;
+    const barW = w - 2 * s;
+    g.fillStyle = 'rgba(10, 10, 10, .85)';
+    g.fillRect(x0 + 0.6 * s, top + plateH, w - 1.2 * s, 6 * s - 0.6 * s);
+    if (m.org != null) {
+      g.fillStyle = '#41c24c';
+      g.fillRect(x0 + s, top + plateH + 0.8 * s, barW * m.org, 2 * s);
+    }
+    if (m.str != null) {
+      g.fillStyle = '#e6c34a';
+      g.fillRect(x0 + s, top + plateH + 3.3 * s, barW * m.str, 2 * s);
     }
   }
 

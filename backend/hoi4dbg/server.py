@@ -148,6 +148,8 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/map", lambda q, b, gid: svc.summary_map(
             gid, _str(q, "raster") == "1")),
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/units", lambda q, b, gid: svc.summary_units(gid)),
+        r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/unit-kinds",
+          lambda q, b, gid: svc.summary_unit_kinds(gid)),
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/infra", lambda q, b, gid: svc.summary_infra(gid)),
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/moment",
           lambda q, b, gid: svc.summary_moment(gid, float(_str(q, "t") or 0))),
