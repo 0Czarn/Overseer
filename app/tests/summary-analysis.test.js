@@ -249,6 +249,32 @@ test('border strength scales the opacity of the state and province lines', async
   assert.ok(BORDER_STRENGTH[0] < 1 && BORDER_STRENGTH[1] > 1);
 });
 
+test('campaign map timeline: the values of a time read once, the last ones shown meanwhile', async () => {
+  const { timeline } = await import('../renderer/views/summary-map.js');
+  const asked = [];
+  let ready = 0;
+  const line = timeline((t) => { asked.push(t); return Promise.resolve({ at: t }); }, () => { ready += 1; });
+  assert.deepEqual(line.at(5), {});            // no times yet
+  line.setTimes([1, 1.25, 2, 10]);
+  assert.equal(line.rowTime(1.9), 1.25);
+  assert.equal(line.rowTime(0.5), null);
+  assert.deepEqual(line.at(1.9), {});          // asked, not here yet
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(ready, 1);
+  assert.deepEqual(line.at(1.5), { at: 1.25 });   // the same row: not asked again
+  assert.deepEqual(line.at(3), { at: 1.25 });     // row 2 asked, the last values meanwhile
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(asked, [1.25, 2]);
+  line.setTimes([1, 1.25, 2, 10, 11]);         // recorded further: kept
+  assert.deepEqual(line.at(2), { at: 2 });
+  line.setTimes([1, 1.25]);                    // a replay cut: dropped
+  line.at(1.25);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(asked, [1.25, 2, 1.25]);
+  line.reset();
+  assert.equal(line.loaded, false);
+});
+
 test('railway colours by level', async () => {
   const { railColor, RAIL_COLORS } = await import('../renderer/lib/mapview.js');
   assert.deepEqual([1, 2, 3, 4, 5].map(railColor), RAIL_COLORS);
@@ -257,13 +283,11 @@ test('railway colours by level', async () => {
 });
 
 test('division counters: kind, organisation and strength against the best seen, battles and moves', async () => {
-  const { unitReference, counterOf } = await import('../renderer/views/summary-map.js');
+  const { referenceMaps, counterOf } = await import('../renderer/views/summary-map.js');
   const { unitMarkers } = await import('../renderer/lib/mapview.js');
-  const rows = [{ t: 1, full: 1, u: { 5: { GER: [2, 60, 100, { Inf: 2 }] }, 6: { GER: [1, 30, 50, { Pz: 1 }] } } },
-    { t: 2, u: { 5: { GER: [3, 40, 80, { Inf: 2, Pz: 1 }] }, 6: null } }];
-  const ref = unitReference(rows);
+  // backend ic_history.units_reference of: GER Inf x2 60/100, GER Pz 30/50
+  const ref = referenceMaps({ tpl: { 'GER|Inf': [60, 100], 'GER|Pz': [30, 50] }, tag: { GER: [60, 100] } });
   assert.deepEqual(ref.tpl.get('GER|Inf'), [60, 100]);
-  assert.deepEqual(ref.tag.get('GER'), [60, 100]);
   const kinds = { 'GER|Inf': 'infantry', 'GER|Pz': 'armor' };
   const c = counterOf('GER', [3, 40, 80, { Inf: 2, Pz: 1 }], kinds, ref);
   assert.equal(c.kind, 'infantry');                       // 2 of 3

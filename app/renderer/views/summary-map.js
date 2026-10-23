@@ -104,32 +104,67 @@ export function unitsAt(rows, t) {
   return out;
 }
 
-/** The best mean organisation and strength seen in the division rows (a full division - the recording has no maximum):
- * {tpl: Map "<tag>|<template>" -> [org, strength] (provinces with that template only), tag: Map tag -> [org, strength]}. */
-export function unitReference(rows) {
-  const tpl = new Map();
-  const tag = new Map();
-  const up = (m, k, org, str) => {
-    const v = m.get(k);
-    if (!v) m.set(k, [org, str]);
-    else { v[0] = Math.max(v[0], org); v[1] = Math.max(v[1], str); }
-  };
-  for (const r of rows) {
-    for (const byTag of Object.values(r.u)) {
-      if (!byTag) continue;
-      for (const [t, [, org, str, templates]] of Object.entries(byTag)) {
-        up(tag, t, org, str);
-        const names = Object.keys(templates ?? {});
-        if (names.length === 1) up(tpl, `${t}|${names[0]}`, org, str);
-      }
+/** The best organisation and strength seen (backend ic_history.units_reference {tpl: {key: [org, str]}, tag: {...}})
+ * as Maps for counterOf. */
+export function referenceMaps(ref) {
+  return { tpl: new Map(Object.entries(ref?.tpl ?? {})), tag: new Map(Object.entries(ref?.tag ?? {})) };
+}
+
+/** A campaign map file read a time at a time (2026-10-23: the whole files - 67 MB of division rows - froze the app):
+ * setTimes(times of its rows); at(t) -> the values at the row on or before `t` when read, else the last values got
+ * (asked from fetchAt(row time) and `onReady()` once they come); prefetch(t). The values of a row time never change
+ * (the files are appended to) - kept for the CACHE times asked last; shorter times (a replay was cut) drop them. */
+export function timeline(fetchAt, onReady = () => {}, cacheSize = 48) {
+  let times = [];
+  const cache = new Map();
+  const asked = new Set();
+  let last = {};
+  let generation = 0;   // reset(): answers to earlier questions are dropped
+  const rowTimeOf = (t) => {   // the last time <= t
+    let lo = 0;
+    let hi = times.length - 1;
+    let found = null;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (times[mid] <= t) { found = times[mid]; lo = mid + 1; } else hi = mid - 1;
     }
-  }
-  return { tpl, tag };
+    return found;
+  };
+  const ask = (key, notify) => {
+    if (key == null || cache.has(key) || asked.has(key)) return;
+    asked.add(key);
+    const gen = generation;
+    fetchAt(key).then((values) => {
+      if (gen !== generation) return;
+      cache.set(key, values ?? {});
+      while (cache.size > cacheSize) cache.delete(cache.keys().next().value);
+      if (notify) onReady();
+    }, () => {}).finally(() => asked.delete(key));
+  };
+  return {
+    loaded: false,
+    times: () => times,
+    setTimes(next) {
+      if (next.length < times.length || (times.length && next[times.length - 1] !== times[times.length - 1])) cache.clear();
+      times = next;
+      this.loaded = true;
+    },
+    rowTime: rowTimeOf,
+    at(t) {
+      const key = rowTimeOf(t);
+      if (key == null) return {};
+      if (cache.has(key)) { last = cache.get(key); return last; }
+      ask(key, true);
+      return last;
+    },
+    prefetch(t) { ask(rowTimeOf(t), false); },
+    reset() { generation += 1; times = []; cache.clear(); asked.clear(); last = {}; this.loaded = false; },
+  };
 }
 
 /** {kind, org, str} of a province's divisions of `tag` (entry [divisions, organisation, strength, {template: n}]): the
  * kind most of them are (`kinds`: summary_unit_kinds, null: not known), organisation and strength as shares 0..1 of the
- * best seen for their templates (unitReference; null: not known). */
+ * best seen for their templates (referenceMaps; null: not known). */
 export function counterOf(tag, [count, org, str, templates], kinds, ref) {
   const byKind = {};
   let refOrg = 0;
@@ -242,13 +277,21 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
   let view = null;
   let days = [];        // the recorded days (the slider)
   let index = -1;       // day shown
-  let unitRows = [];    // division positions (ic_history.add_units)
+  let redrawQueued = false;   // values of a time came in: draw again once
+  const redrawSoon = () => {
+    if (redrawQueued) return;
+    redrawQueued = true;
+    setTimeout(() => { redrawQueued = false; draw(); }, 0);
+  };
+  const line = (kind) => timeline((t) => ctx.api.get(`/api/summary/games/${encodeURIComponent(gid)}/${kind}?t=${t}`)
+    .then((r) => r.data.u), redrawSoon);
+  const unitLine = line('units');    // division positions (ic_history.add_units), read a time at a time
   let units = {};       // divisions of the day shown
   let unitKinds = null; // "<tag>|<template>" -> kind (GET .../unit-kinds), the counters' symbols
-  let unitRef = unitReference([]);   // the best organisation and strength seen (the counters' bars)
-  let infraRows = [];   // railways and province buildings (ic_history "infra")
+  let unitRef = referenceMaps(null);   // the best organisation and strength seen (the counters' bars)
+  const infraLine = line('infra');   // railways and province buildings (ic_history "infra")
   let built = {};       // province -> [supply hub, naval base, fort, coastal fort] of the day shown
-  let frontRows = [];   // moves and battles (ic_history "front")
+  const frontLine = line('front');   // moves and battles (ic_history "front")
   let battles = {};     // province -> [attacker, defender, attacking, defending divisions, attacker share %]
   let divisionsAt = null;   // [time, {province: [division]}] of each division (GET .../divisions), null: none read
   let divisionTimer = 0;
@@ -286,9 +329,9 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
     const row = rowAt(data.rows, t);
     current = row >= 0 ? statesAt(data.rows, row) : {};
     front = row >= 0 ? frontAt(data.rows, row) : {};
-    units = prefs.units || prefs.fog ? unitsAt(unitRows, t) : {};
-    const infra = INFRA_PREFS.some((k) => prefs[k]) ? unitsAt(infraRows, t) : {};
-    const fighting = FRONT_PREFS.some((k) => prefs[k]) ? unitsAt(frontRows, t) : {};
+    units = prefs.units || prefs.fog ? unitLine.at(t) : {};
+    const infra = INFRA_PREFS.some((k) => prefs[k]) ? infraLine.at(t) : {};
+    const fighting = FRONT_PREFS.some((k) => prefs[k]) ? frontLine.at(t) : {};
     const moves = [];
     battles = {};
     for (const [k, v] of Object.entries(fighting)) {
@@ -455,6 +498,7 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
       if (index >= days.length - 1) { stop(); follow = true; return; }
       index += 1;
       draw();
+      for (const l of [unitLine, infraLine, frontLine]) if (l.loaded) l.prefetch(days[index + 1] ?? days[index]);
     }, prefs.speed);
   }
 
@@ -523,9 +567,9 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
       h('button', { class: `gs-seg-btn ${prefs[k] ? 'gs-seg-on' : ''}`, 'aria-pressed': String(!!prefs[k]),
         onclick: async () => {
           prefs[k] = !prefs[k];
-          if (k === 'units' && prefs.units && !unitRows.length) { await loadUnits(); refreshDays(); }
-          if (INFRA_PREFS.includes(k) && prefs[k] && !infraRows.length) await loadInfra();
-          if (FRONT_PREFS.includes(k) && prefs[k] && !frontRows.length) { await loadFront(); refreshDays(); }
+          if (k === 'units' && prefs.units && !unitLine.loaded) { await loadUnits(); refreshDays(); }
+          if (INFRA_PREFS.includes(k) && prefs[k] && !infraLine.loaded) await loadInfra();
+          if (FRONT_PREFS.includes(k) && prefs[k] && !frontLine.loaded) { await loadFront(); refreshDays(); }
           redraw();
         } }, label)));
     const field = (label, control) => h('div', { class: 'gs-field' }, h('span', { class: 'gs-seg-label' }, label), control);
@@ -587,7 +631,7 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
     const opt = (v, label) => h('option', { value: v, selected: v === prefs.fog || null }, label);
     return h('select', { class: 'gs-map-fog', 'aria-label': 'Fog of war', onchange: async (e) => {
       prefs.fog = e.target.value;
-      if (prefs.fog && !unitRows.length) await loadUnits();
+      if (prefs.fog && !unitLine.loaded) await loadUnits();
       redraw();
     } },
     opt('', 'Off'),
@@ -595,13 +639,16 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
     h('optgroup', { label: 'Countries' }, holders.map((t) => opt(t, `${tagName(t)} (${t})`))));
   }
 
+  /** The times of the division rows, the best organisation / strength seen and the kinds of the templates (small: the
+   * positions are read a time at a time). */
   async function loadUnits() {
     try {
-      unitRows = (await ctx.api.get(`/api/summary/games/${encodeURIComponent(gid)}/units`)).data.rows;
+      const d = (await ctx.api.get(`/api/summary/games/${encodeURIComponent(gid)}/units`)).data;
+      unitLine.setTimes(d.times);
+      unitRef = referenceMaps(d.ref);
     } catch {
-      unitRows = [];   // the map still works without them
+      unitLine.setTimes([]);   // the map still works without them
     }
-    unitRef = unitReference(unitRows);
     try {
       unitKinds = (await ctx.api.get(`/api/summary/games/${encodeURIComponent(gid)}/unit-kinds`)).data.kinds;
     } catch {
@@ -611,9 +658,9 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
 
   async function loadFront() {
     try {
-      frontRows = (await ctx.api.get(`/api/summary/games/${encodeURIComponent(gid)}/front`)).data.rows;
+      frontLine.setTimes((await ctx.api.get(`/api/summary/games/${encodeURIComponent(gid)}/front`)).data.times);
     } catch {
-      frontRows = [];
+      frontLine.setTimes([]);
     }
   }
 
@@ -622,7 +669,7 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
   function frames() {
     const all = new Set(data.t?.length ? data.t : []);
     for (const r of data.rows) all.add(r.t);
-    for (const r of [...unitRows, ...frontRows]) all.add(rowTime(r));
+    for (const t of [...unitLine.times(), ...frontLine.times()]) all.add(t);
     return [...all].sort((a, b) => a - b);
   }
 
@@ -636,9 +683,9 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
 
   async function loadInfra() {
     try {
-      infraRows = (await ctx.api.get(`/api/summary/games/${encodeURIComponent(gid)}/infra`)).data.rows;
+      infraLine.setTimes((await ctx.api.get(`/api/summary/games/${encodeURIComponent(gid)}/infra`)).data.times);
     } catch {
-      infraRows = [];
+      infraLine.setTimes([]);
     }
   }
 
@@ -655,7 +702,10 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
       gid = id;
       data = res;
       map = fresh;
-      if (changed) { divisionsAt = null; picked = null; pickedDivision = null; }
+      if (changed) {
+        divisionsAt = null; picked = null; pickedDivision = null; unitKinds = null;
+        for (const l of [unitLine, infraLine, frontLine]) l.reset();   // their times are this campaign's
+      }
       dropDivisions();   // read again: the campaign may have been recorded further
       if (!data.rows.length) {
         view = null;

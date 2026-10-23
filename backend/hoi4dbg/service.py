@@ -1976,10 +1976,15 @@ class DebuggerService:
         return {"data": {"id": gid, "rows": rows, "t": game["t"], "dates": game["dates"], "factions": factions,
                          "players": players, "groups": self.ic_history.groups(gid), **self.game_map(raster)["data"]}}
 
-    def summary_units(self, gid: str) -> dict:
-        """Division positions of a recorded campaign (ic_history.add_units rows) for the campaign map."""
+    def summary_units(self, gid: str, t: float | None = None) -> dict:
+        """Division positions of a recorded campaign for the campaign map: without `t` the times of the rows and the
+        best organisation / strength seen (ic_history.units_reference), with `t` the positions then (delta_at) - the
+        whole file is never sent (2026-10-23: 67 MB of rows froze the app)."""
         try:
-            return {"data": {"id": gid, "rows": self.ic_history.units_rows(gid)}}
+            if t is None:
+                return {"data": {"id": gid, "times": self.ic_history.delta_times("units", gid),
+                                 "ref": self.ic_history.units_reference(gid)}}
+            return {"data": {"id": gid, "t": t, "u": self.ic_history.delta_at("units", gid, t)}}
         except ValueError:
             raise NotFound(f"No recorded campaign {gid}") from None
 
@@ -1998,11 +2003,13 @@ class DebuggerService:
                     kinds[key] = kind
         return {"data": {"id": gid, "kinds": kinds}}
 
-    def summary_infra(self, gid: str, kind: str = "infra") -> dict:
-        """Railways and province buildings ("infra") or moves and battles ("front") of a recorded campaign
-        (ic_history rows) for the campaign map."""
+    def summary_infra(self, gid: str, kind: str = "infra", t: float | None = None) -> dict:
+        """Railways and province buildings ("infra") or moves and battles ("front") of a recorded campaign for the
+        campaign map: without `t` the times of the rows, with `t` the values then (ic_history.delta_at)."""
         try:
-            return {"data": {"id": gid, "rows": self.ic_history.delta_rows(kind, gid)}}
+            if t is None:
+                return {"data": {"id": gid, "times": self.ic_history.delta_times(kind, gid)}}
+            return {"data": {"id": gid, "t": t, "u": self.ic_history.delta_at(kind, gid, t)}}
         except ValueError:
             raise NotFound(f"No recorded campaign {gid}") from None
 

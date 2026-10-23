@@ -1048,6 +1048,19 @@ DO ZROBIENIA (w tej kolejności)
             KONTROLA (2026-10-23): testy py 342 OK, js 118 OK. Smoke: działa na profilu użytkownika - zwinięte kafelki
                 ukrywały sloty badań; teraz smoke na czas testu rozwija wszystko (hoi4dbg.collapsed) i przywraca na końcu.
                 Bez gry zostają 2 błędy smoke (Research: sloty na żywo, Army/Air/Navy: Compare) - wymagają działającej gry.
+[x] ZAWIESZANIE PRZY DUŻYM NAGRANIU (2026-10-23, zgłoszenie użytkownika: po nagraniu kampanii ICE do 1944, ~380 MB,
+            aplikacja nie reaguje). Przyczyna: Game summary pobierał CAŁE pliki mapy - units 67 MB (77 MB JSON), infra,
+            front - i robił to co 5 s przy nagrywanej kampanii; Electron parsował je w procesie głównym (0,7 s) i
+            kopiował przez IPC do okna (2 s, ~800 MB na kopię) - okno stało. Backend trzymał też całe divs w pamięci
+            (284 MB pliku -> 2,4 GB). Poprawka: ic_history - indeks linii plików mapy (czas, pełny wiersz, bajty),
+            dopisywany przyrostowo; delta_at czyta od ostatniego pełnego wiersza (units 25 ms / 0,13 MB, divs 90-140 ms /
+            1 MB zamiast 314 MB), key_history czyta linia po linii tylko wartości kluczy (historia dywizji 0,9 s zamiast
+            14 s), units_reference (maksima pasków) przyrostowo, _cut przepisuje strumieniowo. API: /units, /infra, /front
+            bez t = czasy (+ maksima), z ?t= = stan w chwili. Widok: timeline() - pobiera chwilę na żądanie, pamięta 48,
+            pobiera następną przy odtwarzaniu. Pełny wiersz dywizji co 180 dni (DIVS_FULL_EVERY; był co 30) - nowe
+            nagrania divs ok. 4x mniejsze. Smoke na tej kampanii (do 1944.09.07): mapa, klik dywizji i karta działają,
+            klatka 3-10 ms. Testy py 371 / js 133.
+            [ ] istniejące duże pliki zostają (284 MB divs) - ewentualnie narzędzie do zmniejszenia (pełne wiersze rzadziej)
 [x] ZOOM 1200% I KOLORY KOLEI (2026-10-23, prośba użytkownika): maks. zoom mapy 400% -> 1200% (linie, napisy i liczniki
             mają stałą wielkość; rzeki do 6 px na ekranie). Koleje wg poziomu: 1 czerwony, 2 pomarańczowy, 3 żółty,
             4 żółtozielony, 5 neonowo zielony (wyższy z modów: kolor 5) na ciemnym obrysie; legenda pod mapą. Smoke:

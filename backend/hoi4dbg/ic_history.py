@@ -32,6 +32,9 @@ POLL_SECONDS = 0.25
 MAX_STEP = 30   # days between two polls that still count as the game running (more = a save was loaded)
 FACTION_EVERY = 7
 UNITS_FULL_EVERY = 30   # days between full rows of division positions (and of railways and buildings)
+# each division one by one (2026-10-23: a full row of every division is ~2.5 MB - 260 of the 284 MB of a campaign to
+# 1944 at 30 days; the changes between are small, and the line index reads from the last full row quickly)
+DIVS_FULL_EVERY = 180
 INFRA_EVERY = 3         # days between readings of railways and buildings (0.3 s; they change slowly)
 FRAME_HOURS = 6         # game hours between readings of divisions, moves and battles within a day
 # Fast game (2026-10-23, user's question "why is the map recorded after 1 day, sometimes after 8 or 15"): the full
@@ -51,6 +54,23 @@ SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
 def row_time(row: dict) -> float:
     """Time of a campaign map row in days: its day and game hour ("h", readings within a day)."""
     return row["t"] + row.get("h", 0) / 24
+
+
+_LINE_T = re.compile(rb'^\{"t":(\d+),')
+_LINE_TAIL = re.compile(rb'(?:,"h":(\d+))?(,"full":1)?\}$')
+
+
+def _line_meta(line: bytes) -> tuple[float, bool] | None:
+    """(row_time, full) of a line of IcHistory.add_delta without parsing it ({"t", "u", "h"?, "full"?} in that order,
+    compact json: "h" and "full" are the last keys), None for a line that is not one. Lines end in \\r\\n on Windows
+    (the files are written in text mode)."""
+    line = line.rstrip(b"\r")
+    m = _LINE_T.match(line)
+    if not m or not line.endswith(b"}"):
+        return None
+    tail = _LINE_TAIL.search(line, max(0, len(line) - 24))
+    hour = int(tail.group(1)) if tail and tail.group(1) else 0
+    return int(m.group(1)) + hour / 24, bool(tail and tail.group(2))
 
 
 def day_number(date: dict) -> int:
@@ -431,7 +451,9 @@ class IcHistory:
         self.active: str | None = None
         self._lock = threading.Lock()
         self._equipment_cache: dict[str, tuple[int, list]] = {}
-        self._delta_cache: dict[tuple[str, str], tuple] = {}   # (campaign, kind) -> (file stamp, rows)
+        self._delta_cache: dict[tuple[str, str], tuple] = {}   # (campaign, kind) -> (file stamp, rows) - small files
+        self._index_cache: dict[tuple[str, str], dict] = {}   # (campaign, kind) -> {"size", "entries"} (_delta_index)
+        self._ref_cache: dict[str, dict] = {}   # campaign -> units_reference state
 
     def _path(self, gid: str) -> Path:
         if not SAFE_ID.match(gid):
@@ -634,10 +656,20 @@ class IcHistory:
             self._map_path(gid).write_text("".join(json.dumps(r, separators=(",", ":")) + "\n" for r in lines
                                                    if r["t"] < t), encoding="utf-8")
         for kind in DELTA_KINDS:   # division positions, railways of replayed days (the recorder starts a full row next)
-            lines = self.delta_rows(kind, gid)
-            if any(r["t"] >= t for r in lines):
-                self._delta_path(gid, kind).write_text("".join(json.dumps(r, separators=(",", ":")) + "\n"
-                                                               for r in lines if r["t"] < t), encoding="utf-8")
+            entries = self._delta_index(kind, gid)   # line by line: these files reach hundreds of MB
+            if any(e[0] >= t for e in entries):
+                path = self._delta_path(gid, kind)
+                tmp = path.with_suffix(".cut")
+                with path.open("rb") as src, tmp.open("wb") as dst:
+                    for time_, _full, start, end in entries:
+                        if time_ < t:
+                            src.seek(start)
+                            dst.write(src.read(end - start) + b"\n")
+                tmp.replace(path)
+                self._index_cache.pop((gid, kind), None)
+                self._delta_cache.pop((gid, kind), None)
+                if kind == "units":
+                    self._ref_cache.pop(gid, None)
         seen = self.designs(gid)   # designs first seen on a replayed day: the game may give their ids to new ones
         kept = {tag: {i: v for i, v in ids.items() if v[1] or v[0] < t} for tag, ids in seen.items()}
         if kept != seen:
@@ -784,18 +816,69 @@ class IcHistory:
         self._delta_cache[(gid, kind)] = (stamp, out)
         return out
 
+    # 2026-10-23 (user's report: the app froze after recording a campaign to 1944 - ICE: divs 284 MB, units 67 MB):
+    # the large files are no longer read whole. An index of their lines (time, full row, byte range), extended by the
+    # bytes appended since (the files only grow; a smaller file - _cut - is indexed again), finds the lines a time
+    # needs: delta_at reads from the last full row on or before it; key_history reads the file line by line and parses
+    # only the lines naming its keys. Memory: the index (tens of bytes a line), not the rows.
+    def _delta_index(self, kind: str, gid: str) -> list[tuple]:
+        """[(row time, full, start byte, end byte)] of the complete lines of a campaign map file, in file order."""
+        path = self._delta_path(gid, kind)
+        try:
+            size = path.stat().st_size
+        except OSError:
+            return []
+        state = self._index_cache.get((gid, kind))
+        if state is None or size < state["size"]:
+            state = {"size": 0, "entries": []}
+        if size > state["size"]:
+            with path.open("rb") as f:
+                f.seek(state["size"])
+                data = f.read(size - state["size"])
+            pos = state["size"]
+            end = data.rfind(b"\n") + 1   # a line being written stays for the next time
+            for line in data[:end].split(b"\n")[:-1]:
+                meta = _line_meta(line)
+                if meta is not None:
+                    state["entries"].append((meta[0], meta[1], pos, pos + len(line)))
+                pos += len(line) + 1
+            state["size"] += end
+            self._index_cache[(gid, kind)] = state
+        return state["entries"]
+
+    def delta_times(self, kind: str, gid: str) -> list[float]:
+        """The times (row_time) of the rows of a campaign map file."""
+        return [e[0] for e in self._delta_index(kind, gid)]
+
+    def _read_lines(self, kind: str, gid: str, entries: list[tuple]) -> list[dict]:
+        """The rows of `entries` (a run of neighbouring lines of the index) parsed."""
+        if not entries:
+            return []
+        with self._delta_path(gid, kind).open("rb") as f:
+            f.seek(entries[0][2])
+            data = f.read(entries[-1][3] - entries[0][2])
+        out = []
+        for line in data.split(b"\n"):
+            try:
+                out.append(json.loads(line))
+            except ValueError:   # a line cut by a crash
+                continue
+        return out
+
     def delta_at(self, kind: str, gid: str, t: float) -> dict:
         """{key: value} of a campaign map file at time `t` (days, row_time): the last full row on or before it and the
         changes after it (null: gone)."""
-        rows = self.delta_rows(kind, gid)
+        entries = self._delta_index(kind, gid)
         last = -1
-        for i, r in enumerate(rows):
-            if row_time(r) > t:
+        for i, e in enumerate(entries):   # file order (times may repeat after a replay was cut)
+            if e[0] > t:
                 break
             last = i
-        start = next((i for i in range(last, -1, -1) if rows[i].get("full")), 0)
+        if last < 0:
+            return {}
+        start = next((i for i in range(last, -1, -1) if entries[i][1]), 0)
         out: dict = {}
-        for r in rows[start:last + 1]:
+        for r in self._read_lines(kind, gid, entries[start:last + 1]):
             for k, v in r["u"].items():
                 if v is None:
                     out.pop(k, None)
@@ -806,20 +889,58 @@ class IcHistory:
     def key_history(self, kind: str, gid: str, keys: list[str]) -> list[list]:
         """[[time, key's first letter, value or None]] of `keys` in a campaign map file, each change once (full rows
         repeat what did not change)."""
+        entries = self._delta_index(kind, gid)
+        needles = [(k, f'"{k}":'.encode()) for k in keys]
+        decoder = json.JSONDecoder()
         out, last = [], {}
-        for r in self.delta_rows(kind, gid):
-            u = r["u"]
-            for k in keys:
-                if k in u:
-                    v = u[k]
-                elif r.get("full") and k in last and last[k] is not None:
-                    v = None   # a full row without it: gone
-                else:
-                    continue
-                if last.get(k, "missing") != v:
-                    out.append([row_time(r), k[0], v])
-                    last[k] = v
+        if not entries:
+            return out
+        with self._delta_path(gid, kind).open("rb") as f:
+            for time_, full, start, end in entries:
+                f.seek(start)
+                line = f.read(end - start)
+                u = {}
+                for k, needle in needles:   # only the keys' values, not the whole line (a full row: megabytes)
+                    at = line.find(needle)
+                    if at >= 0:
+                        u[k] = decoder.raw_decode(line[at + len(needle):].decode("utf-8"))[0]
+                for k in keys:
+                    if k in u:
+                        v = u[k]
+                    elif full and k in last and last[k] is not None:
+                        v = None   # a full row without it: gone
+                    else:
+                        continue
+                    if last.get(k, "missing") != v:
+                        out.append([time_, k[0], v])
+                        last[k] = v
         return out
+
+    def units_reference(self, gid: str) -> dict:
+        """{"tpl": {"<tag>|<template>": [org, strength]}, "tag": {tag: [org, strength]}}: the best mean organisation
+        and strength seen in the division positions ("units"; provinces of one template for "tpl") - the full
+        division of the counters' bars (the recording has no maximum). Extended by the rows appended since."""
+        entries = self._delta_index("units", gid)
+        state = self._ref_cache.get(gid)
+        if state is None or state["n"] > len(entries):
+            state = {"n": 0, "tpl": {}, "tag": {}}
+        if state["n"] < len(entries):
+            def up(m, k, org, st):
+                v = m.get(k)
+                if v is None:
+                    m[k] = [org, st]
+                else:
+                    v[0], v[1] = max(v[0], org), max(v[1], st)
+            new = entries[state["n"]:]
+            for r in self._read_lines("units", gid, new):
+                for by_tag in r["u"].values():
+                    for tag, (_n, org, st, templates) in (by_tag or {}).items():
+                        up(state["tag"], tag, org, st)
+                        if len(templates or {}) == 1:
+                            up(state["tpl"], f"{tag}|{next(iter(templates))}", org, st)
+            state["n"] = len(entries)
+            self._ref_cache[gid] = state
+        return {"tpl": state["tpl"], "tag": state["tag"]}
 
     def faction_rows(self, gid: str) -> list[list]:
         """[[day, {tag: faction}]] of the days the factions were recorded on (every FACTION_EVERY days)."""
@@ -1009,7 +1130,7 @@ class IcRecorder:
         self._infra: dict = {"last": None, "gid": None, "full_t": -UNITS_FULL_EVERY}   # railways, buildings written
         self._last_infra_t = -INFRA_EVERY
         self._front: dict = {"last": None, "gid": None, "full_t": -UNITS_FULL_EVERY}   # moves and battles written
-        self._divs: dict = {"last": None, "gid": None, "full_t": -UNITS_FULL_EVERY}    # each division written
+        self._divs: dict = {"last": None, "gid": None, "full_t": -DIVS_FULL_EVERY, "every": DIVS_FULL_EVERY}   # each division
         self._tmpl: dict = {"last": None, "gid": None, "full_t": -UNITS_FULL_EVERY}    # templates written
         self._frame: tuple | None = None   # (campaign, game hour) of the last reading of divisions
         self._hour: int | None = None        # game hour of the last poll and since when (real time) it stands
@@ -1257,7 +1378,7 @@ class IcRecorder:
 
     def _record_delta(self, kind: str, state: dict, gid: str, t: int, values: dict, hour: int = 0) -> None:
         """Like _record_units for another file (`state`: {"last", "gid", "full_t"} of what was written)."""
-        full = gid != state["gid"] or state["last"] is None or t - state["full_t"] >= UNITS_FULL_EVERY \
+        full = gid != state["gid"] or state["last"] is None or t - state["full_t"] >= state.get("every", UNITS_FULL_EVERY) \
             or t < state["full_t"]
         if full:
             changed = values

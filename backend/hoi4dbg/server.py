@@ -40,6 +40,15 @@ def _str(query: dict, key: str, default: str = "") -> str:
     return query.get(key, [default])[0]
 
 
+def _time(query: dict) -> float | None:
+    """The time `t` (days) of a campaign map request, None without it."""
+    value = _str(query, "t")
+    try:
+        return float(value) if value else None
+    except ValueError:
+        raise ReportError("t must be a number of days") from None
+
+
 def build_routes(svc: DebuggerService) -> list[Route]:
     def r(method: str, pattern: str, fn: Callable[..., dict]) -> Route:
         return method, re.compile(f"^{pattern}$"), fn
@@ -147,10 +156,12 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/groups", lambda q, b, gid: svc.summary_groups(gid)),
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/map", lambda q, b, gid: svc.summary_map(
             gid, _str(q, "raster") == "1")),
-        r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/units", lambda q, b, gid: svc.summary_units(gid)),
+        r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/units",
+          lambda q, b, gid: svc.summary_units(gid, _time(q))),
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/unit-kinds",
           lambda q, b, gid: svc.summary_unit_kinds(gid)),
-        r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/infra", lambda q, b, gid: svc.summary_infra(gid)),
+        r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/infra",
+          lambda q, b, gid: svc.summary_infra(gid, "infra", _time(q))),
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/moment",
           lambda q, b, gid: svc.summary_moment(gid, float(_str(q, "t") or 0))),
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/divisions",
@@ -158,7 +169,7 @@ def build_routes(svc: DebuggerService) -> list[Route]:
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/division/(?P<did>\d{1,9})",
           lambda q, b, gid, did: svc.summary_division(gid, int(did))),
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/front",
-          lambda q, b, gid: svc.summary_infra(gid, "front")),
+          lambda q, b, gid: svc.summary_infra(gid, "front", _time(q))),
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/notes", lambda q, b, gid: svc.summary_notes(gid)),
         r("POST", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/notes", lambda q, b, gid: svc.summary_notes(gid, b)),
         r("GET", r"/api/summary/games/(?P<gid>[A-Za-z0-9_.-]{1,80})/sessions", lambda q, b, gid: svc.summary_sessions(gid)),

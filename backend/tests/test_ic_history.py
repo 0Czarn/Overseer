@@ -1,4 +1,5 @@
 import logging
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -293,6 +294,86 @@ class PerFactoryTest(unittest.TestCase):
         game = history.game(history.active)
         self.assertEqual((game["countries"]["SOV"]["amil"], game["countries"]["SOV"]["pmil"]), ([2], [4.5]))
         self.assertEqual(game["countries"]["SOV"]["lcom"], [None])
+
+
+class LargeFileTest(unittest.TestCase):
+    """The campaign map files read through their line index (2026-10-23: 284 MB of division rows froze the app)."""
+
+    def setUp(self):
+        self.history = IcHistory(Path(tempfile.mkdtemp()))
+        self.t = day(1936, 1, 1)
+        self.gid = self.history.add({"t": self.t, "player": "GER", "countries": {"GER": [1.0, 0.0, 0.0]}})
+        h, t, gid = self.history, self.t, self.gid
+        h.add_units(gid, t, {"1": {"GER": [2, 60, 100, {"Inf": 2}]}, "2": {"POL": [1, 40, 80, {"DP": 1}]}}, True)
+        h.add_units(gid, t, {"1": {"GER": [2, 50, 100, {"Inf": 2}]}}, False, 6)
+        h.add_units(gid, t + 1, {"2": None, "3": {"GER": [1, 30, 50, {"Pz": 1}]}}, False)
+        h.add_units(gid, t + 30, {"3": {"GER": [1, 35, 60, {"Pz": 1}]}}, True)
+
+    def test_index_times_and_values_at_a_time(self):
+        h, t, gid = self.history, self.t, self.gid
+        raw = h._delta_path(gid, "units").read_bytes()
+        self.assertEqual(raw.count(b"\r\n") > 0, os.name == "nt")   # text mode on Windows: the index copes with both
+        self.assertEqual(h.delta_times("units", gid), [t, t + 0.25, t + 1, t + 30])
+        self.assertEqual(h.delta_at("units", gid, t + 0.3), {"1": {"GER": [2, 50, 100, {"Inf": 2}]},
+                                                             "2": {"POL": [1, 40, 80, {"DP": 1}]}})
+        self.assertEqual(sorted(h.delta_at("units", gid, t + 2)), ["1", "3"])   # POL gone
+        self.assertEqual(h.delta_at("units", gid, t + 30), {"3": {"GER": [1, 35, 60, {"Pz": 1}]}})   # from the full row
+        self.assertEqual(h.delta_at("units", gid, t - 1), {})
+        self.assertEqual(h.delta_at("units", gid, t + 2), _replayed(h.delta_rows("units", gid), t + 2))
+
+    def test_appended_rows_and_a_line_being_written(self):
+        h, t, gid = self.history, self.t, self.gid
+        h.delta_times("units", gid)
+        h.add_units(gid, t + 31, {"4": {"ITA": [1, 10, 10, {"X": 1}]}}, False)
+        with h._delta_path(gid, "units").open("ab") as f:
+            f.write(b'{"t":706700,"u":{"5":')   # cut while being written
+        self.assertEqual(h.delta_times("units", gid)[-1], t + 31)
+        self.assertIn("4", h.delta_at("units", gid, t + 40))
+
+    def test_history_of_keys_and_the_best_values(self):
+        h, t, gid = self.history, self.t, self.gid
+        self.assertEqual(h.key_history("units", gid, ["2", "3"]),
+                         [[t, "2", {"POL": [1, 40, 80, {"DP": 1}]}], [t + 1, "2", None], [t + 1, "3", {"GER": [1, 30, 50, {"Pz": 1}]}],
+                          [t + 30, "3", {"GER": [1, 35, 60, {"Pz": 1}]}]])
+        self.assertEqual(h.units_reference(gid), {"tpl": {"GER|Inf": [60, 100], "POL|DP": [40, 80], "GER|Pz": [35, 60]},
+                                                  "tag": {"GER": [60, 100], "POL": [40, 80]}})
+        h.add_units(gid, t + 31, {"3": {"GER": [1, 70, 90, {"Pz": 1}]}}, False)
+        self.assertEqual(h.units_reference(gid)["tpl"]["GER|Pz"], [70, 90])   # the appended row counted
+
+    def test_replayed_days_cut_line_by_line(self):
+        h, t, gid = self.history, self.t, self.gid
+        h.delta_times("units", gid)
+        h._cut(gid, t + 1)
+        self.assertEqual(h.delta_times("units", gid), [t, t + 0.25])
+        self.assertEqual(h.units_reference(gid)["tpl"], {"GER|Inf": [60, 100], "POL|DP": [40, 80]})
+        h.add_units(gid, t + 1, {"1": None}, False)
+        self.assertEqual(h.delta_at("units", gid, t + 1), {"2": {"POL": [1, 40, 80, {"DP": 1}]}})
+
+    def test_the_map_endpoints_send_times_or_one_moment(self):
+        from helpers import make_service
+        svc = make_service(Path(tempfile.mkdtemp()))
+        svc.ic_history = self.history
+        index = svc.summary_units(self.gid)["data"]
+        self.assertEqual(index["times"], [self.t, self.t + 0.25, self.t + 1, self.t + 30])
+        self.assertIn("GER|Pz", index["ref"]["tpl"])
+        self.assertNotIn("rows", index)
+        self.assertEqual(sorted(svc.summary_units(self.gid, self.t + 2)["data"]["u"]), ["1", "3"])
+        self.assertEqual(svc.summary_infra(self.gid, "front")["data"]["times"], [])
+
+
+def _replayed(rows, t):
+    """delta_at as it was before the index: every row parsed."""
+    from hoi4dbg.ic_history import row_time
+    last = max((i for i, r in enumerate(rows) if row_time(r) <= t), default=-1)
+    start = max((i for i in range(last + 1) if rows[i].get("full")), default=0)
+    out = {}
+    for r in rows[start:last + 1]:
+        for k, v in r["u"].items():
+            if v is None:
+                out.pop(k, None)
+            else:
+                out[k] = v
+    return out
 
 
 class EquipmentHistoryTest(unittest.TestCase):
