@@ -249,6 +249,13 @@ test('border strength scales the opacity of the state and province lines', async
   assert.ok(BORDER_STRENGTH[0] < 1 && BORDER_STRENGTH[1] > 1);
 });
 
+test('railway colours by level', async () => {
+  const { railColor, RAIL_COLORS } = await import('../renderer/lib/mapview.js');
+  assert.deepEqual([1, 2, 3, 4, 5].map(railColor), RAIL_COLORS);
+  assert.equal(railColor(9), RAIL_COLORS[4]);   // a mod's higher level: the top colour
+  assert.equal(railColor(0), RAIL_COLORS[0]);
+});
+
 test('division counters: kind, organisation and strength against the best seen, battles and moves', async () => {
   const { unitReference, counterOf } = await import('../renderer/views/summary-map.js');
   const { unitMarkers } = await import('../renderer/lib/mapview.js');

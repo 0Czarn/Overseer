@@ -7,7 +7,7 @@
 // country (a counter per province, per state when zoomed out) and an approximate fog of war from a country's view.
 import { card, h, notice } from '../lib/dom.js';
 import { dayText } from '../lib/linechart.js';
-import { BORDER_STRENGTH, KIND_NAMES, TERRAIN_STYLES, loadMap, mapView, placeLabels, provinceCentre, rgb, seenProvinces, terrainSwatch } from '../lib/mapview.js';
+import { BORDER_STRENGTH, KIND_NAMES, RAIL_COLORS, TERRAIN_STYLES, loadMap, mapView, placeLabels, provinceCentre, rgb, seenProvinces, terrainSwatch } from '../lib/mapview.js';
 import { numberLocale } from '../lib/options.js';
 import { divisionCard, dropDivisions } from './division-card.js';
 
@@ -391,7 +391,9 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
     const fmt = (v) => v.toLocaleString(numberLocale(), { maximumFractionDigits: 0 });
     const hex = (c) => `rgb(${c.join(',')})`;
     terrainKey.replaceChildren(...(prefs.types ? Object.keys(TERRAIN_STYLES).map((t) => h('span', { class: 'gs-terrain-item' },
-      terrainSwatch(t), `${t[0].toUpperCase()}${t.slice(1)}`)) : []));
+      terrainSwatch(t), `${t[0].toUpperCase()}${t.slice(1)}`)) : []),
+    ...(prefs.rails ? [h('span', { class: 'gs-terrain-item' }, 'Railway level:'), ...RAIL_COLORS.map((c, i) => h('span',
+      { class: 'gs-terrain-item' }, h('span', { class: 'gs-rail-swatch', style: { background: c } }), String(i + 1)))] : []));
     legend.replaceChildren(...totals.slice(0, 14).map((s) => h('span', { class: 'gs-map-legend-item',
       title: `${keyText(s.key)}: ${s.owned} states owned, ${s.controlled} controlled, ${fmt(s.vp)} victory points` },
     h('span', { class: 'gs-map-swatch', style: { background: hex(keyColor(s.key)) } }),
@@ -500,7 +502,7 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
         + 'the rivers of the game map (wider rivers from further away); from 100% the borders are drawn as smooth lines. '
         + 'Terrain types: each province as the game counts it in battle (map/definition.csv) - a tint, and symbols '
         + 'from 45% zoom. '
-        + 'Infrastructure (from 2026-10-23, read every 3 game days): railways by level (thicker = higher; the low ones '
+        + 'Infrastructure (from 2026-10-23, read every 3 game days): railways by level (1 red, 2 orange, 3 yellow, 4 yellow-green, 5 neon green; thicker = higher; the low ones '
         + 'when zoomed in), and from 70% the ports (blue circle), forts (grey square; blue edge: coastal) and supply hubs '
         + '(orange) with their level. Front (from 2026-10-23): battles (crossed swords; the bar: the attacker share '
         + 'of both sides organisation x strength - close to the game bar, not the same) and arrows of the divisions '

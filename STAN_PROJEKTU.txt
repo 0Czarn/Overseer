@@ -1048,6 +1048,10 @@ DO ZROBIENIA (w tej kolejności)
             KONTROLA (2026-10-23): testy py 342 OK, js 118 OK. Smoke: działa na profilu użytkownika - zwinięte kafelki
                 ukrywały sloty badań; teraz smoke na czas testu rozwija wszystko (hoi4dbg.collapsed) i przywraca na końcu.
                 Bez gry zostają 2 błędy smoke (Research: sloty na żywo, Army/Air/Navy: Compare) - wymagają działającej gry.
+[x] ZOOM 1200% I KOLORY KOLEI (2026-10-23, prośba użytkownika): maks. zoom mapy 400% -> 1200% (linie, napisy i liczniki
+            mają stałą wielkość; rzeki do 6 px na ekranie). Koleje wg poziomu: 1 czerwony, 2 pomarańczowy, 3 żółty,
+            4 żółtozielony, 5 neonowo zielony (wyższy z modów: kolor 5) na ciemnym obrysie; legenda pod mapą. Smoke:
+            1200% przy Hamburgu, klatka 2-3 ms. Testy js 132.
 [x] LICZNIKI DYWIZJI JAK W HOI4 (2026-10-23, prośba użytkownika; odpowiedzi: licznik jak w grze, rodzaj wojsk, paski
             org. i siły, walka / ruch, oddalenie zbiorczo na stan): plakietka w kolorze państwa, symbol NATO rodzaju (X
             piechota, owal pancerne, owal+X zmech., X+koło zmot., / kawaleria, X+szczyt górskie, X+fala piechota morska,

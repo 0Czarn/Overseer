@@ -21,7 +21,10 @@ export const LAKE = 1;
 export const COLORS = { sea: [24, 38, 58], lake: [36, 58, 84], empty: [70, 68, 64], unknown: [110, 108, 104], border: [12, 12, 12],
   highlight: [255, 255, 255] };
 const ZOOM_MIN = 0.1;
-const ZOOM_MAX = 4;
+const ZOOM_MAX = 12;   // 2026-10-23 (user's request: a larger zoom; was 4): lines, names and counters keep their size
+// railways by level (2026-10-23, user's request): 1 red, 2 orange, 3 yellow, 4 yellow-green, 5 neon green
+export const RAIL_COLORS = ['#e53935', '#fb8c00', '#fdd835', '#b5e61d', '#39ff14'];
+export const railColor = (level) => RAIL_COLORS[Math.max(1, Math.min(RAIL_COLORS.length, level)) - 1];
 const VECTOR_ZOOM = 1;      // from this zoom the map is drawn from its outlines
 const NO_STATE = 2;
 const loaded = new Map();   // map key -> Promise of the decoded map
@@ -746,7 +749,7 @@ export function mapView(map, zoomId, { onHover, onClick } = {}) {
       g.lineCap = g.lineJoin = 'round';
       for (const [c, path] of riverPaths) {
         if (c < min) continue;
-        g.lineWidth = Math.max(0.6 / z, 0.4 + (c - 3) * 0.125);
+        g.lineWidth = Math.min(6 / z, Math.max(0.6 / z, 0.4 + (c - 3) * 0.125));   // up to 6 screen pixels (zoom 1200%)
         g.stroke(path);
       }
     }
@@ -979,7 +982,7 @@ export function mapView(map, zoomId, { onHover, onClick } = {}) {
     }
   }
 
-  /** Railways: a dark line per level (thicker = higher), sleepers as a light dashed line when zoomed in. */
+  /** Railways: a line per level in its colour (RAIL_COLORS; thicker = higher) on a dark casing, the lowest first. */
   function paintRails(g, z, rails, inside) {
     if (!rails.length) return;
     const min = railThreshold(z);
@@ -995,20 +998,16 @@ export function mapView(map, zoomId, { onHover, onClick } = {}) {
       path.lineTo(q[0], q[1]);
     }
     g.lineCap = 'round';
-    for (const [level, path] of [...byLevel].sort((x, y) => x[0] - y[0])) {
-      const w = (0.7 + 0.45 * level) / z;
-      g.setLineDash([]);
-      g.lineWidth = w;
-      g.strokeStyle = 'rgba(28, 24, 20, .88)';
-      g.stroke(path);
-      if (z >= 0.8) {
-        g.setLineDash([3 / z, 3 / z]);
-        g.lineWidth = w * 0.4;
-        g.strokeStyle = 'rgba(235, 225, 205, .8)';
-        g.stroke(path);
-      }
-    }
     g.setLineDash([]);
+    for (const [level, path] of [...byLevel].sort((x, y) => x[0] - y[0])) {
+      const w = (0.9 + 0.45 * level) / z;
+      g.lineWidth = w + 1.4 / z;
+      g.strokeStyle = 'rgba(12, 10, 8, .85)';
+      g.stroke(path);
+      g.lineWidth = w;
+      g.strokeStyle = railColor(level);
+      g.stroke(path);
+    }
   }
 
   /** Arrows from a province's centre towards the next one (stopping short of its centre), in the country's colour

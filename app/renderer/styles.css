@@ -1430,3 +1430,4 @@ div.tm-path-row { cursor: default; }
 .gs-border-strength { display: inline-flex; gap: 4px; align-items: center; }
 .gs-border-slider { width: 110px; accent-color: var(--accent); }
 .gs-border-value { font-family: var(--mono); font-size: 12px; min-width: 40px; }
+.gs-rail-swatch { display: inline-block; width: 22px; height: 5px; border-radius: 2px; border: 1px solid #0c0a08; }

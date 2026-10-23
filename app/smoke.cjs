@@ -395,6 +395,15 @@ function runSmoke(win, outDir, quit) {
                   }
                   return slowest; })()`;
                 info.campaignFrameMs = { close: await wc.executeJavaScript(frames) };
+                // the largest zoom (1200%) at Berlin: railways in their level colours, the frame time there
+                await wc.executeJavaScript(`(() => { const bar = document.querySelector('.gs-map-card .zoom-bar');
+                  const plus = [...bar.querySelectorAll('button')].find((b) => b.textContent === '+');
+                  for (let i = 0; i < 20; i++) plus.click();
+                  const v = document.querySelector('.gs-map-card .map-scroll'); v.scrollLeft = 35000; v.scrollTop = 5200; })()`);
+                wc.invalidate(); await sleep(1500); wc.invalidate(); await sleep(1500);
+                info.campaignZoomMax =await wc.executeJavaScript(`document.querySelector('.gs-map-card .zoom-level').textContent`);
+                fs.writeFileSync(path.join(outDir, `${size.name}-campaign-map-max.png`), (await wc.capturePage()).toPNG());
+                info.campaignFrameMs.max = await wc.executeJavaScript(frames);
                 await wc.executeJavaScript(`[...document.querySelectorAll('.gs-map-card .zoom-bar button')].find((b) => b.textContent === '100%').click()`);
                 info.campaignFrameMs.full = await wc.executeJavaScript(frames);
                 await wc.executeJavaScript(`(() => { const f = document.querySelector('.gs-map-fog'); f.value = 'GER'; f.dispatchEvent(new Event('change')); })()`);
