@@ -34,6 +34,14 @@ FACTION_EVERY = 7
 UNITS_FULL_EVERY = 30   # days between full rows of division positions (and of railways and buildings)
 INFRA_EVERY = 3         # days between readings of railways and buildings (0.3 s; they change slowly)
 FRAME_HOURS = 6         # game hours between readings of divisions, moves and battles within a day
+# Fast game (2026-10-23, user's question "why is the map recorded after 1 day, sometimes after 8 or 15"): the full
+# day's reading takes ~1-1.5 s, at high speed several game days pass meanwhile, so the map jumped by them. When a game
+# day passes faster than the full reading takes (and that is at least FAST_MIN_COST), the full day is read every
+# FAST_FULL_EVERY game days and the days between get the light reading: the map, divisions, moves and battles
+# (live.frame_snapshot with_map, ~0.4 s); no readings within a day then.
+FAST_FULL_EVERY = 14
+FAST_MIN_COST = 0.2     # seconds
+SPEED_SMOOTHING = 0.3   # weight of the newest measurement of the real seconds a game day takes
 DELTA_KINDS = ("units", "infra", "front", "divs", "tmpl")
 NEW_CAMPAIGN_GAP = 31   # days back that still count as a reload of the same campaign
 MONTH_DAYS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)   # the game has no leap years
@@ -1007,6 +1015,12 @@ class IcRecorder:
         self._hour: int | None = None        # game hour of the last poll and since when (real time) it stands
         self._hour_since: float | None = None
         self._still = 0.0                    # real seconds stopped since the last recorded day
+        self._gid: str | None = None         # file of the last full day
+        self._light_t: int | None = None     # day of the last light reading (fast game)
+        self._full_cost: float | None = None   # real seconds the last full day's reading took
+        self._day_seconds: float | None = None   # real seconds a game day takes (smoothed, while the game runs)
+        self._speed_mark: tuple | None = None    # (game hour, real time) the hour last moved on
+        self._fast_logged: bool | None = None
         self.wall = time.time
         self.monotonic = time.monotonic
 
@@ -1031,11 +1045,16 @@ class IcRecorder:
         hours = self.live.game_hours() if hasattr(self.live, "game_hours") else None
         t = hours // 24 if hours is not None else self.live.game_day()
         self._track_stops(hours)
+        self._track_speed(hours)
         previous, self.seen_t = self.seen_t, t
         if t is not None and t != previous:   # a game started since the user turned it on gets it too
             self.live.ensure_combat_log_patch()
-        if t is not None and t == previous and t == self.last_t and hours is not None:
-            self._step_frame(hours)
+        if t is not None and t == previous and t in (self.last_t, self._light_t) and hours is not None:
+            if not self.fast():
+                self._step_frame(hours)
+            return False
+        if (t is not None and previous is not None and 0 < t - previous <= MAX_STEP and self.fast()
+                and self.last_t is not None and 0 < t - self.last_t < FAST_FULL_EVERY and self._light(t)):
             return False
         launch = None
         if t is None or previous is None or not 0 < t - previous <= MAX_STEP:
@@ -1050,6 +1069,7 @@ class IcRecorder:
                 self._divs["last"] = None
                 self._tmpl["last"] = None
                 self._frame = None
+                self._light_t = None
                 self._last_infra_t = -INFRA_EVERY
             # a game just started on a country (game.log, not the menu's state): its first day is recorded at once
             launch = self._new_launch()
@@ -1057,7 +1077,9 @@ class IcRecorder:
                 return False
         with_factions = t - self._last_faction_t >= FACTION_EVERY or self.last_t is None or t < self.last_t
         with_infra = t - self._last_infra_t >= INFRA_EVERY or t < self._last_infra_t
+        began = self.monotonic()
         sample = self.live.ic_snapshot(with_factions, with_infra)
+        self._full_cost = self.monotonic() - began
         if sample["t"] != t:   # the day moved on while reading: take it next time
             self.seen_t = previous
             return False
@@ -1096,6 +1118,7 @@ class IcRecorder:
         designs = sample.pop("designs", None)
         equipment = sample.pop("equipment", None)
         gid = self.history.add(sample)
+        self._gid = gid
         if (gid, self.history.how) != self._chosen:
             self._chosen = (gid, self.history.how)
             self.log.info("IC recorder: %s (game id %s) - %s", gid, sample.get("campaign") or "not readable",
@@ -1172,6 +1195,55 @@ class IcRecorder:
             return
         if frame["t"] != self.last_t:   # the day moved on: the daily reading takes it
             return
+        self._record_frame(gid, frame)
+
+    def _track_speed(self, hours: int | None) -> None:
+        """Real seconds a game day takes, measured whenever the game hour moves on (a pause before it counts too -
+        it only makes the game look slower, which reads the full day)."""
+        now = self.monotonic()
+        if hours is None:
+            self._speed_mark = None
+            return
+        mark = self._speed_mark
+        if mark is None or hours < mark[0] or hours - mark[0] > 24 * MAX_STEP:
+            self._speed_mark = (hours, now)
+        elif hours > mark[0]:
+            seconds = (now - mark[1]) * 24 / (hours - mark[0])
+            self._day_seconds = seconds if self._day_seconds is None else \
+                SPEED_SMOOTHING * seconds + (1 - SPEED_SMOOTHING) * self._day_seconds
+            self._speed_mark = (hours, now)
+
+    def fast(self) -> bool:
+        """A game day passes faster than the full day's reading takes (FAST_FULL_EVERY)."""
+        fast = (self._full_cost is not None and self._full_cost >= FAST_MIN_COST and self._day_seconds is not None
+                and self._day_seconds < self._full_cost)
+        if fast != bool(self._fast_logged) and self._full_cost is not None and self._day_seconds is not None:
+            self._fast_logged = fast
+            self.log.info("IC recorder: %s (a game day in %.2f s, the full reading %.2f s)%s",
+                          "fast game" if fast else "game slower than the reading", self._day_seconds, self._full_cost,
+                          f" - full day every {FAST_FULL_EVERY} days, the map and divisions in between" if fast else "")
+        return fast
+
+    def _light(self, t: int) -> bool:
+        """The light reading of a day between full ones (fast game): map, divisions, moves and battles. False when
+        it cannot be done (no file yet, nothing readable) - the full day is read instead."""
+        if self._gid is None or not hasattr(self.live, "frame_snapshot"):
+            return False
+        try:
+            frame = self.live.frame_snapshot(with_map=True)
+        except Exception as exc:   # noqa: BLE001 - the full reading takes the day
+            self.log.info("Light reading not possible: %s", exc)
+            return False
+        if frame["t"] is None or frame["t"] <= self.last_t:
+            return False
+        if frame.get("map"):
+            self._record_map(self._gid, frame["t"], frame["map"])
+        self._record_frame(self._gid, frame)
+        self._light_t = frame["t"]
+        return True
+
+    def _record_frame(self, gid: str, frame: dict) -> None:
+        """Divisions, moves and battles of a reading between full days (frame_snapshot)."""
         if frame["units"] is not None:
             self._record_units(gid, frame["t"], frame["units"], frame["hour"])
         if frame["front"] is not None:

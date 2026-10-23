@@ -559,6 +559,60 @@ class MapLive(FakeLive):
 
 
 class RecorderCampaignTest(unittest.TestCase):
+    def test_fast_game_gets_the_map_between_full_days(self):
+        """A game day in 0.25 s, the full reading 1 s: full days every FAST_FULL_EVERY days, the map in between."""
+        live = MapLive()
+        clock = [0.0]
+        snap = live.ic_snapshot
+
+        def full(f, i=False):
+            s = snap(f, i)
+            clock[0] += 1.0                      # the reading takes a second: 4 game days pass meanwhile
+            live.t += 4
+            return s
+        frames = []
+
+        def frame(with_map=False):
+            frames.append(with_map)
+            return {"t": live.t, "hour": 0, "units": dict(live.units), "front": {}, "divs": None,
+                    "map": {"states": dict(live.control), "provinces": {}} if with_map else None}
+        live.ic_snapshot, live.frame_snapshot = full, frame
+        history = IcHistory(Path(tempfile.mkdtemp()))
+        rec = IcRecorder(live, history, logging.getLogger("test"))
+        rec.monotonic = lambda: clock[0]
+        rec.step()
+        for _ in range(60):
+            clock[0] += 0.25
+            live.t += 1
+            live.control[2] = ["FIN", "SOV" if live.t % 2 else "FIN"]   # the front moves every day
+            rec.step()
+        gid = history.active
+        days = history.game(gid)["t"]
+        map_days = [r["t"] for r in history.map_rows(gid)]
+        self.assertTrue(rec.fast())
+        self.assertTrue(all(b - a >= ic_history.FAST_FULL_EVERY for a, b in zip(days[1:], days[2:])), days)
+        self.assertTrue(all(frames))                    # light readings only, nothing within a day
+        self.assertLessEqual(max(b - a for a, b in zip(map_days, map_days[1:])), 5)   # was the 4-5 days of a reading
+        self.assertGreater(len(map_days), 3 * len(days))
+
+    def test_slow_game_reads_every_day_in_full(self):
+        live = MapLive()
+        clock = [0.0]
+        snap = live.ic_snapshot
+
+        def full(f, i=False):
+            clock[0] += 1.0
+            return snap(f, i)
+        live.ic_snapshot = full
+        rec = IcRecorder(live, IcHistory(Path(tempfile.mkdtemp())), logging.getLogger("test"))
+        rec.monotonic = lambda: clock[0]
+        rec.step()
+        for _ in range(10):
+            clock[0] += 3.0          # a day in 3 s (+ the reading)
+            live.t += 1
+            self.assertTrue(rec.step())
+        self.assertFalse(rec.fast())
+
     def test_divisions_one_by_one_and_their_history(self):
         live = MapLive()
         day = {"n1": ["SOV", "1st Rifle", "Rifle"], "p1": [100, 0], "s1": [50, 200, 100, 9000, 5, 100], "e1": {"inf": 900},

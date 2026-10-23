@@ -1247,14 +1247,19 @@ class LiveService:
             values.append(t[3] if t else (0 if control else None))
             values += [army.get("manpower_field"), army.get("manpower_training")] if army else [None, None]
             extra[tag] = values
-        mapped = {sid: [o, c] for sid, (o, c, _a) in control.items()} if control else None
-        if mapped is not None:   # the front inside states: provinces held by another country than their state's
-            try:
-                mapped = {"states": mapped, "provinces": pointers.read_province_control(mem, base, tags)}
-            except pointers.PointerError as exc:
-                self.log.info("Provinces not readable for the Game summary: %s", exc)
-                mapped = {"states": mapped, "provinces": None}
-        return extra, mapped
+        return extra, self._mapped(mem, base, tags, control)
+
+    def _mapped(self, mem, base: int, tags: list[str], control: dict | None) -> dict | None:
+        """{"states": {state id: [owner, controller]}, "provinces": {province id: controller} of the provinces not
+        held by their state's controller, or None} of read_state_control's `control`, None without it."""
+        if not control:
+            return None
+        mapped = {sid: [o, c] for sid, (o, c, _a) in control.items()}
+        try:   # the front inside states: provinces held by another country than their state's
+            return {"states": mapped, "provinces": pointers.read_province_control(mem, base, tags)}
+        except pointers.PointerError as exc:
+            self.log.info("Provinces not readable for the Game summary: %s", exc)
+            return {"states": mapped, "provinces": None}
 
     def _front(self, mem, base: int, countries: dict, types: dict | None = None) -> tuple[dict | None, dict | None, dict | None]:
         """(division positions, {"m<from>-<to>": {tag: divisions} moving / attacking, "c<province>": battle
@@ -1276,14 +1281,21 @@ class LiveService:
         front.update({f"c{p}": v for p, v in battles.items()})
         return units, front, division_rows(rows)
 
-    def frame_snapshot(self) -> dict:
-        """{"t", "hour", "units", "front"} - divisions, their moves and the battles between two recorded days (the
-        campaign map's readings every few game hours)."""
+    def frame_snapshot(self, with_map: bool = False) -> dict:
+        """{"t", "hour", "units", "front", "divs"} - divisions, their moves and the battles between two recorded days
+        (the campaign map's readings every few game hours); `with_map` also "map" (_mapped: owner and controller of
+        the states, the provinces off their state's controller) - the light day of a fast game (ic_history.IcRecorder)."""
         def read(mem, base, tags, _process):
             date = pointers.read_date(mem, base)
             units, front, divs = self._front(mem, base, pointers.country_objects(mem, base, tags))
-            return {"t": ic_history.day_number(date), "hour": date["hour"], "units": units, "front": front,
-                    "divs": divs}
+            out = {"t": ic_history.day_number(date), "hour": date["hour"], "units": units, "front": front, "divs": divs}
+            if with_map:
+                try:
+                    out["map"] = self._mapped(mem, base, tags, pointers.read_state_control(mem, base, tags))
+                except pointers.PointerError as exc:
+                    self.log.info("States not readable for the campaign map: %s", exc)
+                    out["map"] = None
+            return out
         return self._game_memory(read)
 
     def _infra_day(self, mem, base: int, install: str) -> dict:

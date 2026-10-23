@@ -1048,6 +1048,16 @@ DO ZROBIENIA (w tej kolejności)
             KONTROLA (2026-10-23): testy py 342 OK, js 118 OK. Smoke: działa na profilu użytkownika - zwinięte kafelki
                 ukrywały sloty badań; teraz smoke na czas testu rozwija wszystko (hoi4dbg.collapsed) i przywraca na końcu.
                 Bez gry zostają 2 błędy smoke (Research: sloty na żywo, Army/Air/Navy: Compare) - wymagają działającej gry.
+[x] MAPA PRZY SZYBKIEJ GRZE (2026-10-23, pytanie użytkownika "czemu mapa raz po 1 dniu, raz po 8 lub 15"):
+            przyczyna - pełny dzienny odczyt (IC, armie, sprzęt, dywizje, front, mapa...) trwa ~1-1,5 s, a przy
+            prędkości 4-5 mija w tym czasie kilka dni gry; nagrania: GER 20.10 (lżejszy odczyt) 2502 z 2533 dni po
+            kolei, ICE 23.10 tylko 298 z 750 (luki 2-19 dni). Poprawka (ic_history.IcRecorder): mierzy sekundy na dzień
+            gry i czas pełnego odczytu; gdy dzień mija szybciej niż trwa odczyt (>= 0,2 s) - pełny dzień co 14 dni
+            (FAST_FULL_EVERY), w dni pomiędzy lekki odczyt live.frame_snapshot(with_map=True): stany, prowincje,
+            dywizje, front (~0,4 s); bez klatek co 6 h. Suwak mapy chodzi też po dniach wierszy mapy. Wolna gra bez
+            zmian (każdy dzień pełny). Koszt: przy szybkiej grze wykresy IC / państw co 14 dni. Log "IC recorder:
+            fast game (...)" przy przełączeniu. Testy py 364 / js 129.
+            [ ] sprawdzić w grze na prędkości 5: odstępy mapy (cel ~2 dni) i czasy z logu
 [x] Krok G  Game Tools (narzędzia lokalne) - 2026-10-23, zakładka bez DEMO (smoke: demoBadges=0)
             (zakładka Intelligence Lab USUNIĘTA 2026-10-13 na prośbę użytkownika - była tylko na danych DEMO)
             backend/hoi4dbg/game_tools.py + GET /api/tools/changes, GET/POST /api/tools/checkpoints, GET /api/tools/live-check.

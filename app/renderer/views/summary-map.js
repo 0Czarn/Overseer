@@ -499,9 +499,11 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
     }
   }
 
-  /** The times the slider steps over: every recorded day and the readings within a day (divisions, battles). */
+  /** The times the slider steps over: every recorded day, the map's own rows (the light days of a fast game, 2026-10-23)
+   * and the readings within a day (divisions, battles). */
   function frames() {
-    const all = new Set(data.t?.length ? data.t : data.rows.map((r) => r.t));
+    const all = new Set(data.t?.length ? data.t : []);
+    for (const r of data.rows) all.add(r.t);
     for (const r of [...unitRows, ...frontRows]) all.add(rowTime(r));
     return [...all].sort((a, b) => a - b);
   }
