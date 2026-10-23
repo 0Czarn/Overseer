@@ -1426,3 +1426,7 @@ div.tm-path-row { cursor: default; }
 .gt-head-tools { display: flex; gap: 8px; align-items: center; }
 .gt-head-tools .input { width: min(220px, 40vw); }
 .gt-note-cell { min-width: 200px; }
+.gs-border-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.gs-border-strength { display: inline-flex; gap: 4px; align-items: center; }
+.gs-border-slider { width: 110px; accent-color: var(--accent); }
+.gs-border-value { font-family: var(--mono); font-size: 12px; min-width: 40px; }

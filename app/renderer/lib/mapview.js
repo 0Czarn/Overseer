@@ -85,6 +85,16 @@ const LINES = {
   country: [1.6, 'rgb(12, 12, 12)'],
   highlight: [2.2, 'rgb(255, 255, 255)'],
 };
+// lines whose width and opacity follow style.borderStrength (2026-10-23, user's request: a slider for the visibility
+// of the state and province borders)
+const SCALED = new Set(['province', 'state']);
+export const BORDER_STRENGTH = [0.5, 4];
+
+/** `colour` (rgba / rgb) with its opacity times `s` (up to 1). */
+export function strengthen(colour, s) {
+  const m = /^rgba\((\d+), (\d+), (\d+), ([\d.]+)\)$/.exec(colour);
+  return m ? `rgba(${m[1]}, ${m[2]}, ${m[3]}, ${Math.min(1, Number(m[4]) * s).toFixed(3)})` : colour;
+}
 
 /** The province outlines of campaign_map.encode_borders (base64): {width, height, arcs, start (first point of each
  * arc, arcs + 1), sides (provinces p, q of each arc), pts (x, y in map pixels), box (x0, y0, x1, y1 of each arc),
@@ -541,6 +551,9 @@ export function mapView(map, zoomId, { onHover, onClick } = {}) {
       sstripe[sid] = style.stripe?.(sid) ?? null;
       sgroup[sid] = style.group?.(sid) ?? 0;
     }
+    const strength = style.borderStrength ?? 1;   // pixel borders (below VECTOR_ZOOM): how much darker they are
+    const fState = Math.max(0, 1 - 0.55 * strength);
+    const fProvince = Math.max(0, 1 - 0.28 * strength);
     const nProv = provState.length;
     const fill = new Uint8Array(nProv * 3);
     const stripe = new Uint8Array(nProv * 3);
@@ -603,8 +616,8 @@ export function mapView(map, zoomId, { onHover, onClick } = {}) {
         const src = striped[pid] && ((x + y) % 8) < 3 ? stripe : fill;
         const o = pid * 3;
         let f = 1;
-        if (style.states && (lsid !== sid || usid !== sid)) f = 0.45;
-        else if (style.provinces && ((left >= 0 && pids[left] !== pid) || (up >= 0 && pids[up] !== pid))) f = 0.72;
+        if (style.states && (lsid !== sid || usid !== sid)) f = fState;
+        else if (style.provinces && ((left >= 0 && pids[left] !== pid) || (up >= 0 && pids[up] !== pid))) f = fProvince;
         px[p] = src[o] * f; px[p + 1] = src[o + 1] * f; px[p + 2] = src[o + 2] * f;
       }
     }
@@ -783,9 +796,11 @@ export function mapView(map, zoomId, { onHover, onClick } = {}) {
       lines[line].addPath(path);
     }
     g.lineCap = 'round';
+    const s = paint.style.borderStrength ?? 1;
     for (const [line, [px, colour]] of Object.entries(LINES)) {
-      g.lineWidth = px / z;
-      g.strokeStyle = colour;
+      const scaled = SCALED.has(line);
+      g.lineWidth = (scaled ? px * s : px) / z;
+      g.strokeStyle = scaled ? strengthen(colour, s) : colour;
       g.stroke(lines[line]);
     }
   }

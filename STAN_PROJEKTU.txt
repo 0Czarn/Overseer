@@ -1048,6 +1048,11 @@ DO ZROBIENIA (w tej kolejności)
             KONTROLA (2026-10-23): testy py 342 OK, js 118 OK. Smoke: działa na profilu użytkownika - zwinięte kafelki
                 ukrywały sloty badań; teraz smoke na czas testu rozwija wszystko (hoi4dbg.collapsed) i przywraca na końcu.
                 Bez gry zostają 2 błędy smoke (Research: sloty na żywo, Army/Air/Navy: Compare) - wymagają działającej gry.
+[x] MAPA: STRZAŁKI DNI I SIŁA GRANIC (2026-10-23, prośba użytkownika): przyciski ◀ ▶ obok daty i klawisze ← → (Home /
+            End: pierwszy / ostatni krok; po kliknięciu mapy) - poprzedni / następny zapisany krok suwaka. Borders: − suwak +
+            (×0,5-×4, zapamiętane): grubość i krycie linii stanów i prowincji z konturów, przyciemnienie w widoku
+            pikselowym; podniesienie przy wyłączonych granicach włącza States. Smoke (HOI4DBG_SMOKE_CAMPAIGN, limit 600 s):
+            → zmienia dzień 1936.01.01 -> 1936.01.02, zrzut campaign-map-borders (States ×3, potem przywrócone). Testy js 130.
 [x] MAPA PRZY SZYBKIEJ GRZE (2026-10-23, pytanie użytkownika "czemu mapa raz po 1 dniu, raz po 8 lub 15"):
             przyczyna - pełny dzienny odczyt (IC, armie, sprzęt, dywizje, front, mapa...) trwa ~1-1,5 s, a przy
             prędkości 4-5 mija w tym czasie kilka dni gry; nagrania: GER 20.10 (lżejszy odczyt) 2502 z 2533 dni po

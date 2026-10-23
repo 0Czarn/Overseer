@@ -7,7 +7,7 @@
 // country (a counter per province, per state when zoomed out) and an approximate fog of war from a country's view.
 import { card, h, notice } from '../lib/dom.js';
 import { dayText } from '../lib/linechart.js';
-import { TERRAIN_STYLES, loadMap, mapView, placeLabels, provinceCentre, rgb, seenProvinces, terrainSwatch } from '../lib/mapview.js';
+import { BORDER_STRENGTH, TERRAIN_STYLES, loadMap, mapView, placeLabels, provinceCentre, rgb, seenProvinces, terrainSwatch } from '../lib/mapview.js';
 import { numberLocale } from '../lib/options.js';
 import { divisionCard, dropDivisions } from './division-card.js';
 
@@ -191,7 +191,7 @@ const mute = ([r, g, b]) => [Math.round(r * 0.45 + 50), Math.round(g * 0.45 + 50
 export function mapSection(ctx, { seriesColors = [] } = {}) {
   const prefs = { mode: 'owner', speed: 250, show: 'countries', colors: 'game', states: false, provinces: false,
     names: true, cities: true, units: true, fog: '', relief: true, rivers: true, rails: true, ports: true, forts: false,
-    hubs: false, battles: true, moves: true, types: true, ...loadPrefs() };
+    hubs: false, battles: true, moves: true, types: true, borderStrength: 1, ...loadPrefs() };
   const body = h('div', { class: 'gs-map' }, h('p', { class: 'muted' }, 'Choose a campaign above.'));
   const el = card('Campaign map', body, { cls: 'gs-map-card' });
   let gid = null;
@@ -228,6 +228,13 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
   let busy = false;
 
   const tagName = (tag) => map.info.names[tag] ?? tag;
+  el.addEventListener('keydown', (e) => {   // ← → the recorded steps, Home / End the first and last (not in fields)
+    if (!view || e.altKey || e.ctrlKey || e.metaKey || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+    const by = { ArrowLeft: -1, ArrowRight: 1, Home: -Infinity, End: Infinity }[e.key];
+    if (by === undefined) return;
+    e.preventDefault();
+    stepDay(Number.isFinite(by) ? by : by < 0 ? -days.length : days.length);
+  });
 
   function draw() {
     if (!view) return;
@@ -297,6 +304,7 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
       group: (sid) => number(area(shown(sid))),
       states: prefs.states,
       provinces: prefs.provinces,
+      borderStrength: prefs.borderStrength,
       overrides,
       visible,
     });
@@ -397,18 +405,33 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
     }, prefs.speed);
   }
 
+  /** One recorded step back or forward (2026-10-23, user's request: the arrows step through the recorded days). */
+  function stepDay(by) {
+    if (!days.length) return;
+    stop();
+    index = Math.max(0, Math.min(days.length - 1, index + by));
+    follow = index === days.length - 1;
+    draw();
+  }
+
   function build() {
     view = mapView(map, 'campaign-map', { onHover: hover, onClick: pick });
+    view.el.tabIndex = 0;   // focus for the arrow keys (dragging may hold the default focus back)
+    view.el.addEventListener('pointerdown', () => view.el.focus({ preventScroll: true }));
     panel = h('aside', { class: 'gs-map-panel' });
     dateLabel = h('strong', { class: 'gs-map-date' });
     slider = h('input', { type: 'range', class: 'gs-map-slider', min: 0, max: Math.max(0, days.length - 1), value: index,
       'aria-label': 'Day', oninput: (e) => { stop(); index = Number(e.target.value); follow = index === days.length - 1; draw(); } });
     playBtn = h('button', { class: 'btn btn-small', onclick: play }, timer ? '❚❚ Pause' : '▶ Play');
+    const prevBtn = h('button', { class: 'btn btn-small', title: 'Previous recorded step (←)', 'aria-label': 'Previous day',
+      onclick: () => stepDay(-1) }, '◀');
+    const nextBtn = h('button', { class: 'btn btn-small', title: 'Next recorded step (→)', 'aria-label': 'Next day',
+      onclick: () => stepDay(1) }, '▶');
     controls = h('div', { class: 'gs-map-options' });
     legend = h('div', { class: 'gs-map-legend' });
     terrainKey = h('div', { class: 'gs-map-legend gs-terrain-key' });
     body.replaceChildren(
-      h('div', { class: 'gs-map-controls' }, playBtn, dateLabel, slider), controls,
+      h('div', { class: 'gs-map-controls' }, playBtn, prevBtn, dateLabel, nextBtn, slider), controls,
       h('div', { class: 'gs-map-main' }, view.el, panel), legend, terrainKey,
       h('p', { class: 'hint' }, 'The game\'s map with the mods it runs with. Owner and controller of every state, recorded once a '
         + 'game day from game memory (from 2026-10-21); from 2026-10-23 also each province held by another country than '
@@ -429,7 +452,8 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
         + 'moving (thin) or attacking (thick) into the next province. Divisions, moves and battles are read every 6 game '
         + 'hours, so the slider has up to 4 steps a day. '
         + 'Hover a state for its '
-        + 'name; wheel: zoom, drag: move.'));
+        + 'name; wheel: zoom, drag: move. ◀ ▶ or the arrow keys (click the map first): the previous / next recorded '
+        + 'step; Home / End: the first / last. Border strength: how thick and dark the state and province borders are.'));
     renderControls();
   }
 
@@ -454,7 +478,8 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
       field('Colours', seg([['game', 'Game'], ['charts', 'Chart lines']], prefs.colors, (v) => { prefs.colors = v; redraw(); })),
       field('Map', seg([['owner', 'Owner (occupied: stripes)'], ['controller', 'Controller']], prefs.mode,
         (v) => { prefs.mode = v; redraw(); })),
-      field('Borders', toggles([['states', 'States'], ['provinces', 'Provinces']])),
+      field('Borders', h('div', { class: 'gs-border-tools' }, toggles([['states', 'States'], ['provinces', 'Provinces']]),
+        strengthControl())),
       field('Names', toggles([['names', 'Countries'], ['cities', 'Cities'], ['units', 'Units']])),
       field('Terrain', toggles([['types', 'Terrain types'], ['relief', 'Relief'], ['rivers', 'Rivers']])),
       field('Infrastructure', toggles([['rails', 'Railways'], ['ports', 'Ports'], ['forts', 'Forts'], ['hubs', 'Supply hubs']])),
@@ -464,6 +489,36 @@ export function mapSection(ctx, { seriesColors = [] } = {}) {
         prefs.speed = v; savePrefs(prefs); renderControls();
         if (timer) { stop(); play(); }
       })));
+  }
+
+  /** − slider + of the state and province borders' strength (mapview BORDER_STRENGTH), drawn at once; the borders
+   * are turned on when it is raised with both off. */
+  function strengthControl() {
+    const [lo, hi] = BORDER_STRENGTH;
+    const label = h('span', { class: 'gs-border-value' });
+    const range = h('input', { type: 'range', class: 'gs-border-slider', min: lo, max: hi, step: 0.25,
+      value: prefs.borderStrength, 'aria-label': 'Border strength' });
+    const set = (v, done = true) => {
+      prefs.borderStrength = Math.max(lo, Math.min(hi, Math.round(v * 4) / 4));
+      range.value = String(prefs.borderStrength);
+      label.textContent = `×${prefs.borderStrength.toFixed(2).replace(/0$/, '')}`;
+      savePrefs(prefs);
+      if (done && !prefs.states && !prefs.provinces && prefs.borderStrength > 1) {   // not while dragging: it rebuilds
+        prefs.states = true;
+        savePrefs(prefs);
+        renderControls();
+      }
+      draw();
+    };
+    range.addEventListener('input', () => set(Number(range.value), false));
+    range.addEventListener('change', () => set(Number(range.value)));
+    label.textContent = `×${Number(prefs.borderStrength).toFixed(2).replace(/0$/, '')}`;
+    return h('span', { class: 'gs-border-strength', title: 'Border strength: thickness and darkness of the state and '
+      + 'province borders' },
+    h('button', { class: 'btn btn-small', 'aria-label': 'Thinner borders', onclick: () => set(prefs.borderStrength - 0.25) }, '−'),
+    range,
+    h('button', { class: 'btn btn-small', 'aria-label': 'Stronger borders', onclick: () => set(prefs.borderStrength + 0.25) }, '+'),
+    label);
   }
 
   /** Off, or a country to see the map as: the players of the day shown first, then every country holding land. */

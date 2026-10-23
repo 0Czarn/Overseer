@@ -23,7 +23,7 @@ const timeout = setTimeout(() => {
   console.error('Smoke test timed out');
   child.kill();
   process.exit(1);
-}, 300000);
+}, process.env.HOI4DBG_SMOKE_CAMPAIGN ? 600000 : 300000);   // a recorded campaign: the map steps take minutes
 
 child.on('exit', (code) => {
   clearTimeout(timeout);

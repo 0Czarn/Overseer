@@ -239,3 +239,11 @@ test('time machine: divisions filtered and sorted, a whole day reads its last re
   assert.deepEqual(Object.fromEntries(Object.entries(divisionsByProvince([{ pid: 5, tag: 'B', name: 'x' }, { pid: 5, tag: 'A', name: 'y' }]))
     .map(([k, v]) => [k, v.map((d) => d.tag)])), { 5: ['A', 'B'] });
 });
+
+test('border strength scales the opacity of the state and province lines', async () => {
+  const { strengthen, BORDER_STRENGTH } = await import('../renderer/lib/mapview.js');
+  assert.equal(strengthen('rgba(0, 0, 0, .3)', 2), 'rgba(0, 0, 0, 0.600)');
+  assert.equal(strengthen('rgba(0, 0, 0, .6)', 4), 'rgba(0, 0, 0, 1.000)');   // up to opaque
+  assert.equal(strengthen('rgb(12, 12, 12)', 3), 'rgb(12, 12, 12)');
+  assert.ok(BORDER_STRENGTH[0] < 1 && BORDER_STRENGTH[1] > 1);
+});

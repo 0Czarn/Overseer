@@ -325,6 +325,9 @@ function runSmoke(win, outDir, quit) {
                 const lastDate = document.querySelector('.gs-map-date').textContent;
                 const s = document.querySelector('.gs-map-slider'); s.value = '0'; s.dispatchEvent(new Event('input'));
                 const firstDate = document.querySelector('.gs-map-date').textContent;
+                document.querySelector('.gs-map-card .map-scroll, .gs-map-main > *')
+                  .dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+                const keyDate = document.querySelector('.gs-map-date').textContent;   // → : the next recorded step
                 s.value = s.max; s.dispatchEvent(new Event('input'));
                 const r = c.getBoundingClientRect();
                 c.dispatchEvent(new MouseEvent('mousemove', { clientX: r.left + r.width * 0.52, clientY: r.top + r.height * 0.22, bubbles: true }));
@@ -342,7 +345,7 @@ function runSmoke(win, outDir, quit) {
                   const b = buttons.find((x) => x.textContent === label) ?? [...document.querySelectorAll('.gs-map-options .gs-seg-btn')].find((x) => x.textContent === label);
                   const t0 = performance.now(); b?.click(); slowest = Math.max(slowest, performance.now() - t0);
                 }
-                return { width: c.width, colours: colours.size, firstDate, lastDate, tip: tip.hidden ? null : tip.textContent,
+                return { width: c.width, colours: colours.size, firstDate, keyDate, lastDate, tip: tip.hidden ? null : tip.textContent,
                   named, options: document.querySelectorAll('.gs-map-options .gs-seg-btn').length, drawMs: Math.round(slowest),
                   noteDay: document.querySelector('.gs-note-day')?.textContent, markers: document.querySelectorAll('.lc-note').length,
                   ranking: document.querySelectorAll('.gs-rank-cat').length, sessions: document.querySelectorAll('.gs-sess-table tbody tr').length,
@@ -351,6 +354,7 @@ function runSmoke(win, outDir, quit) {
               if (drawn && info.campaign.colours < 5) result.failures.push(`${size.name}/summary: the campaign map is not drawn`);
               if (drawn && !info.campaign.named) result.failures.push(`${size.name}/summary: no names on the campaign map`);
               if (drawn && info.campaign.firstDate === info.campaign.lastDate) result.failures.push(`${size.name}/summary: the map slider does not change the day`);
+              if (drawn && info.campaign.keyDate === info.campaign.firstDate) result.failures.push(`${size.name}/summary: the arrow key does not step to the next day`);
               if (drawn && !info.campaign.markers) result.failures.push(`${size.name}/summary: notes are not on the charts`);
               if (drawn && !info.campaign.ranking) result.failures.push(`${size.name}/summary: no players ranking`);
               await wc.executeJavaScript(`document.querySelector('.gs-map-card').scrollIntoView({ block: 'start' })`);
@@ -368,6 +372,19 @@ function runSmoke(win, outDir, quit) {
                   const v = document.querySelector('.gs-map-card .map-scroll'); v.scrollLeft = 8690; v.scrollTop = 1265; })()`);
                 wc.invalidate(); await sleep(1500);
                 fs.writeFileSync(path.join(outDir, `${size.name}-campaign-map-close.png`), (await wc.capturePage()).toPNG());
+                // state borders on and their strength x3 (input events: nothing else turned on), then both as they were
+                const statesBtn = `[...document.querySelectorAll('.gs-map-options .gs-seg-btn')].find((x) => x.textContent === 'States')`;
+                const before = await wc.executeJavaScript(`(() => { const r = document.querySelector('.gs-border-slider');
+                  if (!r) return null; const on = ${statesBtn}.getAttribute('aria-pressed') === 'true';
+                  if (!on) ${statesBtn}.click();
+                  const s = document.querySelector('.gs-border-slider'); const v = s.value;
+                  s.value = '3'; s.dispatchEvent(new Event('input')); return { v, on }; })()`);
+                if (before === null) result.failures.push(`${size.name}/summary: no border strength slider`);
+                wc.invalidate(); await sleep(1000);
+                fs.writeFileSync(path.join(outDir, `${size.name}-campaign-map-borders.png`), (await wc.capturePage()).toPNG());
+                if (before !== null) await wc.executeJavaScript(`(() => { const s = document.querySelector('.gs-border-slider');
+                  s.value = ${JSON.stringify(before?.v)}; s.dispatchEvent(new Event('input'));
+                  if (!${before?.on}) ${statesBtn}.click(); })()`);
                 // the slowest of 4 frames while moving the map (drawn from the outlines)
                 const frames = `(async () => {
                   const v = document.querySelector('.gs-map-card .map-scroll'); let slowest = 0;
